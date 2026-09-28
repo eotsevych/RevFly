@@ -99,6 +99,8 @@ RevFly checks for updates once a day and shows a notification when a new version
 
 Linux does not show developer warnings. An X11 session is recommended: Wayland restricts global hotkeys and simulated paste.
 
+Requires a recent distribution (glibc 2.39 or newer): Ubuntu 24.04+, Debian 13+, Fedora 40+ or a current rolling release such as Arch.
+
 ### Option A: AppImage (All Linux distributions)
 1. Download `RevFly_<version>_amd64.AppImage`.
 2. Make it runnable:
