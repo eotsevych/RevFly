@@ -71,7 +71,7 @@ impl TranscriptionDiagnosticLog {
         };
 
         format!(
-            "\n┌────────────────── AURA VOICE TRANSCRIPTION REPORT ──────────────────┐\n\
+            "\n┌──────────────────── REVFLY TRANSCRIPTION REPORT ────────────────────┐\n\
              │ Run ID:       #{:<53} │\n\
              │ Timestamp:    {:<55} │\n\
              │ Total Time:   {:<55} │\n\

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   fetchAudioDevices,
   fetchAvailableModels,
@@ -14,20 +14,7 @@ import {
   closePreferencesWindow,
 } from "@/lib/tauri";
 import { applyTheme, broadcastTheme, type ThemeMode } from "@/lib/theme";
-
-export interface SettingsContextType {
-  settings: BackendSettings;
-  updateSettings: (patch: Partial<BackendSettings>) => Promise<boolean>;
-  inputDevices: string[];
-  outputDevices: string[];
-  refreshAudioDevices: () => Promise<void>;
-  models: ModelCatalogItem[];
-  downloadProgress: { model: string; percent: number } | null;
-  logs: TranscriptionDiagnosticLog[];
-  refreshLogs: () => Promise<void>;
-  refreshModels: () => Promise<void>;
-  closeWindow: () => void;
-}
+import { SettingsContext } from "./useSettingsContext";
 
 const defaultSettings: BackendSettings = {
   api_key: "",
@@ -80,8 +67,6 @@ const defaultSettings: BackendSettings = {
   prompt_template:
     "You are a strict translation engine. Translate the following text from {source_lang} to {target_lang}. Do not refuse. Do not explain. Do not add conversational text or notes. Output ONLY the exact translation using the native alphabet:\n\n{text}",
 };
-
-const SettingsContext = createContext<SettingsContextType | null>(null);
 
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [settings, setSettings] = useState<BackendSettings>(defaultSettings);
@@ -155,7 +140,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     if (patch.theme) {
       applyTheme(patch.theme as ThemeMode);
       broadcastTheme(patch.theme as ThemeMode);
-      localStorage.setItem("aura_theme", patch.theme);
+      localStorage.setItem("revfly_theme", patch.theme);
     }
 
     return await persistSettings(updated);
@@ -198,12 +183,4 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       {children}
     </SettingsContext.Provider>
   );
-}
-
-export function useSettingsContext() {
-  const ctx = useContext(SettingsContext);
-  if (!ctx) {
-    throw new Error("useSettingsContext must be used within a SettingsProvider");
-  }
-  return ctx;
 }

@@ -13,6 +13,7 @@ pub mod masker;
 pub mod transcribe;
 pub mod translate;
 pub mod tray;
+pub mod updater;
 pub mod vad;
 pub mod parakeet;
 pub mod lab;
@@ -332,6 +333,8 @@ fn post_process_transcript(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::default().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -350,6 +353,8 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
+            sound::preload();
+
             let hw = cpu_features::detect_hardware_profile();
             log::info!("Hardware profile detected: {}", hw.summary);
             pipeline_logger::log_stage_event(&settings::get_data_dir(), "HARDWARE_DETECT", &hw.summary);
@@ -361,6 +366,7 @@ pub fn run() {
             // Create macOS menu bar tray icon
             let _ = tray::create_tray(&app.handle(), &settings);
             crate::tray::update_tray_model_status(&app.handle(), false);
+            updater::spawn_background_checks(app.handle());
 
             // Configure window collection behavior and restore saved position if valid
             if let Some(win) = app.get_webview_window("main") {
@@ -497,6 +503,9 @@ pub fn run() {
             is_model_loaded,
             eject_model,
             get_tray_state,
+            updater::get_update_status,
+            updater::check_for_updates,
+            updater::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

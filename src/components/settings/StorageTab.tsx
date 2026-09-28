@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Tokens } from "@/lib/tokens";
 import { Section, Row, FieldSelect } from "./SettingsPrimitives";
-import { useSettingsContext } from "./SettingsContext";
+import { useSettingsContext } from "./useSettingsContext";
 import { triggerClearHistory, triggerOpenAudioFolder } from "@/lib/tauri";
 
 const PURGE_OPTIONS = [

@@ -498,7 +498,7 @@ export async function triggerPlayAudio(filename?: string): Promise<boolean> {
     await invoke("play_recorded_audio", { filename: filename || null });
     return true;
   } catch (err) {
-    console.error("Failed to play audio with afplay:", err);
+    console.error("Failed to play audio:", err);
     return false;
   }
 }
@@ -509,7 +509,7 @@ export async function triggerOpenAudioFolder(): Promise<boolean> {
     await invoke("open_audio_folder");
     return true;
   } catch (err) {
-    console.error("Failed to open audio folder in Finder:", err);
+    console.error("Failed to open audio folder:", err);
     return false;
   }
 }
@@ -715,6 +715,60 @@ export async function getTrayState(): Promise<{
   try {
     return await invoke("get_tray_state");
   } catch {
+    return null;
+  }
+}
+
+export type UpdateState =
+  "idle" | "checking" | "up_to_date" | "available" | "downloading" | "installing" | "error";
+
+export interface UpdateStatus {
+  state: UpdateState;
+  current_version: string;
+  version: string | null;
+  percent: number | null;
+  message: string | null;
+}
+
+export async function fetchUpdateStatus(): Promise<UpdateStatus | null> {
+  if (!isTauri()) return null;
+  try {
+    return await invoke<UpdateStatus>("get_update_status");
+  } catch {
+    return null;
+  }
+}
+
+export async function triggerCheckForUpdates(): Promise<UpdateStatus | null> {
+  if (!isTauri()) return null;
+  try {
+    return await invoke<UpdateStatus>("check_for_updates");
+  } catch {
+    return null;
+  }
+}
+
+/** Resolves with an error message when the install could not start or failed; the app restarts on success. */
+export async function triggerInstallUpdate(): Promise<string | null> {
+  if (!isTauri()) return "Updates are only available in the desktop app.";
+  try {
+    await invoke("install_update");
+    return null;
+  } catch (err) {
+    return typeof err === "string" ? err : String(err);
+  }
+}
+
+export async function subscribeToUpdateStatus(
+  callback: (status: UpdateStatus) => void,
+): Promise<UnlistenFn | null> {
+  if (!isTauri()) return null;
+  try {
+    return await listen<UpdateStatus>("update-status", (event) => {
+      callback(event.payload);
+    });
+  } catch (err) {
+    console.error("Failed to listen to update status:", err);
     return null;
   }
 }

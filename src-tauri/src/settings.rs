@@ -223,14 +223,7 @@ impl Default for AppSettings {
 
 pub fn get_config_dir() -> PathBuf {
     if let Some(base) = dirs::config_dir() {
-        let revfly = base.join("revfly");
-        if !revfly.exists() {
-            let old = base.join("aura-voice");
-            if old.exists() {
-                let _ = fs::rename(&old, &revfly);
-            }
-        }
-        revfly
+        base.join("revfly")
     } else {
         PathBuf::from(".revfly")
     }
@@ -238,14 +231,7 @@ pub fn get_config_dir() -> PathBuf {
 
 pub fn get_data_dir() -> PathBuf {
     if let Some(base) = dirs::data_dir() {
-        let revfly = base.join("revfly");
-        if !revfly.exists() {
-            let old = base.join("aura-voice");
-            if old.exists() {
-                let _ = fs::rename(&old, &revfly);
-            }
-        }
-        revfly
+        base.join("revfly")
     } else {
         PathBuf::from(".revfly-data")
     }

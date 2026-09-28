@@ -1,13 +1,56 @@
 name: Build RevFly (All Platforms)
 
+# Pushes to main and pull requests build installers as workflow artifacts.
+# Pushing a version tag (e.g. v0.1.0) also attaches them to a draft GitHub Release.
 on:
   push:
-    branches: [ main, master ]
+    branches: [main]
+    tags: ['v*']
+  pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # Optional secrets (see DEPLOYMENT.md). Builds still succeed without them, just unsigned for the updater.
+  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+  # Enables in-app updater artifacts (.sig files) only when the updater key is configured.
+  UPDATER_CONFIG: '{"bundle":{"createUpdaterArtifacts":true}}'
+
 jobs:
+  create-release:
+    name: Create draft release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify tag matches app version
+        run: |
+          APP_VERSION="$(jq -r .version src-tauri/tauri.conf.json)"
+          if [ "v$APP_VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version $APP_VERSION in src-tauri/tauri.conf.json"
+            exit 1
+          fi
+
+      - name: Create draft release
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --draft --title "RevFly $GITHUB_REF_NAME" --generate-notes
+
   build-macos:
     name: Build macOS (Universal, Apple Silicon & Intel)
+    needs: create-release
+    if: ${{ !failure() && !cancelled() }}
     runs-on: macos-14
     steps:
       - name: Check out repository
@@ -18,28 +61,64 @@ jobs:
         with:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
 
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
 
       - name: Install frontend dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
-      - name: Build macOS App
+      - name: Import self-signed signing certificate
+        env:
+          MACOS_SIGNING_P12: ${{ secrets.MACOS_SIGNING_P12 }}
+          MACOS_SIGNING_P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
         run: |
-          chmod +x scripts/*.sh
-          ./scripts/build_universal.sh
+          if [ -z "$MACOS_SIGNING_P12" ]; then
+            echo "::warning::MACOS_SIGNING_P12 not set; signing ad-hoc (macOS permissions reset on every update)."
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/revfly-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+          echo "$MACOS_SIGNING_P12" | base64 --decode > "$RUNNER_TEMP/revfly-signing.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/revfly-signing.p12" -k "$KEYCHAIN" -P "$MACOS_SIGNING_P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          rm -f "$RUNNER_TEMP/revfly-signing.p12"
+          echo "REVFLY_SIGN_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
 
-      - name: Upload macOS Installers
+      - name: Build macOS installers
+        run: bash scripts/build_installers.sh
+
+      - name: Upload macOS installers
         uses: actions/upload-artifact@v4
         with:
           name: revfly-macos-installers
           path: |
-            ~/Desktop/RevFly_Installers/*.dmg
             installers/*.dmg
+            installers/*.app.tar.gz
+            installers/*.app.tar.gz.sig
+          if-no-files-found: error
+
+      - name: Attach to release
+        if: env.IS_RELEASE == 'true'
+        run: |
+          shopt -s nullglob
+          gh release upload "$GITHUB_REF_NAME" installers/*.dmg installers/*.app.tar.gz installers/*.app.tar.gz.sig --clobber
 
   build-windows:
     name: Build Windows (.exe & .msi)
+    needs: create-release
+    if: ${{ !failure() && !cancelled() }}
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -49,35 +128,49 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
 
       - name: Install frontend dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
-      - name: Build Windows App (.exe and .msi)
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: .
-          tagName: v__VERSION__
-          releaseName: 'RevFly v__VERSION__'
-          releaseBody: 'Windows Build'
-          releaseDraft: true
-          prerelease: false
+      - name: Build Windows installers
+        run: |
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            bun run tauri build --bundles nsis,msi --config "$UPDATER_CONFIG"
+          else
+            bun run tauri build --bundles nsis,msi
+          fi
 
-      - name: Upload Windows Installers
+      - name: Upload Windows installers
         uses: actions/upload-artifact@v4
         with:
-          name: revfly-windows-installer
+          name: revfly-windows-installers
           path: |
             src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.exe.sig
             src-tauri/target/release/bundle/msi/*.msi
-            src-tauri/target/release/revfly.exe
+          if-no-files-found: error
+
+      - name: Attach to release
+        if: env.IS_RELEASE == 'true'
+        run: |
+          shopt -s nullglob
+          gh release upload "$GITHUB_REF_NAME" \
+            src-tauri/target/release/bundle/nsis/*.exe \
+            src-tauri/target/release/bundle/nsis/*.exe.sig \
+            src-tauri/target/release/bundle/msi/*.msi \
+            --clobber
 
   build-linux:
-    name: Build Linux (.AppImage & .deb)
+    name: Build Linux (.AppImage, .deb & .rpm)
+    needs: create-release
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
@@ -92,6 +185,9 @@ jobs:
             curl \
             wget \
             file \
+            cmake \
+            clang \
+            pkg-config \
             libxdo-dev \
             libssl-dev \
             libayatana-appindicator3-dev \
@@ -103,29 +199,60 @@ jobs:
         with:
           targets: x86_64-unknown-linux-gnu
 
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
 
       - name: Install frontend dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
-      - name: Build Linux App (.AppImage and .deb)
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: .
-          tagName: v__VERSION__
-          releaseName: 'RevFly v__VERSION__'
-          releaseBody: 'Linux Build'
-          releaseDraft: true
-          prerelease: false
+      - name: Typecheck and lint frontend
+        run: |
+          bun run typecheck
+          bun run lint
 
-      - name: Upload Linux Installers
+      - name: Build Linux packages
+        run: |
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            bun run tauri build --bundles appimage,deb,rpm --config "$UPDATER_CONFIG"
+          else
+            bun run tauri build --bundles appimage,deb,rpm
+          fi
+
+      - name: Upload Linux packages
         uses: actions/upload-artifact@v4
         with:
-          name: revfly-linux-installer
+          name: revfly-linux-packages
           path: |
             src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/appimage/*.AppImage.sig
             src-tauri/target/release/bundle/deb/*.deb
-            src-tauri/target/release/revfly
+            src-tauri/target/release/bundle/rpm/*.rpm
+          if-no-files-found: error
+
+      - name: Attach to release
+        if: env.IS_RELEASE == 'true'
+        run: |
+          shopt -s nullglob
+          gh release upload "$GITHUB_REF_NAME" \
+            src-tauri/target/release/bundle/appimage/*.AppImage \
+            src-tauri/target/release/bundle/appimage/*.AppImage.sig \
+            src-tauri/target/release/bundle/deb/*.deb \
+            src-tauri/target/release/bundle/rpm/*.rpm \
+            --clobber
+
+  publish-update-manifest:
+    name: Publish updater manifest (latest.json)
+    needs: [build-macos, build-windows, build-linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build and upload latest.json
+        run: bash scripts/make_update_manifest.sh "$GITHUB_REF_NAME"

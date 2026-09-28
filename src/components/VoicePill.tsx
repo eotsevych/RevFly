@@ -14,7 +14,7 @@ import { tok, type AccentColor, type Theme } from "@/lib/tokens";
 import { useResolvedTheme } from "@/lib/theme";
 import { StateIndicator } from "./pill/Indicators";
 
-export const STATE_META: Record<
+const STATE_META: Record<
   "idle" | "listening" | "transcribing" | "translating" | "done" | "error",
   { label: string; sublabel: string }
 > = {
@@ -26,7 +26,7 @@ export const STATE_META: Record<
   error: { label: "Error", sublabel: "Action could not complete" },
 };
 
-export function getStateAccent(
+function getStateAccent(
   state: "idle" | "listening" | "transcribing" | "translating" | "done" | "error",
   accentColor: string,
   title?: string,
@@ -128,7 +128,7 @@ export function VoicePill() {
       const start = Date.now();
       timer = setInterval(() => {
         setElapsedSec(Math.floor((Date.now() - start) / 1000));
-      }, 500);
+      }, 200);
     } else {
       setElapsedSec(0);
     }
@@ -136,11 +136,6 @@ export function VoicePill() {
       if (timer) clearInterval(timer);
     };
   }, [state.state]);
-
-  const handleCancel = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    await triggerCancelRecording();
-  };
 
   const handleMouseDown = async (e: React.MouseEvent) => {
     if (e.button === 0 && !(e.target as HTMLElement).closest("button")) {
@@ -156,7 +151,7 @@ export function VoicePill() {
 
   const isIdle = state.state === "idle";
   const themeMode: Theme = useResolvedTheme(settings?.theme);
-  const accentKey: AccentColor = (localStorage.getItem("aura_accent") as AccentColor) || "violet";
+  const accentKey: AccentColor = (localStorage.getItem("revfly_accent") as AccentColor) || "violet";
   const t = tok(themeMode, accentKey);
   const accent = getStateAccent(state.state, t.accent, state.title);
 
@@ -215,7 +210,7 @@ export function VoicePill() {
             transition: "box-shadow 0.3s ease, background 0.3s ease, opacity 0.2s ease",
           } as React.CSSProperties
         }
-        className="flex items-center gap-3 pl-4 pr-3 select-none cursor-grab active:cursor-grabbing opacity-100 scale-100"
+        className="flex items-center gap-3 pl-4 pr-4 select-none cursor-grab active:cursor-grabbing opacity-100 scale-100"
       >
         {/* State visual indicator icon */}
         <div
@@ -232,7 +227,7 @@ export function VoicePill() {
         </div>
 
         {/* Text column: Monospace label + Inter sublabel */}
-        <div className="flex flex-col justify-center min-w-0">
+        <div className="flex flex-1 flex-col justify-center min-w-0">
           <div className="flex items-center gap-2">
             <span
               style={{
@@ -247,23 +242,6 @@ export function VoicePill() {
             >
               {state.title && state.state !== "listening" ? state.title : meta.label}
             </span>
-
-            {state.state === "listening" && (
-              <span
-                style={{
-                  fontFamily: "JetBrains Mono, monospace",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  color: accent,
-                  background: `${accent}18`,
-                  padding: "1px 6px",
-                  borderRadius: 6,
-                  border: `1px solid ${accent}33`,
-                }}
-              >
-                {formatTimer(elapsedSec)}
-              </span>
-            )}
           </div>
 
           <span
@@ -281,22 +259,28 @@ export function VoicePill() {
           </span>
         </div>
 
-        {/* Dismiss Button */}
-        <button
-          type="button"
-          onClick={handleCancel}
-          style={
-            {
-              WebkitAppRegion: "no-drag",
-              color: t.textMuted,
-            } as React.CSSProperties
-          }
-          className="flex h-6 w-6 items-center justify-center shrink-0 rounded-full hover:bg-white/10 hover:text-white transition-colors cursor-pointer"
-          aria-label="Dismiss"
-          title="Dismiss (Esc)"
-        >
-          <span style={{ fontSize: 18, lineHeight: 1 }}>×</span>
-        </button>
+        {/* Recording timer, vertically centred on the right edge of the pill */}
+        {state.state === "listening" && (
+          <span
+            className="shrink-0 self-center"
+            style={{
+              fontFamily: "JetBrains Mono, monospace",
+              fontSize: 12,
+              fontWeight: 500,
+              fontVariantNumeric: "tabular-nums",
+              lineHeight: "18px",
+              textAlign: "center",
+              minWidth: 44,
+              color: accent,
+              background: `${accent}18`,
+              padding: "1px 6px",
+              borderRadius: 6,
+              border: `1px solid ${accent}33`,
+            }}
+          >
+            {formatTimer(elapsedSec)}
+          </span>
+        )}
       </div>
     </main>
   );

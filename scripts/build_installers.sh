@@ -6,15 +6,19 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 INSTALLERS_DIR="$ROOT_DIR/installers"
 DESKTOP_DIR="$HOME/Desktop"
 
+# shellcheck source=lib_codesign.sh
+source "$SCRIPT_DIR/lib_codesign.sh"
+
 echo "=========================================================="
 echo "  RevFly - Rebuild All Installer Packages"
 echo "=========================================================="
+revfly_print_identity
 
 # Ensure installers and desktop directories exist
 mkdir -p "$INSTALLERS_DIR" "$DESKTOP_DIR"
 
 # Detach any mounted RevFly volumes to avoid hdiutil locks
-for vol in "/Volumes/RevFly"* "/Volumes/RevFly"*; do
+for vol in "/Volumes/RevFly"*; do
   if [ -d "$vol" ]; then
     hdiutil detach "$vol" -force 2>/dev/null || true
   fi
@@ -35,10 +39,10 @@ echo "--> 1. Building frontend assets..."
 cd "$ROOT_DIR"
 bun run build
 
-# 2. Build arm64 release bundle (Apple Silicon)
+# 2. Build arm64 release bundle (Apple Silicon). DMGs are assembled below, so only the .app is needed.
 echo "--> 2. Building Apple Silicon (arm64) release bundle..."
 cd "$ROOT_DIR"
-bun run tauri build
+bun run tauri build --bundles app
 
 BASE_APP="$ROOT_DIR/src-tauri/target/release/bundle/macos/RevFly.app"
 ARM64_BIN="$ROOT_DIR/src-tauri/target/release/revfly"
@@ -63,21 +67,25 @@ if [ ! -f "$X86_64_BIN" ]; then
 fi
 
 sign_app_bundle() {
-  local target="$1"
-  if [ -d "$target" ]; then
-    xattr -cr "$target" || true
-    if [ -d "$target/Contents/Frameworks" ]; then
-      for f in "$target/Contents/Frameworks"/*.dylib; do
-        if [ -f "$f" ]; then
-          codesign --force --sign - "$f" 2>/dev/null || true
-        fi
-      done
-    fi
-    codesign --force --deep --sign - \
-      --identifier "com.revfly.desktop" \
-      -r='designated => identifier "com.revfly.desktop"' \
-      "$target" 2>/dev/null || true
+  revfly_sign_app "$1"
+}
+
+# In-app updater archive (.app.tar.gz + .sig). Needs the updater private key, see DEPLOYMENT.md.
+make_updater_archive() {
+  local app_source="$1"
+  local archive_name="$2"
+  if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ] && [ -z "${TAURI_SIGNING_PRIVATE_KEY_PATH:-}" ]; then
+    echo "--> Skipping updater archive (TAURI_SIGNING_PRIVATE_KEY not set)."
+    return
   fi
+  echo "--> Packaging updater archive $archive_name..."
+  local out="$INSTALLERS_DIR/$archive_name"
+  rm -f "$out" "$out.sig"
+  COPYFILE_DISABLE=1 tar -czf "$out" -C "$(dirname "$app_source")" "$(basename "$app_source")"
+  # The password variable must exist (even empty), otherwise the CLI tries to prompt for it.
+  (cd "$ROOT_DIR" && TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" \
+    bun run tauri signer sign "$out" >/dev/null)
+  echo "✓ Created $archive_name (+ .sig)"
 }
 
 make_dmg() {
@@ -109,8 +117,7 @@ make_dmg() {
   hdiutil create -volname "$vol_name" -srcfolder "$stage_dir" -ov -format UDZO "$out_installers" > /dev/null
   rm -rf "$stage_dir"
 
-  xattr -cr "$out_installers" || true
-  codesign --force --sign - "$out_installers" 2>/dev/null || true
+  revfly_sign_dmg "$out_installers"
 
   # Copy to Desktop for immediate access
   cp "$out_installers" "$out_desktop"
@@ -140,7 +147,7 @@ copy_resources() {
 
 # A. Universal Installer (arm64 + x86_64)
 echo "--> 4. Creating Universal 2 (Intel + Apple Silicon) installer..."
-UNIV_DIR="/tmp/aura_univ_$$"
+UNIV_DIR="/tmp/revfly_univ_$$"
 UNIV_APP="$UNIV_DIR/RevFly.app"
 rm -rf "$UNIV_DIR"
 mkdir -p "$UNIV_DIR"
@@ -150,7 +157,7 @@ if [ -d "$ONNX_DIR" ]; then
   cp "$ONNX_DIR"/libonnxruntime*.dylib "$UNIV_APP/Contents/Frameworks/"
 fi
 copy_resources "$UNIV_APP"
-UNIV_BIN="/tmp/aura_univ_bin_$$"
+UNIV_BIN="/tmp/revfly_univ_bin_$$"
 lipo -create "$ARM64_BIN" "$X86_64_BIN" -output "$UNIV_BIN"
 chmod +x "$UNIV_BIN"
 install_name_tool -add_rpath "@executable_path/../Frameworks" "$UNIV_BIN" 2>/dev/null || true
@@ -178,12 +185,12 @@ if [ "$1" = "--install" ]; then
 fi
 
 make_dmg "$UNIV_APP" "RevFly_Universal.dmg" "RevFly Universal"
-cp "$INSTALLERS_DIR/RevFly_Universal.dmg" "$INSTALLERS_DIR/RevFly_0.1.0_universal.dmg"
+make_updater_archive "$UNIV_APP" "RevFly_Universal.app.tar.gz"
 rm -rf "$UNIV_DIR"
 
 # B. Intel Only Installer (x86_64)
 echo "--> 5. Creating Intel (x86_64) installer..."
-INTEL_DIR="/tmp/aura_intel_$$"
+INTEL_DIR="/tmp/revfly_intel_$$"
 INTEL_APP="$INTEL_DIR/RevFly.app"
 rm -rf "$INTEL_DIR"
 mkdir -p "$INTEL_DIR"
@@ -202,7 +209,7 @@ rm -rf "$INTEL_DIR"
 
 # C. Apple Silicon Only Installer (arm64)
 echo "--> 6. Creating Apple Silicon (arm64) installer..."
-ARM_DIR="/tmp/aura_arm_$$"
+ARM_DIR="/tmp/revfly_arm_$$"
 ARM_APP="$ARM_DIR/RevFly.app"
 rm -rf "$ARM_DIR"
 mkdir -p "$ARM_DIR"
@@ -213,56 +220,7 @@ chmod +x "$ARM_APP/Contents/MacOS/revfly"
 copy_resources "$ARM_APP"
 sign_app_bundle "$ARM_APP"
 make_dmg "$ARM_APP" "RevFly_Apple_Silicon_arm64.dmg" "RevFly Apple Silicon"
-cp "$INSTALLERS_DIR/RevFly_Apple_Silicon_arm64.dmg" "$INSTALLERS_DIR/RevFly_0.1.0_aarch64.dmg"
 rm -rf "$ARM_DIR"
-
-# D. Package Windows & Linux Build Artifacts
-echo "--> 7. Packaging Windows and Linux build archives..."
-WIN_STAGE_NAME="aura_win_stage_$$"
-WIN_STAGE="/tmp/$WIN_STAGE_NAME"
-rm -rf "$WIN_STAGE"
-mkdir -p "$WIN_STAGE"
-cp "$ROOT_DIR/scripts/build_windows.bat" "$WIN_STAGE/" 2>/dev/null || true
-cp "$ROOT_DIR/scripts/build_linux.sh" "$WIN_STAGE/" 2>/dev/null || true
-mkdir -p "$WIN_STAGE/.github/workflows"
-cp "$ROOT_DIR/.github/workflows/build-windows.yml" "$WIN_STAGE/.github/workflows/" 2>/dev/null || true
-cp "$ROOT_DIR/.github/workflows/build-all-platforms.yml" "$WIN_STAGE/.github/workflows/" 2>/dev/null || true
-
-cat << 'EOF' > "$WIN_STAGE/README_WINDOWS_AND_LINUX.txt"
-============================================================
-  RevFly - Windows & Linux Build Instructions
-============================================================
-
---- WINDOWS ---
-Option 1: Build on Windows PC
-1. Copy this project to your Windows machine.
-2. Install Node.js or Bun (https://bun.sh or https://nodejs.org).
-3. Install Rust (https://rustup.rs).
-4. Run build_windows.bat.
-5. Installers (.exe and .msi) will be in:
-   src-tauri\target\release\bundle\nsis\
-   src-tauri\target\release\bundle\msi\
-
-Option 2: Build with GitHub Actions
-1. Push repository to GitHub.
-2. Run workflow: "Build RevFly (All Platforms)" or "Build Windows Application".
-3. Download artifact.
-
---- LINUX (Ubuntu / Debian / Fedora) ---
-Option 1: Build on Linux PC
-1. Open terminal in project root.
-2. Run: bash scripts/build_linux.sh
-3. Packages (.AppImage and .deb) will be in:
-   src-tauri/target/release/bundle/appimage/
-   src-tauri/target/release/bundle/deb/
-============================================================
-EOF
-
-(cd /tmp && zip -rq "$INSTALLERS_DIR/RevFly_Windows_Build.zip" "$WIN_STAGE_NAME")
-cp "$INSTALLERS_DIR/RevFly_Windows_Build.zip" "$DESKTOP_DIR/RevFly_Windows_Build.zip"
-cp "$INSTALLERS_DIR/RevFly_Windows_Build.zip" "$INSTALLERS_DIR/RevFly_CrossPlatform_Build.zip"
-cp "$INSTALLERS_DIR/RevFly_Windows_Build.zip" "$DESKTOP_DIR/RevFly_CrossPlatform_Build.zip"
-rm -rf "$WIN_STAGE"
 
 echo ""
 echo "=========================================================="
@@ -271,7 +229,5 @@ echo "✓ Location: $INSTALLERS_DIR"
 echo "   - RevFly_Universal.dmg (Intel + Apple Silicon)"
 echo "   - RevFly_Apple_Silicon_arm64.dmg"
 echo "   - RevFly_Intel_x86_64.dmg"
-echo "   - RevFly_Windows_Build.zip"
-echo "   - RevFly_CrossPlatform_Build.zip"
 echo "✓ Also copied to: $DESKTOP_DIR"
 echo "=========================================================="

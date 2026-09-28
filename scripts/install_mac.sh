@@ -4,7 +4,7 @@
 
 set -e
 
-REPO="${AURA_REPO:-eugeneotsevich/RevFly}"
+REPO="${REVFLY_REPO:-eotsevych/RevFly}"
 APP_NAME="RevFly.app"
 INSTALL_PATH="/Applications/$APP_NAME"
 TEMP_DIR="/tmp/revfly_install_$$"
@@ -63,7 +63,7 @@ fi
 
 # Close existing running instance
 echo "--> Closing any running instances of RevFly..."
-pkill -f "revfly" >/dev/null 2>&1 || true
+pkill -x revfly >/dev/null 2>&1 || true
 
 # Mount the disk image
 echo "--> Mounting disk image..."

@@ -9,7 +9,7 @@ import {
   ApiKeyInput,
   FieldSelect,
 } from "./SettingsPrimitives";
-import { useSettingsContext } from "./SettingsContext";
+import { useSettingsContext } from "./useSettingsContext";
 
 const LLM_MODEL_SUGGESTIONS = [
   "gemini-3.6-flash",
@@ -116,7 +116,7 @@ const PROMPT_PRESETS = [
   },
 ];
 
-const DEFAULT_PROMPT = PROMPT_PRESETS[0].template;
+const DEFAULT_PROMPT = PROMPT_PRESETS[0]!.template;
 
 export default function TranslationsTab({ t }: { t: Tokens }) {
   const { settings, updateSettings } = useSettingsContext();

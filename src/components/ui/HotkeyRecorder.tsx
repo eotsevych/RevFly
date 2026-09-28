@@ -7,6 +7,10 @@ interface HotkeyRecorderProps {
   t: Tokens;
 }
 
+// Single-modifier hotkeys (e.g. Right Option) rely on the macOS event tap; other platforms only support key combos.
+const IS_MAC = typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
+const COMBO_PRESET = "CommandOrControl+Shift+Space";
+
 function formatDisplay(raw: string): string {
   if (!raw) return "";
   if (raw === "RightOption" || raw === "AltRight") return "Right ⌥ (Option)";
@@ -18,7 +22,7 @@ function formatDisplay(raw: string): string {
   if (raw === "RightShift" || raw === "ShiftRight") return "Right ⇧ (Shift)";
   if (raw === "LeftShift" || raw === "ShiftLeft") return "Left ⇧ (Shift)";
   return raw
-    .replace(/CommandOrControl/gi, "⌘")
+    .replace(/CommandOrControl/gi, IS_MAC ? "⌘" : "Ctrl")
     .replace(/Control/gi, "Ctrl")
     .replace(/Command/gi, "⌘")
     .replace(/\+/g, " + ");
@@ -44,7 +48,7 @@ export default function HotkeyRecorder({ value, onChange, t }: HotkeyRecorderPro
       ShiftLeft: "LeftShift",
     };
 
-    if (singleModifiers[code]) {
+    if (IS_MAC && singleModifiers[code]) {
       onChange(singleModifiers[code]);
       setRecording(false);
       return;
@@ -52,7 +56,13 @@ export default function HotkeyRecorder({ value, onChange, t }: HotkeyRecorderPro
 
     // 2. Detect key combinations (e.g. CommandOrControl + Shift + Space)
     const parts: string[] = [];
-    if (e.metaKey || e.ctrlKey) parts.push("CommandOrControl");
+    if (IS_MAC) {
+      if (e.metaKey) parts.push("CommandOrControl");
+      if (e.ctrlKey) parts.push("Control");
+    } else {
+      if (e.ctrlKey) parts.push("CommandOrControl");
+      if (e.metaKey) parts.push("Super");
+    }
     if (e.altKey) parts.push("Alt");
     if (e.shiftKey) parts.push("Shift");
 
@@ -103,53 +113,57 @@ export default function HotkeyRecorder({ value, onChange, t }: HotkeyRecorderPro
 
       {/* Quick Presets for Popular Modifiers */}
       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        {IS_MAC && (
+          <>
+            <button
+              type="button"
+              onClick={() => onChange("RightOption")}
+              style={{
+                padding: "5px 9px",
+                borderRadius: 6,
+                background: value === "RightOption" ? `${t.accent}22` : t.surface,
+                border: `1px solid ${value === "RightOption" ? t.accent : t.border}`,
+                color: value === "RightOption" ? t.accent : t.textMuted,
+                fontSize: 11,
+                cursor: "pointer",
+                fontWeight: value === "RightOption" ? 600 : 400,
+              }}
+            >
+              Right ⌥
+            </button>
+            <button
+              type="button"
+              onClick={() => onChange("RightControl")}
+              style={{
+                padding: "5px 9px",
+                borderRadius: 6,
+                background: value === "RightControl" ? `${t.accent}22` : t.surface,
+                border: `1px solid ${value === "RightControl" ? t.accent : t.border}`,
+                color: value === "RightControl" ? t.accent : t.textMuted,
+                fontSize: 11,
+                cursor: "pointer",
+                fontWeight: value === "RightControl" ? 600 : 400,
+              }}
+            >
+              Right ⌃
+            </button>
+          </>
+        )}
         <button
           type="button"
-          onClick={() => onChange("RightOption")}
+          onClick={() => onChange(COMBO_PRESET)}
           style={{
             padding: "5px 9px",
             borderRadius: 6,
-            background: value === "RightOption" ? `${t.accent}22` : t.surface,
-            border: `1px solid ${value === "RightOption" ? t.accent : t.border}`,
-            color: value === "RightOption" ? t.accent : t.textMuted,
+            background: value === COMBO_PRESET ? `${t.accent}22` : t.surface,
+            border: `1px solid ${value === COMBO_PRESET ? t.accent : t.border}`,
+            color: value === COMBO_PRESET ? t.accent : t.textMuted,
             fontSize: 11,
             cursor: "pointer",
-            fontWeight: value === "RightOption" ? 600 : 400,
+            fontWeight: value === COMBO_PRESET ? 600 : 400,
           }}
         >
-          Right ⌥
-        </button>
-        <button
-          type="button"
-          onClick={() => onChange("RightControl")}
-          style={{
-            padding: "5px 9px",
-            borderRadius: 6,
-            background: value === "RightControl" ? `${t.accent}22` : t.surface,
-            border: `1px solid ${value === "RightControl" ? t.accent : t.border}`,
-            color: value === "RightControl" ? t.accent : t.textMuted,
-            fontSize: 11,
-            cursor: "pointer",
-            fontWeight: value === "RightControl" ? 600 : 400,
-          }}
-        >
-          Right ⌃
-        </button>
-        <button
-          type="button"
-          onClick={() => onChange("CommandOrControl+Shift+Space")}
-          style={{
-            padding: "5px 9px",
-            borderRadius: 6,
-            background: value === "CommandOrControl+Shift+Space" ? `${t.accent}22` : t.surface,
-            border: `1px solid ${value === "CommandOrControl+Shift+Space" ? t.accent : t.border}`,
-            color: value === "CommandOrControl+Shift+Space" ? t.accent : t.textMuted,
-            fontSize: 11,
-            cursor: "pointer",
-            fontWeight: value === "CommandOrControl+Shift+Space" ? 600 : 400,
-          }}
-        >
-          ⌘+⇧+Space
+          {IS_MAC ? "⌘+⇧+Space" : "Ctrl+⇧+Space"}
         </button>
       </div>
     </div>

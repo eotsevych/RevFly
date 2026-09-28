@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { tok, type AccentColor, type Theme } from "@/lib/tokens";
 import { useResolvedTheme } from "@/lib/theme";
-import { SettingsProvider, useSettingsContext } from "@/components/settings/SettingsContext";
+import { SettingsProvider } from "@/components/settings/SettingsContext";
+import { useSettingsContext } from "@/components/settings/useSettingsContext";
 import GeneralTab from "@/components/settings/GeneralTab";
 import ThemeTab from "@/components/settings/ThemeTab";
 import TranslationsTab from "@/components/settings/TranslationsTab";
@@ -132,12 +133,12 @@ function SettingsInner() {
   };
 
   const [accent, setAccent] = useState<AccentColor>(() => {
-    return (localStorage.getItem("aura_accent") as AccentColor) || "violet";
+    return (localStorage.getItem("revfly_accent") as AccentColor) || "violet";
   });
 
   const handleAccentChange = (newAccent: AccentColor) => {
     setAccent(newAccent);
-    localStorage.setItem("aura_accent", newAccent);
+    localStorage.setItem("revfly_accent", newAccent);
     window.dispatchEvent(new Event("storage"));
   };
 

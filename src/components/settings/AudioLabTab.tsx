@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Tokens } from "@/lib/tokens";
+import { errorMessage } from "@/lib/utils";
 import { Section, Row, FieldSelect } from "./SettingsPrimitives";
-import { useSettingsContext } from "./SettingsContext";
+import { useSettingsContext } from "./useSettingsContext";
 import Toggle from "@/components/ui/Toggle";
 import {
   fetchLabAudioFiles,
@@ -60,9 +61,23 @@ export default function AudioLabTab({
     { value: "zh", label: "Chinese" },
   ];
 
+  const refreshLab = useCallback(
+    async (targetAudio?: string | null) => {
+      const list = await fetchLabAudioFiles();
+      setItems(list);
+      setSelected((prev) => {
+        const toSelect = targetAudio || initialAudio || prev;
+        if (toSelect && list.some((it) => it.filename === toSelect)) return toSelect;
+        if (list[0] && !prev) return list[0].filename;
+        return prev;
+      });
+    },
+    [initialAudio],
+  );
+
   useEffect(() => {
     refreshLab(initialAudio);
-  }, [initialAudio]);
+  }, [initialAudio, refreshLab]);
 
   useEffect(() => {
     setTextNorm(!!settings.text_normalization);
@@ -74,19 +89,8 @@ export default function AudioLabTab({
     setCollapse(!!settings.collapse_redundancy);
     setAmbiguity(!!settings.annotate_ambiguity);
     setStructured(!!settings.normalize_structured_values);
-    setModel(settings.model_name || model);
+    setModel((prev) => settings.model_name || prev);
   }, [settings]);
-
-  async function refreshLab(targetAudio?: string | null) {
-    const list = await fetchLabAudioFiles();
-    setItems(list);
-    const toSelect = targetAudio || initialAudio || selected;
-    if (toSelect && list.some((it) => it.filename === toSelect)) {
-      setSelected(toSelect);
-    } else if (list.length > 0 && !selected) {
-      setSelected(list[0].filename);
-    }
-  }
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
@@ -103,8 +107,8 @@ export default function AudioLabTab({
       await refreshLab();
       if (saved) setSelected(saved);
       setError(null);
-    } catch (err: any) {
-      setError(String(err?.message ?? err));
+    } catch (err) {
+      setError(errorMessage(err));
     } finally {
       if (fileRef.current) fileRef.current.value = "";
     }
@@ -152,8 +156,8 @@ export default function AudioLabTab({
         setError("Empty result.");
         setPhase("error");
       }
-    } catch (err: any) {
-      setError(String(err?.message ?? err));
+    } catch (err) {
+      setError(errorMessage(err));
       setPhase("error");
     }
   }
@@ -500,7 +504,7 @@ export default function AudioLabTab({
           {result.segments?.length > 0 && (
             <Section title="Segments" t={t}>
               <div style={{ padding: 8, maxHeight: 160, overflow: "auto" }}>
-                {result.segments.slice(0, 20).map((s: any, i: number) => (
+                {result.segments.slice(0, 20).map((s, i) => (
                   <p
                     key={i}
                     style={{
@@ -526,6 +530,6 @@ export default function AudioLabTab({
 function arrayBufferToBase64(buf: ArrayBuffer): string {
   const bytes = new Uint8Array(buf);
   let binary = "";
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
   return btoa(binary);
 }

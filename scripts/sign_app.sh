@@ -4,12 +4,17 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# shellcheck source=lib_codesign.sh
+source "$SCRIPT_DIR/lib_codesign.sh"
+
 echo "==> Preparing and signing RevFly macOS Universal bundle..."
+revfly_print_identity
 
 SRC_APP="$ROOT_DIR/src-tauri/target/release/bundle/macos/RevFly.app"
 ROOT_APP="$ROOT_DIR/RevFly.app"
-UNIVERSAL_DMG="$ROOT_DIR/RevFly_0.1.0_universal.dmg"
-AARCH64_DMG="$ROOT_DIR/RevFly_0.1.0_aarch64.dmg"
+VERSION="$(sed -n 's/^  "version": "\(.*\)",$/\1/p' "$ROOT_DIR/src-tauri/tauri.conf.json")"
+UNIVERSAL_DMG="$ROOT_DIR/RevFly_${VERSION}_universal.dmg"
+AARCH64_DMG="$ROOT_DIR/RevFly_${VERSION}_aarch64.dmg"
 
 ARM64_BIN="$ROOT_DIR/src-tauri/target/release/revfly"
 X86_64_BIN="$ROOT_DIR/src-tauri/target/x86_64-apple-darwin/release/revfly"
@@ -40,22 +45,7 @@ sign_app() {
   local target="$1"
   if [ -d "$target" ]; then
     echo "Signing: $target"
-    xattr -cr "$target" || true
-    
-    # Sign any frameworks or dylibs first
-    if [ -d "$target/Contents/Frameworks" ]; then
-      for f in "$target/Contents/Frameworks"/*.dylib; do
-        if [ -f "$f" ]; then
-          codesign --force --sign - "$f"
-        fi
-      done
-    fi
-    
-    codesign --force --deep --sign - \
-      --identifier "com.revfly.desktop" \
-      -r='designated => identifier "com.revfly.desktop"' \
-      "$target"
-    codesign -dvvv "$target" 2>&1 | grep "Identifier="
+    revfly_sign_app "$target"
     codesign -d -r- "$target" 2>&1 | grep "designated =>"
     echo "✓ Signed: $target"
   fi
@@ -74,7 +64,7 @@ fi
 # Package fresh signed Universal DMG
 if [ -d "$ROOT_APP" ]; then
   echo "Packaging signed Universal DMG..."
-  STAGE_DIR="/tmp/aura_dmg_pack_$$"
+  STAGE_DIR="/tmp/revfly_dmg_pack_$$"
   rm -rf "$STAGE_DIR"
   mkdir -p "$STAGE_DIR"
   cp -R "$ROOT_APP" "$STAGE_DIR/"
@@ -83,8 +73,7 @@ if [ -d "$ROOT_APP" ]; then
   rm -f "$UNIVERSAL_DMG" "$AARCH64_DMG"
   hdiutil create -volname "RevFly" -srcfolder "$STAGE_DIR" -ov -format UDZO "$UNIVERSAL_DMG" > /dev/null
   rm -rf "$STAGE_DIR"
-  xattr -cr "$UNIVERSAL_DMG" || true
-  codesign --force --sign - "$UNIVERSAL_DMG" 2>/dev/null || true
+  revfly_sign_dmg "$UNIVERSAL_DMG"
   
   # Also copy to AARCH64_DMG for backwards compatibility
   cp "$UNIVERSAL_DMG" "$AARCH64_DMG"
@@ -92,12 +81,7 @@ if [ -d "$ROOT_APP" ]; then
   echo "✓ Signed DMG ready at: $AARCH64_DMG"
 fi
 
-# Clean old installation from /Applications to allow clean install from scratch
-echo "Cleaning old /Applications/RevFly.app..."
-pkill -f "revfly" 2>/dev/null || true
-rm -rf "/Applications/RevFly.app"
-tccutil reset Accessibility com.revfly.desktop 2>/dev/null || true
-tccutil reset Microphone com.revfly.desktop 2>/dev/null || true
-tccutil reset All com.revfly.desktop 2>/dev/null || true
+# Installing is left to the user (or scripts/clean_and_deploy_desktop.sh for a full reset):
+# resetting permissions here would undo the point of signing with a stable identity.
 
 echo "==> All bundles signed and verified successfully."

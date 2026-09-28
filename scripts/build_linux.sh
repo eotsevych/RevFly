@@ -17,6 +17,9 @@ if command -v apt-get &> /dev/null; then
         curl \
         wget \
         file \
+        cmake \
+        clang \
+        pkg-config \
         libxdo-dev \
         libssl-dev \
         libayatana-appindicator3-dev \

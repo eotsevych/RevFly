@@ -36,6 +36,11 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "RevFly",
+    "copyright": "Copyright (c) 2026 Eugene Otsevich. MIT License.",
+    "category": "Productivity",
+    "shortDescription": "Local-first voice dictation and translation",
+    "longDescription": "RevFly records your speech, transcribes it locally, optionally translates it with AI, and pastes the result into the active window.",
     "macOS": {
       "minimumSystemVersion": "11.0",
       "infoPlist": "Info.plist"
@@ -47,5 +52,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE5MTUzNTdCRkRBOUFCNjIKUldSaXE2bjllelVWR2Vmajd3L1p6U0grUGtuVVRyWFdIbjFhQnEvV1FHcDBtbnJ1b0I4WHd5b1kK",
+      "endpoints": [
+        "https://github.com/eotsevych/RevFly/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

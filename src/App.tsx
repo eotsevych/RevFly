@@ -23,11 +23,11 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error, info: React.ErrorInfo) {
+  override componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error("App ErrorBoundary caught:", error, info);
   }
 
-  render() {
+  override render() {
     if (this.state.hasError) {
       return (
         <div
@@ -80,10 +80,14 @@ function checkIsPreferences(): boolean {
   if (window.location.hash === "#preferences" || window.location.href.includes("preferences")) {
     return true;
   }
-  const anyWin = window as any;
+  const tauriWin = window as Window & {
+    __TAURI_INTERNALS__?: {
+      metadata?: { currentWebview?: { label?: string }; currentWindow?: { label?: string } };
+    };
+  };
   const label =
-    anyWin?.__TAURI_INTERNALS__?.metadata?.currentWebview?.label ||
-    anyWin?.__TAURI_INTERNALS__?.metadata?.currentWindow?.label;
+    tauriWin.__TAURI_INTERNALS__?.metadata?.currentWebview?.label ||
+    tauriWin.__TAURI_INTERNALS__?.metadata?.currentWindow?.label;
   if (label === "preferences") {
     return true;
   }
@@ -95,13 +99,13 @@ export default function App() {
 
   useEffect(() => {
     // 1. Initial theme application
-    const savedTheme = (localStorage.getItem("aura_theme") as ThemeMode) || "system";
+    const savedTheme = (localStorage.getItem("revfly_theme") as ThemeMode) || "system";
     applyTheme(savedTheme);
 
     fetchSettings().then((settings) => {
       if (settings?.theme) {
         const t = settings.theme as ThemeMode;
-        localStorage.setItem("aura_theme", t);
+        localStorage.setItem("revfly_theme", t);
         applyTheme(t);
       }
     });

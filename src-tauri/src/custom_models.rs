@@ -35,30 +35,26 @@ fn sanitize_filename(name: &str) -> String {
     }
 }
 
+/// Opens a folder in the platform's file manager (Finder, Explorer, or the XDG default).
+pub fn open_in_file_manager(dir: &std::path::Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(target_os = "windows")]
+    let program = "explorer";
+    #[cfg(target_os = "linux")]
+    let program = "xdg-open";
+
+    std::process::Command::new(program)
+        .arg(dir)
+        .spawn()
+        .map_err(|e| format!("Failed to open file manager: {}", e))?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn open_models_folder() -> Result<String, String> {
     let dir = get_models_dir();
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(&dir)
-            .spawn()
-            .map_err(|e| format!("Failed to open Finder: {}", e))?;
-    }
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("explorer")
-            .arg(&dir)
-            .spawn()
-            .map_err(|e| format!("Failed to open Explorer: {}", e))?;
-    }
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&dir)
-            .spawn()
-            .map_err(|e| format!("Failed to open file manager: {}", e))?;
-    }
+    open_in_file_manager(&dir)?;
     Ok(dir.to_string_lossy().to_string())
 }
 

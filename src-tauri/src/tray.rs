@@ -73,6 +73,7 @@ pub fn update_tray_icon(app: &AppHandle, state: TrayIconState) {
 static STATUS_ITEM: std::sync::OnceLock<tauri::menu::MenuItem<tauri::Wry>> = std::sync::OnceLock::new();
 static EJECT_ITEM: std::sync::OnceLock<tauri::menu::MenuItem<tauri::Wry>> = std::sync::OnceLock::new();
 static TOGGLE_ITEM: std::sync::OnceLock<tauri::menu::MenuItem<tauri::Wry>> = std::sync::OnceLock::new();
+static UPDATE_ITEM: std::sync::OnceLock<tauri::menu::MenuItem<tauri::Wry>> = std::sync::OnceLock::new();
 static IS_RECORDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn update_tray_model_status(app: &AppHandle, is_loaded: bool) {
@@ -94,6 +95,17 @@ pub fn update_tray_model_status(app: &AppHandle, is_loaded: bool) {
         let _ = item.set_text(if is_loaded { "Eject Model from RAM" } else { "Model Ejected (Sleeping)" });
     }
     let _ = app; // silence unused if no tray yet
+}
+
+pub fn is_recording() -> bool {
+    IS_RECORDING.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+pub fn set_update_item(_app: &AppHandle, label: &str, enabled: bool) {
+    if let Some(item) = UPDATE_ITEM.get() {
+        let _ = item.set_text(label);
+        let _ = item.set_enabled(enabled);
+    }
 }
 
 pub fn set_tray_recording(app: &AppHandle, is_recording: bool, llm_loaded: bool) {
@@ -255,6 +267,8 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
     let trans_submenu = Submenu::with_items(app, "Translation", true, &trans_items_refs)?;
 
     let sep2 = PredefinedMenuItem::separator(app)?;
+    let update_item = MenuItem::with_id(app, "check_updates", "Check for Updates…", true, None::<&str>)?;
+    let _ = UPDATE_ITEM.set(update_item.clone());
     let pref_item = MenuItem::with_id(app, "preferences", "Settings...", true, None::<&str>)?;
     let sep3 = PredefinedMenuItem::separator(app)?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit RevFly", true, None::<&str>)?;
@@ -269,6 +283,7 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
         &output_submenu,
         &trans_submenu,
         &sep2,
+        &update_item,
         &pref_item,
         &sep3,
         &quit_item,
@@ -290,6 +305,8 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
                 }
             } else if id == "preferences" {
                 open_preferences(app);
+            } else if id == "check_updates" {
+                crate::updater::on_tray_click(app);
             } else if id == "eject_model" {
                 if let Some(state) = app.try_state::<crate::AppState>() {
                     state.controller.eject_model();

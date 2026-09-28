@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react";
 import type { Tokens } from "@/lib/tokens";
+import { errorMessage } from "@/lib/utils";
 import HotkeyRecorder from "@/components/ui/HotkeyRecorder";
 import Toggle from "@/components/ui/Toggle";
 import Segmented from "@/components/ui/Segmented";
 import { Section, Row, FieldSelect, FieldTextarea, FieldInput } from "./SettingsPrimitives";
-import { useSettingsContext } from "./SettingsContext";
+import { useSettingsContext } from "./useSettingsContext";
+import UpdatesSection from "./UpdatesSection";
 import {
   startMicTest,
   stopMicTest,
@@ -106,7 +108,7 @@ export default function GeneralTab({ t }: { t: Tokens }) {
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     let isMounted = true;
-    let timer: any = null;
+    let timer: ReturnType<typeof setInterval> | null = null;
 
     if (isTestingMic) {
       setMicLevel(0);
@@ -123,7 +125,7 @@ export default function GeneralTab({ t }: { t: Tokens }) {
       startMicTest(settings.input_device ?? null);
       const samples: number[] = [];
 
-      subscribeToMicTestLevels((data: any) => {
+      subscribeToMicTestLevels((data) => {
         if (!isMounted) return;
         const rawLvl = typeof data === "number" ? data : (data?.level ?? 0);
         const rawPeak = typeof data === "number" ? data : (data?.peak ?? rawLvl);
@@ -137,7 +139,7 @@ export default function GeneralTab({ t }: { t: Tokens }) {
           samples.push(lvlPct);
           if (samples.length >= 8) {
             const sorted = [...samples].sort((a, b) => a - b);
-            const baseline = sorted[Math.floor(sorted.length * 0.25)];
+            const baseline = sorted[Math.floor(sorted.length * 0.25)] ?? 0;
             setNoiseFloor(baseline);
           }
         }
@@ -353,6 +355,8 @@ export default function GeneralTab({ t }: { t: Tokens }) {
           </div>
         </Row>
       </Section>
+
+      <UpdatesSection t={t} />
 
       {/* ── Input Section ── */}
       <Section title="Input" t={t}>
@@ -756,8 +760,8 @@ export default function GeneralTab({ t }: { t: Tokens }) {
                   setImportFeedback(`Imported ${item.filename}`);
                   setTimeout(() => setImportFeedback(null), 3000);
                 }
-              } catch (e: any) {
-                setImportFeedback(String(e?.message ?? e));
+              } catch (e) {
+                setImportFeedback(errorMessage(e));
                 setTimeout(() => setImportFeedback(null), 4000);
               } finally {
                 setIsImporting(false);
@@ -840,8 +844,8 @@ export default function GeneralTab({ t }: { t: Tokens }) {
                   setCustomUrl("");
                   setImportFeedback("Download complete");
                   setTimeout(() => setImportFeedback(null), 3000);
-                } catch (e: any) {
-                  setCustomUrlError(String(e?.message ?? e ?? "Download failed"));
+                } catch (e) {
+                  setCustomUrlError(e == null ? "Download failed" : errorMessage(e));
                 } finally {
                   setIsDownloadingCustom(false);
                 }

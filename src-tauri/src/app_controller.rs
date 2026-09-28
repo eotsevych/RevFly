@@ -493,11 +493,7 @@ impl AppController {
 
     pub fn open_audio_folder(&self) -> Result<(), String> {
         let dir = self.history.get_audio_dir();
-        std::process::Command::new("open")
-            .arg(&dir)
-            .spawn()
-            .map_err(|e| format!("Failed to open folder in Finder: {}", e))?;
-        Ok(())
+        crate::custom_models::open_in_file_manager(&dir)
     }
 
     pub fn play_recorded_audio(&self, filename: Option<String>) -> Result<(), String> {
@@ -521,11 +517,7 @@ impl AppController {
             return Err(format!("Audio file not found: {:?}", path));
         }
 
-        std::process::Command::new("afplay")
-            .arg(&path)
-            .spawn()
-            .map_err(|e| format!("Failed to play audio with afplay: {}", e))?;
-        Ok(())
+        crate::sound::play_wav_file(&path)
     }
 
     pub fn list_lab_audio(&self) -> Vec<crate::lab::LabAudioItem> {
@@ -724,6 +716,12 @@ impl AppController {
                 "subtitle": transcribing_subtitle
             }),
         );
+
+        // Stop earcon plays on key release; the recorder discards audio captured after this point,
+        // so the chime is not transcribed.
+        if settings.sound_effect {
+            crate::sound::play_sound(crate::sound::AppSound::StopRecording);
+        }
 
         let raw_samples = self.recorder.stop_recording();
 
@@ -1566,11 +1564,6 @@ impl AppController {
                 } else {
                     *p = AssistantPhase::Done;
                 }
-            }
-
-            // Play sound right before copied to clipboard
-            if settings.sound_effect {
-                crate::sound::play_sound(crate::sound::AppSound::TranscriptionComplete);
             }
 
             // Step 7: Copy to clipboard and auto-paste if enabled

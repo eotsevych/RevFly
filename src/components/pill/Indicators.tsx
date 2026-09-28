@@ -1,32 +1,74 @@
+import { useEffect, useRef } from "react";
 import type { Tokens } from "../../lib/tokens";
 
-export function SoundWave({ accent, levels }: { accent: string; levels?: number[] }) {
-  const baseHeights = [16, 28, 20, 34, 18, 26, 14];
+const WAVE_BARS = 7;
+const WAVE_HEIGHT = 38;
+const WAVE_MIN_SCALE = 0.22;
+// Centre bars react most, edges least, so the wave reads as one shape rather than random bars.
+const WAVE_PROFILE = [0.55, 0.78, 0.94, 1, 0.94, 0.78, 0.55];
+// Exponential smoothing time constants (ms): rise quickly with the voice, fall back gently.
+const WAVE_ATTACK_MS = 45;
+const WAVE_RELEASE_MS = 160;
+
+/** Level for bar `i`, interpolated across however many level bands the backend sends. */
+function levelForBar(levels: number[], i: number): number {
+  if (levels.length === 0) return 0;
+  const pos = (i / (WAVE_BARS - 1)) * (levels.length - 1);
+  const lo = Math.floor(pos);
+  const hi = Math.min(levels.length - 1, lo + 1);
+  const a = levels[lo] ?? 0;
+  const b = levels[hi] ?? a;
+  return a + (b - a) * (pos - lo);
+}
+
+export function SoundWave({ accent, levels }: { accent: string; levels?: number[] | undefined }) {
+  const barsRef = useRef<(HTMLDivElement | null)[]>([]);
+  const levelsRef = useRef<number[]>(levels ?? []);
+  levelsRef.current = levels ?? [];
+
+  // Animate on every frame and ease towards the latest levels, so 25 Hz level updates
+  // render as continuous motion instead of steps. A gentle idle breath keeps the wave alive in silence.
+  useEffect(() => {
+    const current = new Array<number>(WAVE_BARS).fill(WAVE_MIN_SCALE);
+    let last = performance.now();
+    let frame = requestAnimationFrame(function tick(now) {
+      const dt = Math.min(64, now - last);
+      last = now;
+      for (let i = 0; i < WAVE_BARS; i++) {
+        const idle = WAVE_MIN_SCALE + 0.1 * (0.5 + 0.5 * Math.sin(now / 320 + i * 0.85));
+        const voice = levelForBar(levelsRef.current, i) * (WAVE_PROFILE[i] ?? 1);
+        const target = Math.min(1, Math.max(idle, voice));
+        const cur = current[i] ?? WAVE_MIN_SCALE;
+        const tau = target > cur ? WAVE_ATTACK_MS : WAVE_RELEASE_MS;
+        const next = cur + (target - cur) * (1 - Math.exp(-dt / tau));
+        current[i] = next;
+        const bar = barsRef.current[i];
+        if (bar) bar.style.transform = `scaleY(${next.toFixed(3)})`;
+      }
+      frame = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   return (
-    <div className="flex items-center gap-[3.5px]">
-      {[0, 1, 2, 3, 4, 5, 6].map((i) => {
-        const lvl = levels ? (levels[i % levels.length] ?? 0) : 0;
-        const hasLiveInput = levels && levels.some((v) => v > 0.02);
-        const base = baseHeights[i];
-        const h = hasLiveInput
-          ? Math.min(38, Math.max(10, Math.round(base * 0.45 + lvl * 32)))
-          : undefined;
-
-        return (
-          <div
-            key={i}
-            className={hasLiveInput ? undefined : "wave-bar"}
-            style={{
-              width: 3.5,
-              borderRadius: 2,
-              height: h ?? undefined,
-              transition: hasLiveInput ? "height 75ms cubic-bezier(0.2, 0.9, 0.3, 1)" : undefined,
-              background: `linear-gradient(180deg, ${accent}, #00d4ff)`,
-            }}
-          />
-        );
-      })}
+    <div className="flex items-center gap-[3.5px]" style={{ height: WAVE_HEIGHT }}>
+      {Array.from({ length: WAVE_BARS }, (_, i) => (
+        <div
+          key={i}
+          ref={(el) => {
+            barsRef.current[i] = el;
+          }}
+          style={{
+            width: 3.5,
+            height: WAVE_HEIGHT,
+            borderRadius: 2,
+            transform: `scaleY(${WAVE_MIN_SCALE})`,
+            transformOrigin: "center",
+            willChange: "transform",
+            background: `linear-gradient(180deg, ${accent}, #00d4ff)`,
+          }}
+        />
+      ))}
     </div>
   );
 }
@@ -97,7 +139,7 @@ export function CopiedIndicator() {
   );
 }
 
-export function RecordingErrorIndicator({ accent }: { accent?: string }) {
+export function RecordingErrorIndicator({ accent }: { accent?: string | undefined }) {
   const color = accent || "#ff4d6d";
   return (
     <div
@@ -128,7 +170,7 @@ export function RecordingErrorIndicator({ accent }: { accent?: string }) {
   );
 }
 
-export function TranscriptionErrorIndicator({ accent }: { accent?: string }) {
+export function TranscriptionErrorIndicator({ accent }: { accent?: string | undefined }) {
   const color = accent || "#ff6b6b";
   return (
     <div
@@ -158,7 +200,7 @@ export function TranscriptionErrorIndicator({ accent }: { accent?: string }) {
   );
 }
 
-export function TranslationErrorIndicator({ accent }: { accent?: string }) {
+export function TranslationErrorIndicator({ accent }: { accent?: string | undefined }) {
   const color = accent || "#ff9f43";
   return (
     <div
@@ -205,8 +247,8 @@ export function ErrorIndicator({
   accent,
 }: {
   t: Tokens;
-  title?: string;
-  accent?: string;
+  title?: string | undefined;
+  accent?: string | undefined;
 }) {
   const lower = (title || "").toLowerCase();
   if (lower.includes("translat")) return <TranslationErrorIndicator accent={accent} />;
@@ -238,8 +280,8 @@ export function StateIndicator({
   state: "idle" | "listening" | "transcribing" | "translating" | "done" | "error";
   t: Tokens;
   accent: string;
-  levels?: number[];
-  title?: string;
+  levels?: number[] | undefined;
+  title?: string | undefined;
 }) {
   if (state === "listening") return <SoundWave accent={accent} levels={levels} />;
   if (state === "transcribing") return <TranscribingIndicator t={t} />;

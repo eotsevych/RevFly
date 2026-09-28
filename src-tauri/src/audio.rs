@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 pub fn list_input_devices() -> Vec<String> {
@@ -261,6 +261,8 @@ enum AudioCmd {
 pub struct AudioRecorder {
     cmd_tx: Sender<AudioCmd>,
     is_recording: Arc<AtomicBool>,
+    /// Moment the user asked to stop; audio captured after it is dropped.
+    stop_at: Arc<Mutex<Option<Instant>>>,
 }
 
 impl AudioRecorder {
@@ -268,6 +270,8 @@ impl AudioRecorder {
         let (cmd_tx, cmd_rx) = channel::<AudioCmd>();
         let is_recording = Arc::new(AtomicBool::new(false));
         let is_rec_thread = Arc::clone(&is_recording);
+        let stop_at = Arc::new(Mutex::new(None::<Instant>));
+        let stop_at_thread = Arc::clone(&stop_at);
 
         // Dedicated audio recording thread so cpal::Stream stays on one thread
         thread::spawn(move || {
@@ -281,25 +285,33 @@ impl AudioRecorder {
                         if let Ok(mut b) = buffer.lock() {
                             b.clear();
                         }
+                        if let Ok(mut s) = stop_at_thread.lock() {
+                            *s = None;
+                        }
 
                         // Mark recording active before starting stream so initial audio buffers are captured immediately
                         is_rec_thread.store(true, Ordering::SeqCst);
+                        let open_started = Instant::now();
 
                         let res = start_stream_inner(
                             &mut active_stream,
                             Arc::clone(&buffer),
                             Arc::clone(&is_rec_thread),
+                            Arc::clone(&stop_at_thread),
                             app_handle,
                             device_name,
                         );
 
                         if res.is_err() {
                             is_rec_thread.store(false, Ordering::SeqCst);
+                        } else {
+                            log::info!("Microphone stream opened in {} ms", open_started.elapsed().as_millis());
                         }
                         let _ = reply.send(res);
                     }
                     AudioCmd::Stop { reply } => {
-                        // Allow a brief flush window for final hardware audio frames to arrive from audio callback
+                        // Allow a brief flush window for audio captured before the stop to arrive from the callback.
+                        // Frames captured after the stop are discarded in the callback (see frames_before_stop).
                         thread::sleep(Duration::from_millis(120));
                         is_rec_thread.store(false, Ordering::SeqCst);
                         if let Some(stream) = active_stream.take() {
@@ -324,6 +336,7 @@ impl AudioRecorder {
         Self {
             cmd_tx,
             is_recording,
+            stop_at,
         }
     }
 
@@ -347,6 +360,9 @@ impl AudioRecorder {
     }
 
     pub fn stop_recording(&self) -> Vec<f32> {
+        if let Ok(mut s) = self.stop_at.lock() {
+            *s = Some(Instant::now());
+        }
         let (reply_tx, reply_rx) = channel();
         if self.cmd_tx.send(AudioCmd::Stop { reply: reply_tx }).is_ok() {
             reply_rx.recv().unwrap_or_default()
@@ -364,6 +380,7 @@ fn start_stream_inner(
     active_stream: &mut Option<cpal::Stream>,
     buffer: Arc<Mutex<Vec<f32>>>,
     is_rec: Arc<AtomicBool>,
+    stop_at: Arc<Mutex<Option<Instant>>>,
     app_handle: AppHandle,
     device_name: Option<String>,
 ) -> Result<(), String> {
@@ -386,6 +403,7 @@ fn start_stream_inner(
     let resampler_clone = Arc::clone(&resampler_state);
     let buffer_clone = Arc::clone(&buffer);
     let is_rec_cb = Arc::clone(&is_rec);
+    let stop_at_cb = Arc::clone(&stop_at);
 
     let err_fn = |err| {
         log::error!("Audio stream error: {}", err);
@@ -396,10 +414,12 @@ fn start_stream_inner(
             let resampler_cb = Arc::clone(&resampler_clone);
             device.build_input_stream(
                 &supported_config.into(),
-                move |data: &[f32], _: &_| {
+                move |data: &[f32], info: &cpal::InputCallbackInfo| {
                     if !is_rec_cb.load(Ordering::Relaxed) {
                         return;
                     }
+                    let keep = frames_before_stop(info, data.len() / channels.max(1), sample_rate, &stop_at_cb);
+                    let data = &data[..keep * channels];
                     process_input_samples(data, channels, sample_rate, &resampler_cb, &buffer_clone);
                 },
                 err_fn,
@@ -410,11 +430,12 @@ fn start_stream_inner(
             let resampler_cb = Arc::clone(&resampler_clone);
             device.build_input_stream(
                 &supported_config.into(),
-                move |data: &[i16], _: &_| {
+                move |data: &[i16], info: &cpal::InputCallbackInfo| {
                     if !is_rec_cb.load(Ordering::Relaxed) {
                         return;
                     }
-                    let floats: Vec<f32> = data.iter().map(|&s| s.to_float_sample()).collect();
+                    let keep = frames_before_stop(info, data.len() / channels.max(1), sample_rate, &stop_at_cb);
+                    let floats: Vec<f32> = data[..keep * channels].iter().map(|&s| s.to_float_sample()).collect();
                     process_input_samples(&floats, channels, sample_rate, &resampler_cb, &buffer_clone);
                 },
                 err_fn,
@@ -481,6 +502,30 @@ fn start_stream_inner(
     });
 
     Ok(())
+}
+
+/// Number of leading frames in this callback that were captured before the user pressed stop.
+/// Returns all frames while recording; once stop is requested, frames captured afterwards
+/// (including the stop earcon picked up by the mic) are cut off.
+fn frames_before_stop(
+    info: &cpal::InputCallbackInfo,
+    frames: usize,
+    sample_rate: u32,
+    stop_at: &Mutex<Option<Instant>>,
+) -> usize {
+    let Some(stop) = stop_at.lock().ok().and_then(|s| *s) else {
+        return frames;
+    };
+    let ts = info.timestamp();
+    let latency = ts.callback.duration_since(&ts.capture).unwrap_or_default();
+    let Some(first_capture) = Instant::now().checked_sub(latency) else {
+        return frames;
+    };
+    if stop <= first_capture {
+        return 0;
+    }
+    let captured_before = (stop - first_capture).as_secs_f64() * sample_rate as f64;
+    (captured_before as usize).min(frames)
 }
 
 #[derive(Debug)]

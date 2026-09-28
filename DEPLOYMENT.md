@@ -38,25 +38,23 @@ Being open-source does not stop these warnings automatically. The OS checks for 
 
 ### Solutions for Open-Source Maintainers
 
-#### Solution 1: Zero Cost (Document User Bypass - Standard for Open Source)
+#### Solution 1: Zero Cost (What RevFly Uses)
 Most open-source tools (like Blender, Audacity, and Ollama when they started) use this method.
 
-1. macOS ad-hoc signing:
-   The build script runs:
-   ```bash
-   codesign --force --deep --sign - --identifier "com.revfly.desktop" "RevFly.app"
-   ```
-2. Inform users in [INSTALL.md](INSTALL.md) how to open the app:
-   - **macOS**: Right-click the app -> Click **Open**, or run `xattr -cr "/Applications/RevFly.app"`.
-   - **Windows**: Click **More info** -> Click **Run anyway**.
+1. **Install paths without warnings**: the 1-line Terminal installer and the Homebrew cask both clear the quarantine flag, so Gatekeeper never blocks the app. Promote these first.
+2. **Free self-signed certificate (macOS)**: every build is signed with the same "RevFly Self-Signed" certificate (see [section 5](#5-one-time-setup-free-signing--auto-updates)). This does not remove the Gatekeeper warning, but macOS keeps the Microphone and Accessibility permissions across updates. Without it, builds fall back to ad-hoc signing and users grant permissions again after every update.
+3. **In-app updater**: updates downloaded by RevFly itself are not quarantined, so users pass Gatekeeper only once, at first install.
+4. **Document the manual bypass** in [INSTALL.md](INSTALL.md) for DMG and `.exe` downloads:
+   - **macOS 15+**: System Settings → Privacy & Security → **Open Anyway**. (Right-click → Open no longer works on Sequoia.)
+   - **Windows**: Click **More info** → **Run anyway**.
 
 ---
 
 #### Solution 2: Free Certificate for Open Source (Windows)
-For Windows, you can get free code signing through **SignPath.io**:
-- SignPath provides free code signing certificates to approved open-source GitHub projects.
-- It integrates with GitHub Actions CI/CD (Continuous Integration and Continuous Delivery).
-- Sign up at: `https://signpath.io/about/open-source`
+[SignPath Foundation](https://signpath.org) signs approved open-source projects for free, under its own trusted certificate:
+- Apply at `https://signpath.org/apply` **after** the first public release: the application asks for a public repository, an existing release and signs of real usage (downloads, stars, posts).
+- Do not use the certificate buttons in a regular SignPath.io account: self-signed certificates there do not help with SmartScreen, and CA certificates cost money.
+- Signing runs as a GitHub Actions step on binaries built by CI.
 
 ---
 
@@ -97,6 +95,14 @@ This creates:
 - `installers/RevFly_Universal.dmg` (Works on all Macs: M1-M4 and Intel)
 - `installers/RevFly_Apple_Silicon_arm64.dmg` (Apple Silicon only)
 - `installers/RevFly_Intel_x86_64.dmg` (Intel only)
+- `installers/RevFly_Universal.app.tar.gz` + `.sig` (in-app update package; only when the updater key is set, see section 5)
+
+The script signs with the "RevFly Self-Signed" certificate when it is in your keychain, and prints which identity it used.
+To also build the update package locally:
+```bash
+export TAURI_SIGNING_PRIVATE_KEY_PATH="$HOME/.tauri/revfly-updater.key"
+bash scripts/build_installers.sh
+```
 
 ### On Windows
 Run the Windows build batch script:
@@ -104,8 +110,8 @@ Run the Windows build batch script:
 scripts\build_windows.bat
 ```
 Output files:
-- `src-tauri\target\release\bundle\nsis\RevFly_Setup.exe`
-- `src-tauri\target\release\bundle\msi\RevFly.msi`
+- `src-tauri\target\release\bundle\nsis\RevFly_<version>_x64-setup.exe`
+- `src-tauri\target\release\bundle\msi\RevFly_<version>_x64_en-US.msi`
 
 ### On Linux
 Run the Linux build script:
@@ -113,8 +119,9 @@ Run the Linux build script:
 bash scripts/build_linux.sh
 ```
 Output files:
-- `src-tauri/target/release/bundle/appimage/RevFly.AppImage`
-- `src-tauri/target/release/bundle/deb/revfly.deb`
+- `src-tauri/target/release/bundle/appimage/RevFly_<version>_amd64.AppImage`
+- `src-tauri/target/release/bundle/deb/RevFly_<version>_amd64.deb`
+- `src-tauri/target/release/bundle/rpm/RevFly-<version>-1.x86_64.rpm`
 
 ---
 
@@ -128,7 +135,7 @@ Do not commit the `.dmg` into Git. Follow these exact steps:
 Run this in Terminal:
 ```bash
 # Add your GitHub remote repository (if not added yet)
-git remote add origin https://github.com/eugeneotsevich/RevFly.git
+git remote add origin https://github.com/eotsevych/RevFly.git
 
 # Push the main code branch
 git push -u origin main
@@ -158,22 +165,90 @@ Both your manual DMG download and the 1-line install command will now work immed
 
 When you want GitHub servers to build Windows `.exe`, Linux, and macOS packages automatically:
 
-#### Step 1: Push a Version Tag
+#### Step 1: Bump the Version
+Set the same version in all three files:
+- `package.json`
+- `src-tauri/tauri.conf.json`
+- `src-tauri/Cargo.toml`
+
+The workflow fails if the tag does not match the version in `src-tauri/tauri.conf.json`.
+
+#### Step 2: Push a Version Tag
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-#### Step 2: Automated Cloud Compilation
-The workflow in `.github/workflows/build-all-platforms.yml` starts automatically.
+#### Step 3: Automated Cloud Compilation
+The workflow in `.github/workflows/build-all-platforms.yml` starts automatically and creates a draft release.
 
-It compiles:
-- macOS Universal DMG
+It compiles and attaches:
+- macOS `RevFly_Universal.dmg`, `RevFly_Apple_Silicon_arm64.dmg`, `RevFly_Intel_x86_64.dmg`
 - Windows `.exe` and `.msi`
-- Linux `.AppImage` and `.deb`
+- Linux `.AppImage`, `.deb` and `.rpm`
+- Updater files: `.sig` signatures, `RevFly_Universal.app.tar.gz` and `latest.json` (the update manifest the app reads)
 
-#### Step 3: Review and Publish
+Pushes to `main` and pull requests run the same builds without a release. Download their installers from the workflow run's **Artifacts** section.
+
+#### Step 4: Review and Publish
 1. Open GitHub -> **Releases**.
 2. Click the new draft release created by GitHub Actions.
 3. Review the attached installers.
 4. Click **Publish release**.
+
+The 1-line macOS installer and the in-app updater both read the latest *published* release, so they do not see drafts. Publishing the release is what rolls the update out to users.
+
+#### Step 5: Update the Homebrew Cask
+After publishing, refresh the cask with the new version and checksum, and push it to the tap:
+```bash
+bash scripts/update_homebrew_cask.sh 0.1.0 ../homebrew-tap
+cd ../homebrew-tap && git commit -am "revfly 0.1.0" && git push
+```
+
+---
+
+## 5. One-Time Setup: Free Signing & Auto-Updates
+
+Do this once. Keep every file below backed up (for example in a password manager) and never commit it.
+
+### A. macOS Self-Signed Certificate (keeps permissions across updates)
+```bash
+bash scripts/create_macos_signing_cert.sh
+```
+This creates the "RevFly Self-Signed" certificate, installs it into your login keychain, and writes the files for CI to `~/.revfly-signing/`. The first build may ask whether `codesign` may use the key: choose **Always Allow**.
+
+Add it to GitHub so CI signs releases the same way:
+```bash
+gh secret set MACOS_SIGNING_P12 < ~/.revfly-signing/revfly-signing.p12.b64
+gh secret set MACOS_SIGNING_P12_PASSWORD < ~/.revfly-signing/p12-password.txt
+```
+
+Use the same certificate forever. A new certificate makes every user grant permissions once more.
+
+### B. Updater Signing Key (required for in-app updates)
+Updates are verified with a key pair. The public key is already in `src-tauri/tauri.conf.json` (`plugins.updater.pubkey`); the private key is at `~/.tauri/revfly-updater.key`.
+
+Add the private key to GitHub:
+```bash
+gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/revfly-updater.key
+```
+The key has no password, so `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` is not needed.
+
+**If you lose this key, installed copies can never be updated again**: users would have to reinstall manually. To replace it, run `bun tauri signer generate -w ~/.tauri/revfly-updater.key` and put the new public key in `tauri.conf.json`; only builds made after that can update to builds signed with the new key.
+
+Without these secrets CI still builds everything, just ad-hoc signed and without update files.
+
+---
+
+## 6. Homebrew Tap (One-Time)
+
+1. Create a public GitHub repository named **`homebrew-tap`** (the `homebrew-` prefix is required).
+2. After the first release is published, run:
+   ```bash
+   git clone https://github.com/eotsevych/homebrew-tap.git ../homebrew-tap
+   bash scripts/update_homebrew_cask.sh 0.1.0 ../homebrew-tap
+   cd ../homebrew-tap && git add Casks/revfly.rb && git commit -m "Add revfly" && git push
+   ```
+3. Users can now run `brew install --cask eotsevych/tap/revfly`.
+
+The source of truth is `packaging/homebrew/Casks/revfly.rb` in this repository. The cask removes the quarantine flag after install, so Homebrew users see no Gatekeeper warning.

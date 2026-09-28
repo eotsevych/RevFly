@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import type { Tokens } from "@/lib/tokens";
-import { useSettingsContext } from "./SettingsContext";
+import { useSettingsContext } from "./useSettingsContext";
 import {
   fetchAudioData,
   triggerClearTranscriptionLogs,
@@ -10,6 +10,18 @@ import {
 interface LogsTabProps {
   t: Tokens;
   onOpenInAudioLab?: (audioFilename: string) => void;
+}
+
+/** Fields of a displayed log row that the chunk/action fallbacks read. */
+interface LogDisplayItem {
+  time: string;
+  model: string;
+  latency: string;
+  audioDurationSec: number;
+  vadTrimmedSec: number;
+  vadCutSec: number;
+  chunk_events: ChunkDiagnosticEvent[] | undefined;
+  action_logs: string[] | undefined;
 }
 
 export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
@@ -83,7 +95,7 @@ export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
     await refreshLogs();
   };
 
-  const getLogChunks = (log: any): ChunkDiagnosticEvent[] => {
+  const getLogChunks = (log: LogDisplayItem): ChunkDiagnosticEvent[] => {
     if (log.chunk_events && log.chunk_events.length > 0) {
       return log.chunk_events;
     }
@@ -134,7 +146,7 @@ export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
     ];
   };
 
-  const getLogActions = (log: any): string[] => {
+  const getLogActions = (log: LogDisplayItem): string[] => {
     if (log.action_logs && log.action_logs.length > 0) {
       return log.action_logs;
     }

@@ -2,7 +2,7 @@ import type { Tokens, AccentColor } from "@/lib/tokens";
 import { ACCENT_PALETTE } from "@/lib/tokens";
 import Segmented from "@/components/ui/Segmented";
 import { Section, Row } from "./SettingsPrimitives";
-import { useSettingsContext } from "./SettingsContext";
+import { useSettingsContext } from "./useSettingsContext";
 import { useResolvedTheme, type ThemeMode } from "@/lib/theme";
 
 interface Props {
