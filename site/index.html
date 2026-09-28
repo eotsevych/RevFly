@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RevFly · Private voice dictation &amp; translation</title>
+    <meta
+      name="description"
+      content="Hold a hotkey, speak, and RevFly types it into any app. Speech is transcribed on your computer, translated only when needed, and cleaned up automatically. Free and open source for macOS, Windows and Linux."
+    />
+    <meta property="og:title" content="RevFly · Private voice dictation & translation" />
+    <meta
+      property="og:description"
+      content="Local-first voice dictation with instant AI translation. Your audio never leaves your computer."
+    />
+    <meta property="og:image" content="https://eotsevych.github.io/RevFly/assets/icon.png" />
+    <meta property="og:type" content="website" />
+    <meta name="theme-color" content="#0b0b14" />
+    <link rel="icon" href="favicon.ico" />
+    <link rel="apple-touch-icon" href="assets/icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="nav">
+      <div class="wrap nav-inner">
+        <a class="brand" href="#top" aria-label="RevFly home">
+          <img src="assets/icon.png" alt="" width="32" height="32" />
+          <span>RevFly</span>
+        </a>
+        <nav class="nav-links" aria-label="Main">
+          <a href="#how">How it works</a>
+          <a href="#features">Features</a>
+          <a href="#privacy">Privacy</a>
+          <a href="#faq">FAQ</a>
+        </nav>
+        <div class="nav-actions">
+          <a class="btn btn-ghost btn-sm" href="https://github.com/eotsevych/RevFly" rel="noopener">
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            <span>GitHub</span>
+          </a>
+          <a class="btn btn-primary btn-sm" href="#download">Download</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="top">
+      <!-- Hero -->
+      <section class="hero">
+        <div class="wrap hero-grid">
+          <div class="hero-copy">
+            <p class="eyebrow">Free &amp; open source · macOS · Windows · Linux</p>
+            <h1>Speak in any language.<br /><span class="grad">Paste clean text anywhere.</span></h1>
+            <p class="lead">
+              Hold a hotkey and talk. RevFly transcribes on your own computer, translates only when you need
+              it, tidies up the text, and pastes it straight into the app you're typing in.
+            </p>
+            <div class="hero-ctas">
+              <a class="btn btn-primary btn-lg" id="hero-download" href="#download">
+                <span id="hero-download-label">Download RevFly</span>
+              </a>
+              <a class="btn btn-ghost btn-lg" href="#features">See all features</a>
+            </div>
+            <div class="install" role="group" aria-label="Install from the terminal (macOS)">
+              <div class="install-tabs" role="tablist">
+                <button role="tab" aria-selected="true" data-cmd="curl">Terminal</button>
+                <button role="tab" aria-selected="false" data-cmd="brew">Homebrew</button>
+              </div>
+              <div class="install-cmd">
+                <code id="install-code">curl -fsSL https://raw.githubusercontent.com/eotsevych/RevFly/main/scripts/install_mac.sh | bash</code>
+                <button class="copy" type="button" data-copy-target="install-code" aria-label="Copy command">Copy</button>
+              </div>
+              <p class="install-note">macOS one-liner: installs to Applications with no security prompt.</p>
+            </div>
+          </div>
+
+          <!-- Animated product demo: the voice pill over an app you type in -->
+          <div class="hero-demo" aria-hidden="true">
+            <div class="demo-window">
+              <div class="demo-titlebar">
+                <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                <span class="demo-title"># product-team</span>
+              </div>
+              <div class="demo-body">
+                <div class="msg">
+                  <div class="avatar a1">MK</div>
+                  <div>
+                    <p class="msg-name">Marta <span>10:42</span></p>
+                    <p class="msg-text">When can we show the new build to the client?</p>
+                  </div>
+                </div>
+                <div class="msg msg-me" id="demo-reply" hidden>
+                  <div class="avatar a2">You</div>
+                  <div>
+                    <p class="msg-name">You <span>10:43</span></p>
+                    <p class="msg-text" id="demo-reply-text"></p>
+                  </div>
+                </div>
+              </div>
+              <div class="demo-input">
+                <span id="demo-typed"></span><span class="caret"></span>
+                <span class="demo-placeholder" id="demo-placeholder">Message #product-team</span>
+              </div>
+            </div>
+
+            <div class="spoken" id="demo-spoken">
+              <span class="spoken-mic">🎙</span>
+              <span>«Можемо показати демо в четвер о третій, гаразд?»</span>
+            </div>
+
+            <div class="pill" id="demo-pill" data-state="listening">
+              <div class="pill-icon">
+                <span class="bars"><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="ring"></span>
+                <span class="check">✓</span>
+              </div>
+              <div class="pill-text">
+                <span class="pill-label" id="pill-label">Listening</span>
+                <span class="pill-sub" id="pill-sub">Hold ⌥ to talk</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Proof strip -->
+      <section class="strip" aria-label="Highlights">
+        <div class="wrap strip-grid">
+          <div><strong>0 bytes</strong><span>of audio uploaded</span></div>
+          <div><strong>In RAM</strong><span>speech never written to disk</span></div>
+          <div><strong>Any app</strong><span>Slack, Docs, VS Code, Terminal…</span></div>
+          <div><strong>MIT</strong><span>free and open source</span></div>
+        </div>
+      </section>
+
+      <!-- How it works -->
+      <section class="section" id="how">
+        <div class="wrap">
+          <p class="kicker">How it works</p>
+          <h2>From voice to finished text in one keypress</h2>
+          <ol class="steps">
+            <li>
+              <span class="step-n">1</span>
+              <h3>Hold your hotkey</h3>
+              <p>Right&nbsp;⌥ on a Mac, or any combo like Ctrl+Shift+Space. Release to finish, or tap once to toggle.</p>
+            </li>
+            <li>
+              <span class="step-n">2</span>
+              <h3>Transcribed on-device</h3>
+              <p>Silence is trimmed by Silero VAD, then Whisper or Parakeet turns speech into text locally, in memory.</p>
+            </li>
+            <li>
+              <span class="step-n">3</span>
+              <h3>Translated only if needed</h3>
+              <p>Already in your target language? Translation is skipped instantly with no network call at all.</p>
+            </li>
+            <li>
+              <span class="step-n">4</span>
+              <h3>Pasted where you type</h3>
+              <p>Clean, formatted text lands at your cursor with a simulated ⌘V / Ctrl+V, in any application.</p>
+            </li>
+          </ol>
+
+          <div class="pipeline" role="img" aria-label="Pipeline: microphone, voice activity detection, local speech recognition, language check, confidentiality masking, AI translation, auto-paste. If the speech is already in the target language, it skips straight to auto-paste.">
+            <div class="node">Microphone<small>16 kHz · RAM only</small></div>
+            <div class="node">Silero VAD<small>trim silence</small></div>
+            <div class="node">Speech-to-text<small>Whisper · Parakeet</small></div>
+            <div class="node node-branch">Language check<small>skip if already target</small></div>
+            <div class="node">Masking<small>hide secrets</small></div>
+            <div class="node">Translation<small>Gemini · local LLM</small></div>
+            <div class="node node-end">Auto-paste<small>+ local history</small></div>
+          </div>
+          <p class="pipeline-note"><span class="skip-badge">Instant skip</span> Same-language speech jumps from the language check straight to auto-paste.</p>
+        </div>
+      </section>
+
+      <!-- Features -->
+      <section class="section section-alt" id="features">
+        <div class="wrap">
+          <p class="kicker">Features</p>
+          <h2>Everything you need to talk instead of type</h2>
+          <div class="features">
+            <article class="card">
+              <div class="card-icon">⌨️</div>
+              <h3>Global hotkey &amp; hold-to-talk</h3>
+              <ul>
+                <li>Single modifier keys on macOS: Right ⌥ or Right ⌃</li>
+                <li>Any key combo on Windows and Linux</li>
+                <li>Hold-to-talk or tap-to-toggle</li>
+                <li><kbd>Esc</kbd> cancels recording or translation instantly</li>
+                <li>Subtle chimes on start and finish</li>
+              </ul>
+            </article>
+
+            <article class="card">
+              <div class="card-icon">🧠</div>
+              <h3>On-device speech recognition</h3>
+              <ul>
+                <li>Whisper models (Medium, Small, Base) via whisper.cpp, multilingual and offline</li>
+                <li>Parakeet TDT 0.6B for near-instant dictation on Apple Silicon</li>
+                <li>Import your own Whisper models</li>
+                <li>Models unload after idle time to free up RAM</li>
+              </ul>
+            </article>
+
+            <article class="card">
+              <div class="card-icon">〰️</div>
+              <h3>Voice activity detection</h3>
+              <ul>
+                <li>Silero VAD runs locally on ONNX Runtime</li>
+                <li>Strips silence and long pauses before recognition</li>
+                <li>400 ms safety margins keep whispers and soft consonants</li>
+                <li>Tunable chunking for long dictation</li>
+              </ul>
+            </article>
+
+            <article class="card">
+              <div class="card-icon">🌍</div>
+              <h3>Smart AI translation</h3>
+              <ul>
+                <li>Google Gemini for fast, fluent translation</li>
+                <li>Local LLMs through Ollama or LM Studio</li>
+                <li>Any OpenAI-compatible endpoint with your own prompt template</li>
+                <li>Instant skip for your target language and any languages you exclude</li>
+              </ul>
+            </article>
+
+            <article class="card">
+              <div class="card-icon">✨</div>
+              <h3>Automatic clean-up</h3>
+              <ul>
+                <li>Removes "um", "uh", stutters and repeated words</li>
+                <li>Formats numbers, currency, dates, times and URLs</li>
+                <li>Fixes spoken corrections for you</li>
+              </ul>
+              <div class="before-after">
+                <p><span>Said</span>"um so I think, sorry, I know it costs like a hundred dollars"</p>
+                <p><span>Pasted</span>I know it costs $100.</p>
+              </div>
+            </article>
+
+            <article class="card">
+              <div class="card-icon">🛡️</div>
+              <h3>Confidentiality guard</h3>
+              <ul>
+                <li>Masks names and project codenames before text reaches a cloud API</li>
+                <li>Detects emails, phone numbers and card numbers</li>
+                <li>Your choice of replacement, like <code>[CONFIDENTIAL]</code> or <code>***</code></li>
+              </ul>
+            </article>
+
+            <article class="card">
+              <div class="card-icon">💊</div>
+              <h3>Floating voice pill</h3>
+              <ul>
+                <li>Tiny always-on-top indicator, even over full-screen apps</li>
+                <li>Live equalizer while listening, then transcribing, translating and done</li>
+                <li>Shows the language direction, like <code>Auto → English</code></li>
+                <li>Drag it anywhere on screen</li>
+              </ul>
+            </article>
+
+            <article class="card">
+              <div class="card-icon">🗂️</div>
+              <h3>History you control</h3>
+              <ul>
+                <li>Text only (default), text + Opus audio, or private RAM-only mode</li>
+                <li>Automatic 500 MB cap and 30-day retention</li>
+                <li>Replay recordings and inspect every pipeline stage in Logs</li>
+              </ul>
+            </article>
+
+            <article class="card">
+              <div class="card-icon">⬆️</div>
+              <h3>Menu bar &amp; auto-updates</h3>
+              <ul>
+                <li>Switch microphone, output and translation mode from the tray</li>
+                <li>One-click updates with a notification when a new version is out</li>
+                <li>Light, dark and system themes</li>
+                <li>Audio Labs to test and compare recognition settings</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- Privacy -->
+      <section class="section" id="privacy">
+        <div class="wrap privacy-grid">
+          <div>
+            <p class="kicker">Privacy by design</p>
+            <h2>Your voice stays on your computer</h2>
+            <p class="lead-sm">
+              Audio is recorded straight into memory and recognized locally. No audio file is saved while you
+              speak, and nothing is uploaded. Only text is ever sent out, and only when you turn on a cloud
+              translation provider. Use a local LLM and nothing leaves your machine at all.
+            </p>
+          </div>
+          <div class="modes">
+            <div class="mode">
+              <h3>Text only <span class="tag">Default</span></h3>
+              <p>Keeps transcripts in a local SQLite database. No audio is stored.</p>
+            </div>
+            <div class="mode">
+              <h3>Text + audio</h3>
+              <p>Also keeps compact Opus recordings, so you can replay what you said.</p>
+            </div>
+            <div class="mode">
+              <h3>Private mode</h3>
+              <p>Everything stays in RAM. Nothing is written to disk, ever.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screenshot -->
+      <section class="section section-alt">
+        <div class="wrap">
+          <p class="kicker">Settings</p>
+          <h2>Tune every step, or never open it at all</h2>
+          <p class="lead-sm center">
+            Sensible defaults out of the box. When you want control: General, Theme, Translations, Storage, Logs
+            and Audio Labs.
+          </p>
+          <figure class="shot">
+            <div class="shot-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+            <img src="assets/settings.jpg" width="2000" height="1250" loading="lazy" alt="RevFly Settings window, General tab: permissions, updates, hotkey, microphone, output and idle timeout options" />
+          </figure>
+        </div>
+      </section>
+
+      <!-- Download -->
+      <section class="section" id="download">
+        <div class="wrap">
+          <p class="kicker">Download</p>
+          <h2>Free for macOS, Windows and Linux</h2>
+          <p class="lead-sm center">
+            <span id="release-version">Latest release</span> ·
+            <a href="https://github.com/eotsevych/RevFly/releases" rel="noopener">All releases</a> ·
+            <a href="https://github.com/eotsevych/RevFly/blob/main/INSTALL.md" rel="noopener">Install guide</a>
+          </p>
+          <div class="downloads">
+            <article class="dl" data-os="mac">
+              <h3>macOS</h3>
+              <p class="dl-req">macOS 11+ · Apple Silicon &amp; Intel</p>
+              <a class="btn btn-primary" data-asset="mac-dmg" href="https://github.com/eotsevych/RevFly/releases/latest">Download .dmg</a>
+              <p class="dl-alt">Or with no security prompt:</p>
+              <div class="mini-cmd"><code id="cmd-brew">brew install --cask eotsevych/tap/revfly</code><button class="copy" type="button" data-copy-target="cmd-brew" aria-label="Copy Homebrew command">Copy</button></div>
+            </article>
+            <article class="dl" data-os="windows">
+              <h3>Windows</h3>
+              <p class="dl-req">Windows 10 &amp; 11 · 64-bit</p>
+              <a class="btn btn-primary" data-asset="win-exe" href="https://github.com/eotsevych/RevFly/releases/latest">Download installer (.exe)</a>
+              <p class="dl-alt">Also available: <a data-asset="win-msi" href="https://github.com/eotsevych/RevFly/releases/latest">.msi package</a></p>
+            </article>
+            <article class="dl" data-os="linux">
+              <h3>Linux</h3>
+              <p class="dl-req">Ubuntu 24.04+, Debian 13+, Fedora 40+</p>
+              <a class="btn btn-primary" data-asset="linux-appimage" href="https://github.com/eotsevych/RevFly/releases/latest">Download AppImage</a>
+              <p class="dl-alt">Also: <a data-asset="linux-deb" href="https://github.com/eotsevych/RevFly/releases/latest">.deb</a> · <a data-asset="linux-rpm" href="https://github.com/eotsevych/RevFly/releases/latest">.rpm</a></p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- FAQ -->
+      <section class="section section-alt" id="faq">
+        <div class="wrap narrow">
+          <p class="kicker">FAQ</p>
+          <h2>Questions</h2>
+          <details>
+            <summary>Is RevFly really free?</summary>
+            <p>Yes. It's open source under the MIT license, with no account, subscription or usage limits. Cloud translation with Gemini uses your own API key; local models cost nothing.</p>
+          </details>
+          <details>
+            <summary>Does my audio ever leave my computer?</summary>
+            <p>No. Recording and speech recognition happen locally, in memory. If you enable cloud translation, only the recognized text is sent, after the confidentiality guard has masked anything sensitive. With a local LLM, nothing leaves your machine.</p>
+          </details>
+          <details>
+            <summary>Which languages does it understand?</summary>
+            <p>Whisper models recognize dozens of languages offline. Translation works between any languages your chosen provider supports, and speech that's already in your target language is pasted as-is without translating.</p>
+          </details>
+          <details>
+            <summary>Why does my computer warn me when I open it?</summary>
+            <p>RevFly isn't signed with a paid Apple or Microsoft certificate yet, so macOS and Windows show a one-time warning for downloads from a browser. The Terminal one-liner and Homebrew avoid it on Mac; the <a href="https://github.com/eotsevych/RevFly/blob/main/INSTALL.md" rel="noopener">install guide</a> shows how to allow it otherwise. Updates install from inside the app without the warning.</p>
+          </details>
+          <details>
+            <summary>Which apps does it work with?</summary>
+            <p>Any app with a text cursor: Slack, Telegram, WhatsApp, VS Code, Google Docs, Chrome, Terminal and more. RevFly pastes with the normal ⌘V / Ctrl+V shortcut. On Linux, an X11 session works best.</p>
+          </details>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="wrap footer-inner">
+        <div class="brand brand-sm">
+          <img src="assets/icon.png" alt="" width="24" height="24" />
+          <span>RevFly</span>
+        </div>
+        <p>MIT License · Made for people who'd rather talk than type.</p>
+        <nav aria-label="Footer">
+          <a href="https://github.com/eotsevych/RevFly" rel="noopener">GitHub</a>
+          <a href="https://github.com/eotsevych/RevFly/blob/main/INSTALL.md" rel="noopener">Install guide</a>
+          <a href="https://github.com/eotsevych/RevFly/releases" rel="noopener">Releases</a>
+          <a href="https://github.com/eotsevych/RevFly/issues" rel="noopener">Report an issue</a>
+        </nav>
+      </div>
+    </footer>
+
+    <script src="main.js" defer></script>
+  </body>
+</html>

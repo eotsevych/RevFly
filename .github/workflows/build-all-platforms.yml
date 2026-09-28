@@ -6,7 +6,10 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+    # Website-only changes do not need app builds (see pages.yml).
+    paths-ignore: ['site/**', '.github/workflows/pages.yml']
   pull_request:
+    paths-ignore: ['site/**', '.github/workflows/pages.yml']
   workflow_dispatch:
 
 permissions:
@@ -89,6 +92,8 @@ jobs:
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           security import "$RUNNER_TEMP/revfly-signing.p12" -k "$KEYCHAIN" -P "$MACOS_SIGNING_P12_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          # codesign only finds the private key in keychains on the user search list.
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
           rm -f "$RUNNER_TEMP/revfly-signing.p12"
           echo "REVFLY_SIGN_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
 

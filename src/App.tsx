@@ -77,8 +77,6 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 
 function checkIsPreferences(): boolean {
   if (typeof window === "undefined") return false;
-  // The browser demo on GitHub Pages opens straight into Settings.
-  if (import.meta.env["VITE_WEB_DEMO"] === "true") return true;
   if (window.location.hash === "#preferences" || window.location.href.includes("preferences")) {
     return true;
   }

@@ -1,10 +1,10 @@
-name: Deploy Web Demo (GitHub Pages)
+name: Deploy Website (GitHub Pages)
 
-# Publishes the Settings UI as a browser demo (mock data, no desktop backend)
-# at https://<owner>.github.io/<repo>/ on every push to main.
+# Publishes the static product site in site/ to https://<owner>.github.io/<repo>/.
 on:
   push:
     branches: [main]
+    paths: ["site/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Build and deploy web demo
+    name: Deploy site
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -27,22 +27,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Install frontend dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Build web demo
-        env:
-          VITE_BASE: /${{ github.event.repository.name }}/
-          VITE_WEB_DEMO: "true"
-        run: bun run build
-
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: site
 
       - name: Deploy to GitHub Pages
         id: deployment
