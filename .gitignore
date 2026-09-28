@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Python virtualenvs & cache
+venv/
+**/venv/
+.venv/
+**/.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# Rust / Tauri builds
+target/
+**/target/
+src-tauri/target/
+**/src-tauri/target/
+
+# App bundles & binary builds
+*.app/
+*.dmg
+/installers/
+dist/
+**/dist/
+dist-ssr/
+**/dist-ssr/
+build_deps/
+
+# Temp & logs
+.env*
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.output
+.vinxi
+.tanstack/**
+.nitro
+*.local
+.wrangler/
+.dev.vars
+
+# OS & IDE
+.ct-uploads/
+.DS_Store
+**/.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

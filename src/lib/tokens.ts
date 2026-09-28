@@ -1,0 +1,108 @@
+export type Theme = "dark" | "light";
+export type AccentColor = "violet" | "cyan" | "rose" | "amber" | "emerald" | "sky";
+
+export const ACCENT_PALETTE: Record<AccentColor, { primary: string; glow: string; label: string }> =
+  {
+    violet: { primary: "#7c6fff", glow: "rgba(124,111,255,0.35)", label: "Violet" },
+    cyan: { primary: "#00d4ff", glow: "rgba(0,212,255,0.3)", label: "Cyan" },
+    rose: { primary: "#ff5f87", glow: "rgba(255,95,135,0.3)", label: "Rose" },
+    amber: { primary: "#ffb340", glow: "rgba(255,179,64,0.3)", label: "Amber" },
+    emerald: { primary: "#00e5a0", glow: "rgba(0,229,160,0.3)", label: "Emerald" },
+    sky: { primary: "#38bdf8", glow: "rgba(56,189,248,0.3)", label: "Sky" },
+  };
+
+export function tok(theme: Theme, accentKey: AccentColor = "violet") {
+  const accent = ACCENT_PALETTE[accentKey]?.primary ?? ACCENT_PALETTE.violet.primary;
+  const accentGlow = ACCENT_PALETTE[accentKey]?.glow ?? ACCENT_PALETTE.violet.glow;
+
+  if (theme === "dark")
+    return {
+      accent,
+      accentGlow,
+      bg: "#06060f",
+      bgGlow1: `${accent}11`,
+      bgGlow2: "rgba(0,212,255,0.05)",
+      pillBg: "linear-gradient(135deg, #111120 0%, #0d0d1e 100%)",
+      pillBorder: "rgba(255,255,255,0.08)",
+      pillInset: "rgba(255,255,255,0.04)",
+      text: "#ffffff",
+      textMuted: "rgba(255,255,255,0.72)",
+      textDim: "rgba(255,255,255,0.52)",
+      label: "rgba(255,255,255,0.70)",
+      surface: "rgba(255,255,255,0.04)",
+      surfaceHover: "rgba(255,255,255,0.08)",
+      surfaceActive: "rgba(255,255,255,0.11)",
+      border: "rgba(255,255,255,0.07)",
+      borderFocus: `${accent}80`,
+      stepTrack: "rgba(255,255,255,0.1)",
+      stepDone: "rgba(255,255,255,0.06)",
+      modalBg: "#0f0f1f",
+      modalBorder: "rgba(255,255,255,0.08)",
+      inputBg: "rgba(255,255,255,0.04)",
+      inputBorder: "rgba(255,255,255,0.1)",
+      inputText: "#ffffff",
+      dangerBg: "rgba(255,60,80,0.08)",
+      dangerBorder: "rgba(255,60,80,0.3)",
+      dangerText: "#ff5f7a",
+      shadow: "0 20px 40px rgba(0,0,0,0.5)",
+      pillShadow: "0 4px 12px rgba(0,0,0,0.3)",
+      scanShimmer: "rgba(0,212,255,0.12)",
+      transcribeBg: "rgba(255,255,255,0.04)",
+      transcribeBr: "rgba(255,255,255,0.07)",
+      sidebarBg: "#0a0a18",
+      sidebarBorder: "rgba(255,255,255,0.06)",
+      activeSidebar: `${accent}18`,
+      metricBg: "rgba(255,255,255,0.03)",
+      successColor: "#00e5a0",
+      warnColor: "#ffb340",
+      errorColor: "#ff5f7a",
+      badgeBg: "rgba(255,255,255,0.03)",
+      badgeBorder: "rgba(255,255,255,0.06)",
+    } as const;
+
+  return {
+    accent,
+    accentGlow,
+    bg: "#eeeef5",
+    bgGlow1: `${accent}0d`,
+    bgGlow2: "rgba(0,212,255,0.05)",
+    pillBg: "linear-gradient(135deg, #ffffff 0%, #f7f6ff 100%)",
+    pillBorder: "rgba(0,0,0,0.08)",
+    pillInset: "rgba(255,255,255,0.85)",
+    text: "#000000",
+    textMuted: "#262626",
+    textDim: "#404040",
+    label: "#1a1a1a",
+    surface: "rgba(0,0,0,0.04)",
+    surfaceHover: "rgba(0,0,0,0.07)",
+    surfaceActive: "rgba(0,0,0,0.10)",
+    border: "rgba(0,0,0,0.12)",
+    borderFocus: `${accent}80`,
+    stepTrack: "rgba(0,0,0,0.1)",
+    stepDone: `${accent}18`,
+    modalBg: "#ffffff",
+    modalBorder: "rgba(0,0,0,0.08)",
+    inputBg: "rgba(0,0,0,0.03)",
+    inputBorder: "rgba(0,0,0,0.16)",
+    inputText: "#000000",
+    dangerBg: "rgba(220,30,50,0.06)",
+    dangerBorder: "rgba(220,30,50,0.25)",
+    dangerText: "#cc2840",
+    shadow: "0 20px 60px rgba(0,0,0,0.12)",
+    pillShadow: "0 8px 32px rgba(0,0,0,0.08)",
+    scanShimmer: "rgba(0,150,200,0.10)",
+    transcribeBg: "rgba(0,0,0,0.04)",
+    transcribeBr: "rgba(0,0,0,0.08)",
+    sidebarBg: "#f5f4fc",
+    sidebarBorder: "rgba(0,0,0,0.06)",
+    activeSidebar: `${accent}18`,
+    metricBg: "rgba(0,0,0,0.03)",
+    successColor: "#00a86b",
+    warnColor: "#c97a00",
+    errorColor: "#cc2840",
+    badgeBg: "rgba(0,0,0,0.04)",
+    badgeBorder: "rgba(0,0,0,0.07)",
+  } as const;
+}
+
+export type Tokens = ReturnType<typeof tok>;
