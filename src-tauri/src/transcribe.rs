@@ -322,6 +322,8 @@ impl Transcriber {
         }
 
         file.flush().map_err(|e| e.to_string())?;
+        // Close the file first: Windows refuses to rename a file that is still open.
+        drop(file);
         fs::rename(&temp_path, &model_path)
             .map_err(|e| format!("Failed to finalize model file: {}", e))?;
 

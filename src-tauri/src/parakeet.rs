@@ -170,6 +170,8 @@ impl ParakeetTranscriber {
             }
 
             file.flush().map_err(|e| e.to_string())?;
+            // Close the file first: Windows refuses to rename a file that is still open.
+            drop(file);
             fs::rename(&temp_path, &file_path)
                 .map_err(|e| format!("Rename failed for {}: {}", filename, e))?;
         }

@@ -126,10 +126,11 @@ pub fn spawn_initial_download(app: &AppHandle, model_name: String) {
             Ok(_) => notify(&app, "RevFly is ready", "Press your hotkey and start talking."),
             Err(e) => {
                 log::error!("Initial model download failed: {}", e);
+                let reason: String = e.chars().take(140).collect();
                 notify(
                     &app,
                     "Speech model download failed",
-                    "RevFly will try again the next time you record. Check your internet connection.",
+                    &format!("{}. RevFly will try again the next time you record.", reason),
                 );
             }
         }
