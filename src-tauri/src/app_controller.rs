@@ -223,57 +223,52 @@ fn show_main_window(app_handle: &AppHandle, settings: &AppSettings) {
 
             let _ = win.show();
             let _ = win.set_shadow(false);
-
-            #[cfg(target_os = "macos")]
-            unsafe {
-                use std::ffi::c_void;
-                #[link(name = "AppKit", kind = "framework")]
-                extern "C" {
-                    fn objc_msgSend(receiver: *mut c_void, sel: *const c_void, ...) -> *mut c_void;
-                    fn sel_registerName(str: *const u8) -> *const c_void;
-                    fn objc_getClass(str: *const u8) -> *mut c_void;
-                }
-                extern "C" {
-                    fn object_setClass(obj: *mut c_void, cls: *mut c_void) -> *mut c_void;
-                }
-
-                if let Ok(ns_win) = win.ns_window() {
-                    let ptr = ns_win as *mut c_void;
-
-                    // 1. Swizzle to NSPanel so macOS WindowServer allows displaying over full-screen apps
-                    let panel_cls = objc_getClass(b"NSPanel\0".as_ptr());
-                    if !panel_cls.is_null() {
-                        object_setClass(ptr, panel_cls);
-                    }
-
-                    // 2. Set isFloatingPanel = true
-                    let sel_floating = sel_registerName(b"setFloatingPanel:\0".as_ptr());
-                    let _ = objc_msgSend(ptr, sel_floating, 1);
-
-                    // 3. Set styleMask to include NSWindowStyleMaskNonactivatingPanel (128)
-                    let sel_style = sel_registerName(b"styleMask\0".as_ptr());
-                    let sel_set_style = sel_registerName(b"setStyleMask:\0".as_ptr());
-                    let current_style = objc_msgSend(ptr, sel_style) as usize;
-                    let non_activating_mask: usize = 1 << 7;
-                    let _ = objc_msgSend(ptr, sel_set_style, current_style | non_activating_mask);
-
-                    // 4. NSWindowCollectionBehaviorCanJoinAllSpaces (1) | NSWindowCollectionBehaviorFullScreenAuxiliary (256) | NSWindowCollectionBehaviorIgnoresCycle (64)
-                    let sel_cb = sel_registerName(b"setCollectionBehavior:\0".as_ptr());
-                    let behavior: usize = (1 << 0) | (1 << 8) | (1 << 6);
-                    let _ = objc_msgSend(ptr, sel_cb, behavior);
-
-                    // 5. NSScreenSaverWindowLevel (1000) floats directly above full-screen and active apps
-                    let sel_level = sel_registerName(b"setLevel:\0".as_ptr());
-                    let level: isize = 1000;
-                    let _ = objc_msgSend(ptr, sel_level, level);
-
-                    // 6. orderFrontRegardless: displays on the active Space immediately without stealing keyboard focus!
-                    let sel_order = sel_registerName(b"orderFrontRegardless\0".as_ptr());
-                    let _ = objc_msgSend(ptr, sel_order);
-                }
-            }
+            apply_pill_window_behavior(&win, true);
         }
     });
+}
+
+/// Makes the voice pill float above full-screen apps on every Space without taking keyboard focus,
+/// so the paste lands in the app the user was typing in.
+///
+/// The window must stay the NSWindow subclass tao created: swapping its class (e.g. to NSPanel) breaks
+/// WebKit's KVO observers and aborts the app on macOS 27 when the view hierarchy is rebuilt.
+pub(crate) fn apply_pill_window_behavior(win: &tauri::WebviewWindow, order_front: bool) {
+    let _ = win.set_focusable(false);
+
+    #[cfg(target_os = "macos")]
+    unsafe {
+        use std::ffi::c_void;
+        #[link(name = "AppKit", kind = "framework")]
+        extern "C" {
+            fn objc_msgSend(receiver: *mut c_void, sel: *const c_void, ...) -> *mut c_void;
+            fn sel_registerName(str: *const u8) -> *const c_void;
+        }
+
+        // objc_msgSend must be called through a non-variadic signature: on Apple Silicon variadic
+        // arguments go on the stack, but the callee reads them from registers.
+        let send_usize: extern "C" fn(*mut c_void, *const c_void, usize) =
+            std::mem::transmute(objc_msgSend as *const ());
+        let send_isize: extern "C" fn(*mut c_void, *const c_void, isize) =
+            std::mem::transmute(objc_msgSend as *const ());
+        let send: extern "C" fn(*mut c_void, *const c_void) = std::mem::transmute(objc_msgSend as *const ());
+
+        if let Ok(ns_win) = win.ns_window() {
+            let ptr = ns_win as *mut c_void;
+
+            // NSWindowCollectionBehaviorCanJoinAllSpaces (1) | IgnoresCycle (64) | FullScreenAuxiliary (256)
+            let behavior: usize = (1 << 0) | (1 << 6) | (1 << 8);
+            send_usize(ptr, sel_registerName(b"setCollectionBehavior:\0".as_ptr()), behavior);
+
+            // NSScreenSaverWindowLevel (1000) floats directly above full-screen and active apps
+            send_isize(ptr, sel_registerName(b"setLevel:\0".as_ptr()), 1000);
+
+            if order_front {
+                // Shows on the active Space immediately without activating RevFly
+                send(ptr, sel_registerName(b"orderFrontRegardless\0".as_ptr()));
+            }
+        }
+    }
 }
 
 pub struct AppController {

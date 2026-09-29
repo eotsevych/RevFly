@@ -391,51 +391,7 @@ pub fn run() {
                 }
 
                 let _ = win.set_shadow(false);
-
-                #[cfg(target_os = "macos")]
-                unsafe {
-                    use std::ffi::c_void;
-                    #[link(name = "AppKit", kind = "framework")]
-                    extern "C" {
-                        fn objc_msgSend(receiver: *mut c_void, sel: *const c_void, ...) -> *mut c_void;
-                        fn sel_registerName(str: *const u8) -> *const c_void;
-                        fn objc_getClass(str: *const u8) -> *mut c_void;
-                    }
-                    extern "C" {
-                        fn object_setClass(obj: *mut c_void, cls: *mut c_void) -> *mut c_void;
-                    }
-
-                    if let Ok(ns_win) = win.ns_window() {
-                        let ptr = ns_win as *mut c_void;
-
-                        // 1. Swizzle to NSPanel so macOS WindowServer allows displaying over full-screen apps
-                        let panel_cls = objc_getClass(b"NSPanel\0".as_ptr());
-                        if !panel_cls.is_null() {
-                            object_setClass(ptr, panel_cls);
-                        }
-
-                        // 2. Set isFloatingPanel = true
-                        let sel_floating = sel_registerName(b"setFloatingPanel:\0".as_ptr());
-                        let _ = objc_msgSend(ptr, sel_floating, 1);
-
-                        // 3. Set styleMask to include NSWindowStyleMaskNonactivatingPanel (128)
-                        let sel_style = sel_registerName(b"styleMask\0".as_ptr());
-                        let sel_set_style = sel_registerName(b"setStyleMask:\0".as_ptr());
-                        let current_style = objc_msgSend(ptr, sel_style) as usize;
-                        let non_activating_mask: usize = 1 << 7;
-                        let _ = objc_msgSend(ptr, sel_set_style, current_style | non_activating_mask);
-
-                        // 4. NSWindowCollectionBehaviorCanJoinAllSpaces (1) | NSWindowCollectionBehaviorFullScreenAuxiliary (256) | NSWindowCollectionBehaviorIgnoresCycle (64)
-                        let sel_cb = sel_registerName(b"setCollectionBehavior:\0".as_ptr());
-                        let behavior: usize = (1 << 0) | (1 << 8) | (1 << 6);
-                        let _ = objc_msgSend(ptr, sel_cb, behavior);
-
-                        // 5. NSScreenSaverWindowLevel (1000) floats directly above full-screen and active apps
-                        let sel_level = sel_registerName(b"setLevel:\0".as_ptr());
-                        let level: isize = 1000;
-                        let _ = objc_msgSend(ptr, sel_level, level);
-                    }
-                }
+                app_controller::apply_pill_window_behavior(&win, false);
             }
 
             let key_listener = global_key_listener::start_global_key_listener(
