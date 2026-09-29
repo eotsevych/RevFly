@@ -114,7 +114,19 @@ make_dmg() {
   local out_desktop="$DESKTOP_DIR/$dmg_name"
 
   rm -f "$out_installers" "$out_desktop"
-  hdiutil create -volname "$vol_name" -srcfolder "$stage_dir" -ov -format UDZO "$out_installers" > /dev/null
+  # hdiutil intermittently fails with "Resource busy" (e.g. on CI runners), so retry a few times.
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if hdiutil create -volname "$vol_name" -srcfolder "$stage_dir" -ov -format UDZO "$out_installers" > /dev/null; then
+      break
+    fi
+    if [ "$attempt" -eq 5 ]; then
+      echo "❌ hdiutil create failed for $dmg_name after $attempt attempts" >&2
+      exit 1
+    fi
+    echo "⚠️  hdiutil create failed for $dmg_name (attempt $attempt), retrying..." >&2
+    sleep $((attempt * 5))
+  done
   rm -rf "$stage_dir"
 
   revfly_sign_dmg "$out_installers"
