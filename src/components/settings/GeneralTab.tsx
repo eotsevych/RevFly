@@ -975,59 +975,76 @@ export default function GeneralTab({ t }: { t: Tokens }) {
       {/* ── Audio Chunking & VAD ── */}
       <Section title="Audio Chunking & VAD" t={t}>
         <Row
-          label="Pause detection trigger"
-          hint="Silence duration that cuts a speech chunk cleanly (default 500 ms)"
+          label="Audio chunking"
+          hint="Off: each recording is kept and transcribed as one whole track"
           t={t}
+          last={!settings.audio_chunking}
         >
-          <Segmented
-            options={[
-              { value: "300", label: "300 ms" },
-              { value: "500", label: "500 ms" },
-              { value: "700", label: "700 ms" },
-              { value: "1000", label: "1 s" },
-            ]}
-            value={String(settings.chunk_pause_ms ?? 500)}
-            onChange={(v) => updateSettings({ chunk_pause_ms: Number(v) })}
-            t={t}
+          <Toggle
+            value={settings.audio_chunking ?? false}
+            onChange={(v) => updateSettings({ audio_chunking: v })}
+            accent={t.accent}
           />
         </Row>
 
-        <Row
-          label="Safety cut limit"
-          hint="Maximum continuous speech length before forcing a chunk cut (default 10 s)"
-          t={t}
-        >
-          <Segmented
-            options={[
-              { value: "5", label: "5 s" },
-              { value: "8", label: "8 s" },
-              { value: "10", label: "10 s" },
-              { value: "15", label: "15 s" },
-            ]}
-            value={String(settings.chunk_safety_sec ?? 10)}
-            onChange={(v) => updateSettings({ chunk_safety_sec: Number(v) })}
-            t={t}
-          />
-        </Row>
+        {settings.audio_chunking && (
+          <>
+            <Row
+              label="Pause detection trigger"
+              hint="Silence duration that cuts a speech chunk cleanly (default 500 ms)"
+              t={t}
+            >
+              <Segmented
+                options={[
+                  { value: "300", label: "300 ms" },
+                  { value: "500", label: "500 ms" },
+                  { value: "700", label: "700 ms" },
+                  { value: "1000", label: "1 s" },
+                ]}
+                value={String(settings.chunk_pause_ms ?? 500)}
+                onChange={(v) => updateSettings({ chunk_pause_ms: Number(v) })}
+                t={t}
+              />
+            </Row>
 
-        <Row
-          label="Safety cut overlap"
-          hint="Audio slice preserved across forced cuts to prevent severed words (default 400 ms)"
-          t={t}
-          last
-        >
-          <Segmented
-            options={[
-              { value: "200", label: "200 ms" },
-              { value: "300", label: "300 ms" },
-              { value: "400", label: "400 ms" },
-              { value: "500", label: "500 ms" },
-            ]}
-            value={String(settings.chunk_overlap_ms ?? 400)}
-            onChange={(v) => updateSettings({ chunk_overlap_ms: Number(v) })}
-            t={t}
-          />
-        </Row>
+            <Row
+              label="Safety cut limit"
+              hint="Maximum continuous speech length before forcing a chunk cut (default 10 s)"
+              t={t}
+            >
+              <Segmented
+                options={[
+                  { value: "5", label: "5 s" },
+                  { value: "8", label: "8 s" },
+                  { value: "10", label: "10 s" },
+                  { value: "15", label: "15 s" },
+                ]}
+                value={String(settings.chunk_safety_sec ?? 10)}
+                onChange={(v) => updateSettings({ chunk_safety_sec: Number(v) })}
+                t={t}
+              />
+            </Row>
+
+            <Row
+              label="Safety cut overlap"
+              hint="Audio slice preserved across forced cuts to prevent severed words (default 400 ms)"
+              t={t}
+              last
+            >
+              <Segmented
+                options={[
+                  { value: "200", label: "200 ms" },
+                  { value: "300", label: "300 ms" },
+                  { value: "400", label: "400 ms" },
+                  { value: "500", label: "500 ms" },
+                ]}
+                value={String(settings.chunk_overlap_ms ?? 400)}
+                onChange={(v) => updateSettings({ chunk_overlap_ms: Number(v) })}
+                t={t}
+              />
+            </Row>
+          </>
+        )}
       </Section>
 
       {/* ── Post-Processing & Formatting (LLM-Friendly) ── */}

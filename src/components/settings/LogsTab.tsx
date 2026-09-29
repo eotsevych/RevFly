@@ -21,6 +21,7 @@ interface LogDisplayItem {
   vadTrimmedSec: number;
   vadCutSec: number;
   chunk_events: ChunkDiagnosticEvent[] | undefined;
+  whole_track: boolean | undefined;
   action_logs: string[] | undefined;
 }
 
@@ -96,6 +97,7 @@ export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
   };
 
   const getLogChunks = (log: LogDisplayItem): ChunkDiagnosticEvent[] => {
+    if (log.whole_track) return [];
     if (log.chunk_events && log.chunk_events.length > 0) {
       return log.chunk_events;
     }
@@ -181,6 +183,7 @@ export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
         vadCutSec: l.vad_silence_removed_sec,
         gpuMetalActive: l.gpu_metal_active,
         chunk_events: l.chunk_events,
+        whole_track: l.whole_track,
         action_logs: l.action_logs,
       }))
     : [];
@@ -390,7 +393,9 @@ export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
                         fontFamily: "JetBrains Mono, monospace",
                       }}
                     >
-                      {chunks.length} {chunks.length === 1 ? "chunk" : "chunks"}
+                      {log.whole_track
+                        ? "whole track"
+                        : `${chunks.length} ${chunks.length === 1 ? "chunk" : "chunks"}`}
                     </span>
                   </div>
 
@@ -511,7 +516,9 @@ export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
                           margin: "0 0 8px",
                         }}
                       >
-                        📦 Chunk Creation Details ({chunks.length} Created During Recording):
+                        {log.whole_track
+                          ? "🎧 Whole Track: chunking off, recorded and transcribed as one continuous track"
+                          : `📦 Chunk Creation Details (${chunks.length} Created During Recording):`}
                       </p>
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                         {chunks.map((ch) => (

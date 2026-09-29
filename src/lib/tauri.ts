@@ -37,6 +37,7 @@ export interface BackendSettings {
   chunk_pause_ms?: number;
   chunk_safety_sec?: number;
   chunk_overlap_ms?: number;
+  audio_chunking?: boolean;
   gemini_model?: string;
   mask_confidential?: boolean;
   mask_words?: string;
@@ -422,6 +423,7 @@ export interface TranscriptionDiagnosticLog {
   whisper_raw_output?: string | null;
   segments_count?: number;
   chunk_events?: ChunkDiagnosticEvent[];
+  whole_track?: boolean;
   action_logs?: string[];
 }
 

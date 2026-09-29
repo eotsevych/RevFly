@@ -276,6 +276,29 @@ pub(crate) fn apply_pill_window_behavior(win: &tauri::WebviewWindow, order_front
 
 /// True when a recording carries no signal at all. A live microphone always has some noise floor, so
 /// this means the OS blocked or muted the input (e.g. Windows microphone privacy settings).
+/// Simulated chunk events, or none when chunking is off and the recording went to the model whole.
+fn chunk_diagnostics(
+    chunking: bool,
+    total_audio_sec: f32,
+    vad_trimmed_sec: f32,
+    silence_removed_sec: f32,
+    raw_samples_count: usize,
+) -> (Vec<crate::pipeline_logger::ChunkDiagnosticEvent>, Vec<String>) {
+    if chunking {
+        crate::pipeline_logger::generate_chunk_diagnostics(total_audio_sec, vad_trimmed_sec, silence_removed_sec, raw_samples_count)
+    } else {
+        let actions = crate::pipeline_logger::whole_track_diagnostics(total_audio_sec, vad_trimmed_sec, silence_removed_sec, raw_samples_count);
+        (Vec::new(), actions)
+    }
+}
+
+/// Whole recording of this session for the log's playback and Second Try; none in private mode.
+fn session_audio_filename(data_dir: &std::path::Path, storage_mode: &str, audio: &crate::audio::CapturedAudio) -> Option<String> {
+    let private = storage_mode == "private" || storage_mode == "private_mode";
+    let saved = if private { None } else { crate::pipeline_logger::save_session_audio(data_dir, audio) };
+    saved.or_else(|| Some("latest_recording.wav".to_string()))
+}
+
 fn is_digital_silence(samples: &[f32]) -> bool {
     samples.iter().all(|s| s.abs() < 1e-4)
 }
@@ -1179,7 +1202,8 @@ impl AppController {
             crate::tray::update_tray_model_status(&app_handle, true);
 
             if raw_text.is_empty() || raw_text == "[BLANK_AUDIO]" {
-                let (chunks, mut actions) = crate::pipeline_logger::generate_chunk_diagnostics(
+                let (chunks, mut actions) = chunk_diagnostics(
+                    settings.audio_chunking,
                     duration_sec,
                     vad_res.trimmed_duration_sec,
                     vad_res.silence_removed_sec,
@@ -1210,11 +1234,12 @@ impl AppController {
                     clipboard_paste_ms: 0,
                     history_save_ms: 0,
                     total_pipeline_ms: pipeline_start.elapsed().as_millis() as u64,
-                    audio_filename: Some("latest_recording.wav".to_string()),
+                    audio_filename: session_audio_filename(&data_dir, &settings.storage_mode, &captured),
                     vad_audio_filename: Some("latest_vad_trimmed.wav".to_string()),
                     whisper_raw_output: Some(whisper_raw_output.clone()),
                     segments_count,
                     chunk_events: chunks,
+                    whole_track: !settings.audio_chunking,
                     action_logs: actions,
                 };
                 pipeline_logger_arc.add_log(empty_log.clone(), &data_dir);
@@ -1667,7 +1692,8 @@ impl AppController {
             };
             log_stage_event(&data_dir, "COMPLETE", &format!("Pipeline complete in {} ms! Speed factor: {:.1}x", total_pipeline_ms, speed_factor));
 
-            let (chunks, mut actions) = crate::pipeline_logger::generate_chunk_diagnostics(
+            let (chunks, mut actions) = chunk_diagnostics(
+                    settings.audio_chunking,
                 duration_sec,
                 vad_res.trimmed_duration_sec,
                 vad_res.silence_removed_sec,
@@ -1706,11 +1732,12 @@ impl AppController {
                 clipboard_paste_ms: paste_ms,
                 history_save_ms: history_ms,
                 total_pipeline_ms,
-                audio_filename: Some("latest_recording.wav".to_string()),
+                audio_filename: session_audio_filename(&data_dir, &settings.storage_mode, &captured),
                 vad_audio_filename: Some("latest_vad_trimmed.wav".to_string()),
                 whisper_raw_output: Some(whisper_raw_output),
                 segments_count,
                 chunk_events: chunks,
+                whole_track: !settings.audio_chunking,
                 action_logs: actions,
             };
 
