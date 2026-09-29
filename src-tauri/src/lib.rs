@@ -17,6 +17,7 @@ pub mod updater;
 pub mod vad;
 pub mod parakeet;
 pub mod lab;
+pub mod leveler;
 pub mod model_download;
 pub mod sound;
 pub mod vitals;

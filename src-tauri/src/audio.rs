@@ -253,9 +253,42 @@ enum AudioCmd {
         reply: Sender<Result<(), String>>,
     },
     Stop {
-        reply: Sender<Vec<f32>>,
+        reply: Sender<CapturedAudio>,
     },
     Cancel,
+}
+
+/// One finished recording.
+pub struct CapturedAudio {
+    /// Leveled 16 kHz mono: what VAD and the speech models get.
+    pub speech: Vec<f32>,
+    /// Unleveled mono at the microphone's own rate, kept for playback quality.
+    native: Vec<f32>,
+    native_rate: u32,
+    plan: crate::leveler::LevelPlan,
+}
+
+impl CapturedAudio {
+    fn new(speech_raw: Vec<f32>, native: Vec<f32>, native_rate: u32) -> Self {
+        let (speech, plan) = crate::leveler::level(&speech_raw, 16000);
+        Self { speech, native, native_rate, plan }
+    }
+
+    pub fn empty() -> Self {
+        Self { speech: Vec::new(), native: Vec::new(), native_rate: 16000, plan: Default::default() }
+    }
+
+    pub fn level_plan(&self) -> crate::leveler::LevelPlan {
+        self.plan
+    }
+
+    /// Leveled mono at the microphone's own rate, and that rate, for history playback.
+    pub fn playback(&self) -> (Vec<f32>, u32) {
+        if self.native.is_empty() {
+            return (self.speech.clone(), 16000);
+        }
+        (crate::leveler::apply(&self.native, self.native_rate, self.plan), self.native_rate)
+    }
 }
 
 pub struct AudioRecorder {
@@ -277,12 +310,17 @@ impl AudioRecorder {
         thread::spawn(move || {
             let mut active_stream: Option<cpal::Stream> = None;
             let buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
+            let native_buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
+            let mut native_rate = 16000;
 
             while let Ok(cmd) = cmd_rx.recv() {
                 match cmd {
                     AudioCmd::Start { app_handle, device_name, reply } => {
                         stop_mic_test();
                         if let Ok(mut b) = buffer.lock() {
+                            b.clear();
+                        }
+                        if let Ok(mut b) = native_buffer.lock() {
                             b.clear();
                         }
                         if let Ok(mut s) = stop_at_thread.lock() {
@@ -296,18 +334,25 @@ impl AudioRecorder {
                         let res = start_stream_inner(
                             &mut active_stream,
                             Arc::clone(&buffer),
+                            Arc::clone(&native_buffer),
                             Arc::clone(&is_rec_thread),
                             Arc::clone(&stop_at_thread),
                             app_handle,
                             device_name,
                         );
 
-                        if res.is_err() {
-                            is_rec_thread.store(false, Ordering::SeqCst);
-                        } else {
-                            log::info!("Microphone stream opened in {} ms", open_started.elapsed().as_millis());
+                        match &res {
+                            Ok(rate) => {
+                                native_rate = *rate;
+                                log::info!(
+                                    "Microphone stream opened in {} ms at {} Hz",
+                                    open_started.elapsed().as_millis(),
+                                    rate
+                                );
+                            }
+                            Err(_) => is_rec_thread.store(false, Ordering::SeqCst),
                         }
-                        let _ = reply.send(res);
+                        let _ = reply.send(res.map(|_| ()));
                     }
                     AudioCmd::Stop { reply } => {
                         // Allow a brief flush window for audio captured before the stop to arrive from the callback.
@@ -317,8 +362,14 @@ impl AudioRecorder {
                         if let Some(stream) = active_stream.take() {
                             let _ = stream.pause();
                         }
-                        let collected = buffer.lock().map(|b| b.clone()).unwrap_or_default();
-                        let _ = reply.send(collected);
+                        let speech = buffer.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
+                        // At 16 kHz the speech buffer already is the native audio.
+                        let native = native_buffer.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
+                        let native = if native_rate == 16000 { Vec::new() } else { native };
+                        let captured = CapturedAudio::new(speech, native, native_rate);
+                        let plan = captured.level_plan();
+                        log::info!("Voice leveling: gain {:+.1} dB, make-up {:+.1} dB", plan.gain_db, plan.makeup_db);
+                        let _ = reply.send(captured);
                     }
                     AudioCmd::Cancel => {
                         is_rec_thread.store(false, Ordering::SeqCst);
@@ -326,6 +377,9 @@ impl AudioRecorder {
                             let _ = stream.pause();
                         }
                         if let Ok(mut b) = buffer.lock() {
+                            b.clear();
+                        }
+                        if let Ok(mut b) = native_buffer.lock() {
                             b.clear();
                         }
                     }
@@ -359,15 +413,15 @@ impl AudioRecorder {
             .map_err(|e| format!("Audio thread did not respond: {}", e))?
     }
 
-    pub fn stop_recording(&self) -> Vec<f32> {
+    pub fn stop_recording(&self) -> CapturedAudio {
         if let Ok(mut s) = self.stop_at.lock() {
             *s = Some(Instant::now());
         }
         let (reply_tx, reply_rx) = channel();
         if self.cmd_tx.send(AudioCmd::Stop { reply: reply_tx }).is_ok() {
-            reply_rx.recv().unwrap_or_default()
+            reply_rx.recv().unwrap_or_else(|_| CapturedAudio::empty())
         } else {
-            Vec::new()
+            CapturedAudio::empty()
         }
     }
 
@@ -379,11 +433,12 @@ impl AudioRecorder {
 fn start_stream_inner(
     active_stream: &mut Option<cpal::Stream>,
     buffer: Arc<Mutex<Vec<f32>>>,
+    native_buffer: Arc<Mutex<Vec<f32>>>,
     is_rec: Arc<AtomicBool>,
     stop_at: Arc<Mutex<Option<Instant>>>,
     app_handle: AppHandle,
     device_name: Option<String>,
-) -> Result<(), String> {
+) -> Result<u32, String> {
     let device = resolve_input_device(device_name.as_deref())
         .ok_or_else(|| "No default audio input device found".to_string())?;
 
@@ -402,6 +457,7 @@ fn start_stream_inner(
     let resampler_state = Arc::new(Mutex::new(ResamplerState::new()));
     let resampler_clone = Arc::clone(&resampler_state);
     let buffer_clone = Arc::clone(&buffer);
+    let native_clone = Arc::clone(&native_buffer);
     let is_rec_cb = Arc::clone(&is_rec);
     let stop_at_cb = Arc::clone(&stop_at);
 
@@ -420,7 +476,7 @@ fn start_stream_inner(
                     }
                     let keep = frames_before_stop(info, data.len() / channels.max(1), sample_rate, &stop_at_cb);
                     let data = &data[..keep * channels];
-                    process_input_samples(data, channels, sample_rate, &resampler_cb, &buffer_clone);
+                    process_input_samples(data, channels, sample_rate, &resampler_cb, &buffer_clone, &native_clone);
                 },
                 err_fn,
                 None,
@@ -436,7 +492,7 @@ fn start_stream_inner(
                     }
                     let keep = frames_before_stop(info, data.len() / channels.max(1), sample_rate, &stop_at_cb);
                     let floats: Vec<f32> = data[..keep * channels].iter().map(|&s| s.to_float_sample()).collect();
-                    process_input_samples(&floats, channels, sample_rate, &resampler_cb, &buffer_clone);
+                    process_input_samples(&floats, channels, sample_rate, &resampler_cb, &buffer_clone, &native_clone);
                 },
                 err_fn,
                 None,
@@ -481,7 +537,7 @@ fn start_stream_inner(
         }
     });
 
-    Ok(())
+    Ok(sample_rate)
 }
 
 /// Number of leading frames in this callback that were captured before the user pressed stop.
@@ -529,6 +585,7 @@ fn process_input_samples(
     src_rate: u32,
     resampler: &Arc<Mutex<ResamplerState>>,
     target_buffer: &Arc<Mutex<Vec<f32>>>,
+    native_buffer: &Arc<Mutex<Vec<f32>>>,
 ) {
     if channels == 0 || data.is_empty() {
         return;
@@ -541,6 +598,32 @@ fn process_input_samples(
         mono_chunk.push(sum / channels as f32);
     }
 
+    if src_rate != 16000 {
+        if let Ok(mut native) = native_buffer.lock() {
+            native.extend_from_slice(&mono_chunk);
+        }
+    }
+    resample_mono_to_16k(&mono_chunk, src_rate, resampler, target_buffer);
+}
+
+/// Resamples a whole mono recording to 16 kHz, e.g. a saved history file for the Lab.
+pub fn resample_to_16k(samples: &[f32], src_rate: u32) -> Vec<f32> {
+    if src_rate == 16000 {
+        return samples.to_vec();
+    }
+    let resampler = Arc::new(Mutex::new(ResamplerState::new()));
+    let target = Arc::new(Mutex::new(Vec::with_capacity(samples.len() * 16000 / src_rate.max(1) as usize)));
+    resample_mono_to_16k(samples, src_rate, &resampler, &target);
+    let out = target.lock().map(|mut t| std::mem::take(&mut *t)).unwrap_or_default();
+    out
+}
+
+fn resample_mono_to_16k(
+    mono_chunk: &[f32],
+    src_rate: u32,
+    resampler: &Arc<Mutex<ResamplerState>>,
+    target_buffer: &Arc<Mutex<Vec<f32>>>,
+) {
     if src_rate == 16000 {
         if let Ok(mut target) = target_buffer.lock() {
             target.extend_from_slice(&mono_chunk);
@@ -740,6 +823,7 @@ mod tests {
     fn test_sinc_resampler_48k_to_16k() {
         let resampler = Arc::new(Mutex::new(ResamplerState::new()));
         let target = Arc::new(Mutex::new(Vec::new()));
+        let native = Arc::new(Mutex::new(Vec::new()));
 
         // Generate 4800 samples at 48000 Hz = 0.1 second of 1000 Hz tone
         let mut input = Vec::with_capacity(4800);
@@ -750,9 +834,10 @@ mod tests {
 
         // Feed in 3 chunks to test streaming continuity
         for chunk in input.chunks(1600) {
-            process_input_samples(chunk, 1, 48000, &resampler, &target);
+            process_input_samples(chunk, 1, 48000, &resampler, &target, &native);
         }
 
+        assert_eq!(native.lock().unwrap().len(), 4800, "native-rate copy keeps every input sample");
         let output = target.lock().unwrap().clone();
         // 0.1 sec at 16000 Hz is ~1600 samples (give or take filter margin)
         assert!(output.len() >= 1550 && output.len() <= 1620, "Output length: {}", output.len());

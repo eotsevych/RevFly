@@ -186,7 +186,9 @@ pub async fn run_experiment(
         return Err(format!("Audio file not found: {:?}", audio_path));
     }
 
-    let (raw_samples, _sample_rate) = read_wav_file(&audio_path)?;
+    let (file_samples, sample_rate) = read_wav_file(&audio_path)?;
+    // History recordings are saved at the microphone's own rate; the models need 16 kHz.
+    let raw_samples = crate::audio::resample_to_16k(&file_samples, sample_rate);
     if raw_samples.is_empty() {
         return Err("Audio file is empty".to_string());
     }

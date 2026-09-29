@@ -751,7 +751,7 @@ impl AppController {
             crate::sound::play_sound(crate::sound::AppSound::StopRecording);
         }
 
-        let raw_samples = self.recorder.stop_recording();
+        let captured = self.recorder.stop_recording();
 
         let app_handle = self.app_handle.clone();
         let phase_arc = Arc::clone(&self.phase);
@@ -771,8 +771,12 @@ impl AppController {
                 log_stage_event(&data_dir, "CANCELLED", "Aborted transcription: cancelled by user");
                 return;
             }
+            // Leveled 16 kHz speech; history gets the native-rate copy from `captured`.
+            let raw_samples = &captured.speech;
             let duration_sec = raw_samples.len() as f32 / 16000.0;
             log_stage_event(&data_dir, "AUDIO", &format!("Captured {} samples ({:.2} s)", raw_samples.len(), duration_sec));
+            let plan = captured.level_plan();
+            log_stage_event(&data_dir, "LEVEL", &format!("Voice leveling: gain {:+.1} dB, make-up {:+.1} dB", plan.gain_db, plan.makeup_db));
 
             // Save full original audio (uncut) to latest_recording.wav for playback in UI
             let latest_wav = data_dir.join("latest_recording.wav");
@@ -953,7 +957,7 @@ impl AppController {
                             "auto",
                             &settings.target_lang,
                             duration_sec,
-                            Some(&raw_samples),
+                            Some(&captured),
                             &settings.storage_mode,
                             settings.storage_cap_mb,
                         );
@@ -1150,7 +1154,7 @@ impl AppController {
                             "unknown",
                             &settings.target_lang,
                             duration_sec,
-                            Some(&raw_samples),
+                            Some(&captured),
                             &settings.storage_mode,
                             settings.storage_cap_mb,
                         );
@@ -1648,7 +1652,7 @@ impl AppController {
                 &detected_lang,
                 &settings.target_lang,
                 duration_sec,
-                Some(&raw_samples),
+                Some(&captured),
                 &settings.storage_mode,
                 settings.storage_cap_mb,
             );
