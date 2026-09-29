@@ -1,71 +1,118 @@
 import { useEffect, useRef } from "react";
+import type { AudioLevels } from "../../lib/tauri";
 import type { Tokens } from "../../lib/tokens";
 
-const WAVE_BARS = 7;
-const WAVE_HEIGHT = 38;
-const WAVE_MIN_SCALE = 0.22;
-// Centre bars react most, edges least, so the wave reads as one shape rather than random bars.
-const WAVE_PROFILE = [0.55, 0.78, 0.94, 1, 0.94, 0.78, 0.55];
-// Exponential smoothing time constants (ms): rise quickly with the voice, fall back gently.
-const WAVE_ATTACK_MS = 45;
-const WAVE_RELEASE_MS = 160;
+// Seven capsule towers. The centre tower follows low pitch (voice), the edges follow high pitch
+// ("s", "t", breath); the backend sends band energy already mirrored in that order.
+const BAR_COUNT = 7;
+const BAR_WIDTH = 4;
+const BAR_GAP = 3;
+const BAR_MIN_H = 8; // never collapse, so the capsule shape stays visible
+const BAR_MAX_H = 29; // stays clear of the pill edge
+const BAR_GROWTH = 20; // extra height at full energy and volume
+const BAR_OVERSHOOT_MAX = 2; // spring overshoot when a loud word starts
+const WAVE_BOX_H = BAR_MAX_H + BAR_OVERSHOOT_MAX + 1;
+// Silence: a slow rolling wave around the resting height shows the app is still listening.
+const IDLE_REST_H = 11;
+const IDLE_AMPLITUDE = 3;
+const SILENCE_VOLUME = 0.02;
+// Falling bars keep 80% of their height per 60 fps frame; rises are instant.
+const FALL_KEEP_PER_FRAME = 0.8;
+const FRAME_MS = 1000 / 60;
+// Loudness where the glow and colour shift start, and where they reach full strength.
+const LOUD_START = 0.35;
+const LOUD_FULL = 0.8;
 
-/** Level for bar `i`, interpolated across however many level bands the backend sends. */
-function levelForBar(levels: number[], i: number): number {
-  if (levels.length === 0) return 0;
-  const pos = (i / (WAVE_BARS - 1)) * (levels.length - 1);
-  const lo = Math.floor(pos);
-  const hi = Math.min(levels.length - 1, lo + 1);
-  const a = levels[lo] ?? 0;
-  const b = levels[hi] ?? a;
-  return a + (b - a) * (pos - lo);
+const GRADIENT_QUIET = ["#6468da", "#389aff", "#04caff"] as const;
+const GRADIENT_LOUD = ["#8f6bff", "#4aa3ff", "#1ae4ff"] as const;
+
+function mixHex(a: string, b: string, t: number): string {
+  const pa = parseInt(a.slice(1), 16);
+  const pb = parseInt(b.slice(1), 16);
+  const ch = (shift: number) =>
+    Math.round(((pa >> shift) & 255) + (((pb >> shift) & 255) - ((pa >> shift) & 255)) * t);
+  return `rgb(${ch(16)}, ${ch(8)}, ${ch(0)})`;
 }
 
-export function SoundWave({ accent, levels }: { accent: string; levels?: number[] | undefined }) {
-  const barsRef = useRef<(HTMLDivElement | null)[]>([]);
-  const levelsRef = useRef<number[]>(levels ?? []);
-  levelsRef.current = levels ?? [];
+function barGradient(loud: number): string {
+  const [top, mid, bottom] = GRADIENT_QUIET.map((c, i) => mixHex(c, GRADIENT_LOUD[i] ?? c, loud));
+  return `linear-gradient(180deg, ${top} 0%, ${mid} 50%, ${bottom} 100%)`;
+}
 
-  // Animate on every frame and ease towards the latest levels, so 25 Hz level updates
-  // render as continuous motion instead of steps. A gentle idle breath keeps the wave alive in silence.
+export function SoundWave({ levels }: { levels?: AudioLevels | undefined }) {
+  const barsRef = useRef<(HTMLDivElement | null)[]>([]);
+  const levelsRef = useRef<AudioLevels | undefined>(levels);
+  levelsRef.current = levels;
+
   useEffect(() => {
-    const current = new Array<number>(WAVE_BARS).fill(WAVE_MIN_SCALE);
+    const heights = new Array<number>(BAR_COUNT).fill(IDLE_REST_H);
+    let loud = 0;
+    let paintedLoud = -1;
     let last = performance.now();
+
     let frame = requestAnimationFrame(function tick(now) {
       const dt = Math.min(64, now - last);
       last = now;
-      for (let i = 0; i < WAVE_BARS; i++) {
-        const idle = WAVE_MIN_SCALE + 0.1 * (0.5 + 0.5 * Math.sin(now / 320 + i * 0.85));
-        const voice = levelForBar(levelsRef.current, i) * (WAVE_PROFILE[i] ?? 1);
-        const target = Math.min(1, Math.max(idle, voice));
-        const cur = current[i] ?? WAVE_MIN_SCALE;
-        const tau = target > cur ? WAVE_ATTACK_MS : WAVE_RELEASE_MS;
-        const next = cur + (target - cur) * (1 - Math.exp(-dt / tau));
-        current[i] = next;
+      const fallKeep = Math.pow(FALL_KEEP_PER_FRAME, dt / FRAME_MS);
+      const volume = levelsRef.current?.volume ?? 0;
+      const bands = levelsRef.current?.bands ?? [];
+      const silent = volume < SILENCE_VOLUME;
+
+      // Glow and colour shift follow loudness with the same fast-rise, slow-fall feel.
+      const loudTarget = Math.min(1, Math.max(0, (volume - LOUD_START) / (LOUD_FULL - LOUD_START)));
+      loud = loudTarget > loud ? loudTarget : loud * fallKeep + loudTarget * (1 - fallKeep);
+
+      for (let i = 0; i < BAR_COUNT; i++) {
+        const target = silent
+          ? IDLE_REST_H + Math.sin((now / 1000) * 3 + i * 0.8) * IDLE_AMPLITUDE
+          : BAR_MIN_H + (bands[i] ?? 0) * volume * BAR_GROWTH;
+        const cur = heights[i] ?? IDLE_REST_H;
+        let next: number;
+        if (target > cur) {
+          // Instant rise, with a small spring overshoot on the onset of a loud word.
+          const jump = target - cur;
+          next =
+            target + (!silent && loudTarget > 0 ? Math.min(BAR_OVERSHOOT_MAX, jump * 0.15) : 0);
+        } else {
+          next = cur * fallKeep + target * (1 - fallKeep);
+        }
+        next = Math.min(BAR_MAX_H + BAR_OVERSHOOT_MAX, Math.max(BAR_MIN_H, next));
+        heights[i] = next;
         const bar = barsRef.current[i];
-        if (bar) bar.style.transform = `scaleY(${next.toFixed(3)})`;
+        if (bar) bar.style.height = `${next.toFixed(2)}px`;
       }
+
+      if (Math.abs(loud - paintedLoud) > 0.02) {
+        paintedLoud = loud;
+        const background = barGradient(loud);
+        const glow =
+          loud > 0.01 ? `0 0 10px rgba(4, 202, 255, ${(0.7 * loud).toFixed(3)})` : "none";
+        for (const bar of barsRef.current) {
+          if (!bar) continue;
+          bar.style.background = background;
+          bar.style.boxShadow = glow;
+        }
+      }
+
       frame = requestAnimationFrame(tick);
     });
     return () => cancelAnimationFrame(frame);
   }, []);
 
   return (
-    <div className="flex items-center gap-[3.5px]" style={{ height: WAVE_HEIGHT }}>
-      {Array.from({ length: WAVE_BARS }, (_, i) => (
+    <div style={{ display: "flex", alignItems: "center", height: WAVE_BOX_H, gap: BAR_GAP }}>
+      {Array.from({ length: BAR_COUNT }, (_, i) => (
         <div
           key={i}
           ref={(el) => {
             barsRef.current[i] = el;
           }}
           style={{
-            width: 3.5,
-            height: WAVE_HEIGHT,
-            borderRadius: 2,
-            transform: `scaleY(${WAVE_MIN_SCALE})`,
-            transformOrigin: "center",
-            willChange: "transform",
-            background: `linear-gradient(180deg, ${accent}, #00d4ff)`,
+            width: BAR_WIDTH,
+            height: IDLE_REST_H,
+            borderRadius: BAR_WIDTH,
+            background: barGradient(0),
+            willChange: "height",
           }}
         />
       ))}
@@ -280,10 +327,10 @@ export function StateIndicator({
   state: "idle" | "listening" | "transcribing" | "translating" | "done" | "error";
   t: Tokens;
   accent: string;
-  levels?: number[] | undefined;
+  levels?: AudioLevels | undefined;
   title?: string | undefined;
 }) {
-  if (state === "listening") return <SoundWave accent={accent} levels={levels} />;
+  if (state === "listening") return <SoundWave levels={levels} />;
   if (state === "transcribing") return <TranscribingIndicator t={t} />;
   if (state === "translating") return <TranslatingIndicator accent={accent} />;
   if (state === "error") return <ErrorIndicator t={t} title={title} accent={accent} />;

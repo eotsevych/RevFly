@@ -454,49 +454,29 @@ fn start_stream_inner(
 
     *active_stream = Some(stream);
 
-    // Monitoring thread for animated equalizer levels
+    // Monitoring thread for the pill's equalizer: loudness plus pitch-band energy of the latest audio
     let is_rec_monitor = Arc::clone(&is_rec);
     let buf_monitor = Arc::clone(&buffer);
     thread::spawn(move || {
+        let analyzer = SpectrumAnalyzer::new();
+        let mut window = vec![0.0f32; SPECTRUM_WINDOW];
         let mut last_len = 0;
-        let mut phase: f32 = 0.0;
 
         while is_rec_monitor.load(Ordering::Relaxed) {
             thread::sleep(Duration::from_millis(40));
 
-            let rms = {
-                if let Ok(b) = buf_monitor.lock() {
-                    let cur_len = b.len();
-                    if cur_len > last_len {
-                        let window_size = (cur_len - last_len).min(1024);
-                        let slice = &b[cur_len.saturating_sub(window_size)..cur_len];
-                        last_len = cur_len;
-                        let sum_sq: f32 = slice.iter().map(|&x| x * x).sum();
-                        (sum_sq / slice.len().max(1) as f32).sqrt()
-                    } else {
-                        0.0
-                    }
-                } else {
-                    0.0
+            let has_new_audio = match buf_monitor.lock() {
+                Ok(b) if b.len() > last_len => {
+                    last_len = b.len();
+                    let n = b.len().min(SPECTRUM_WINDOW);
+                    window.fill(0.0);
+                    window[SPECTRUM_WINDOW - n..].copy_from_slice(&b[b.len() - n..]);
+                    true
                 }
+                _ => false,
             };
 
-            phase += 0.35;
-            // Map rms to 0.0..1.0 with speech sensitivity curve
-            let norm = (rms * 14.0).clamp(0.0, 1.0);
-
-            let levels: Vec<f32> = [0.0, 1.0, 2.0, 3.0, 4.0]
-                .iter()
-                .map(|&i| {
-                    if norm > 0.02 {
-                        let ripple = (phase + i * 1.4).sin() * 0.25;
-                        (norm * 0.85 + ripple * norm).clamp(0.05, 1.0)
-                    } else {
-                        0.0
-                    }
-                })
-                .collect();
-
+            let levels = if has_new_audio { analyzer.analyze(&window) } else { AudioLevels::silent() };
             let _ = app_handle.emit("audio-level", levels);
         }
     });
@@ -638,9 +618,123 @@ fn sinc(x: f64) -> f64 {
     }
 }
 
+/// Samples per spectrum frame: 512 at 16 kHz = 32 ms, 31.25 Hz per frequency bin.
+const SPECTRUM_WINDOW: usize = 512;
+const SPECTRUM_RATE: f32 = 16000.0;
+/// Pitch bands, low to high: voice fundamentals, vowels, consonants, sibilants and breath.
+const PITCH_BANDS_HZ: [(f32, f32); 4] = [(100.0, 350.0), (350.0, 1200.0), (1200.0, 3500.0), (3500.0, 7000.0)];
+/// Speech energy falls off with frequency, so higher bands get a boost (dB) to register visibly.
+const BAND_TILT_DB: [f32; 4] = [0.0, 5.0, 10.0, 14.0];
+/// A band this many dB below the loudest band reads as zero.
+const BAND_RANGE_DB: f32 = 24.0;
+/// Below this loudness the pill treats the input as silence.
+const SILENCE_VOLUME: f32 = 0.02;
+
+/// Payload of the `audio-level` event that drives the pill's equalizer.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct AudioLevels {
+    /// Overall loudness, 0..1.
+    pub volume: f32,
+    /// Pitch energy per bar, 0..1, mirrored from the centre:
+    /// [high, high-mid, mid, low, mid, high-mid, high].
+    pub bands: [f32; 7],
+}
+
+impl AudioLevels {
+    pub fn silent() -> Self {
+        Self { volume: 0.0, bands: [0.0; 7] }
+    }
+}
+
+/// Splits short audio frames into pitch bands with a Hann-windowed DFT over the bins of interest.
+struct SpectrumAnalyzer {
+    hann: Vec<f32>,
+    cos: Vec<f32>,
+    sin: Vec<f32>,
+    band_bins: [(usize, usize); 4],
+}
+
+impl SpectrumAnalyzer {
+    fn new() -> Self {
+        let n = SPECTRUM_WINDOW;
+        let tau = 2.0 * std::f32::consts::PI;
+        let hann = (0..n).map(|i| 0.5 - 0.5 * (tau * i as f32 / (n - 1) as f32).cos()).collect();
+        let cos = (0..n).map(|i| (tau * i as f32 / n as f32).cos()).collect();
+        let sin = (0..n).map(|i| (tau * i as f32 / n as f32).sin()).collect();
+        let bin_hz = SPECTRUM_RATE / n as f32;
+        let band_bins = PITCH_BANDS_HZ.map(|(lo, hi)| ((lo / bin_hz).ceil() as usize, (hi / bin_hz).floor() as usize));
+        Self { hann, cos, sin, band_bins }
+    }
+
+    fn analyze(&self, frame: &[f32]) -> AudioLevels {
+        let n = SPECTRUM_WINDOW;
+        debug_assert_eq!(frame.len(), n);
+        let rms = (frame.iter().map(|x| x * x).sum::<f32>() / n as f32).sqrt();
+        // Same speech sensitivity curve the pill has always used.
+        let volume = (rms * 14.0).clamp(0.0, 1.0);
+        if volume < SILENCE_VOLUME {
+            return AudioLevels { volume, bands: [0.0; 7] };
+        }
+
+        let windowed: Vec<f32> = frame.iter().zip(&self.hann).map(|(x, w)| x * w).collect();
+        let band_db = self.band_bins.map(|(lo, hi)| {
+            let mut power = 0.0f32;
+            for k in lo..=hi {
+                let (mut re, mut im) = (0.0f32, 0.0f32);
+                for (t, &x) in windowed.iter().enumerate() {
+                    let idx = (k * t) % n;
+                    re += x * self.cos[idx];
+                    im -= x * self.sin[idx];
+                }
+                power += re * re + im * im;
+            }
+            10.0 * (power / (hi - lo + 1) as f32 + 1e-12).log10()
+        });
+
+        let tilted: Vec<f32> = band_db.iter().zip(BAND_TILT_DB).map(|(db, tilt)| db + tilt).collect();
+        let loudest = tilted.iter().cloned().fold(f32::MIN, f32::max);
+        let energy: Vec<f32> = tilted
+            .iter()
+            .map(|db| ((db - (loudest - BAND_RANGE_DB)) / BAND_RANGE_DB).clamp(0.0, 1.0))
+            .collect();
+        let [low, mid, high_mid, high] = [energy[0], energy[1], energy[2], energy[3]];
+        AudioLevels { volume, bands: [high, high_mid, mid, low, mid, high_mid, high] }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tone(hz: f32, amplitude: f32) -> Vec<f32> {
+        (0..SPECTRUM_WINDOW)
+            .map(|i| amplitude * (2.0 * std::f32::consts::PI * hz * i as f32 / SPECTRUM_RATE).sin())
+            .collect()
+    }
+
+    #[test]
+    fn low_tone_lifts_the_centre_bar() {
+        let levels = SpectrumAnalyzer::new().analyze(&tone(200.0, 0.2));
+        assert!(levels.volume > 0.5);
+        assert_eq!(levels.bands[3], 1.0, "{:?}", levels.bands);
+        assert!(levels.bands[0] < 0.5, "{:?}", levels.bands);
+        assert_eq!(levels.bands[2], levels.bands[4], "bars mirror around the centre");
+    }
+
+    #[test]
+    fn high_tone_lifts_the_edge_bars() {
+        let levels = SpectrumAnalyzer::new().analyze(&tone(5000.0, 0.2));
+        assert_eq!(levels.bands[0], 1.0, "{:?}", levels.bands);
+        assert_eq!(levels.bands[6], 1.0, "{:?}", levels.bands);
+        assert!(levels.bands[3] < 0.5, "{:?}", levels.bands);
+    }
+
+    #[test]
+    fn silence_has_no_band_energy() {
+        let levels = SpectrumAnalyzer::new().analyze(&vec![0.0; SPECTRUM_WINDOW]);
+        assert_eq!(levels.volume, 0.0);
+        assert_eq!(levels.bands, [0.0; 7]);
+    }
 
     #[test]
     fn test_sinc_resampler_48k_to_16k() {

@@ -294,12 +294,20 @@ export async function subscribeToStateChanges(
   }
 }
 
+/** Microphone loudness and pitch-band energy, sent about 25 times a second while recording. */
+export interface AudioLevels {
+  /** Overall loudness, 0..1. */
+  volume: number;
+  /** Pitch energy per bar, 0..1, mirrored from the centre: [high, high-mid, mid, low, mid, high-mid, high]. */
+  bands: number[];
+}
+
 export async function subscribeToAudioLevels(
-  callback: (levels: number[]) => void,
+  callback: (levels: AudioLevels) => void,
 ): Promise<UnlistenFn | null> {
   if (!isTauri()) return null;
   try {
-    return await listen<number[]>("audio-level", (event) => {
+    return await listen<AudioLevels>("audio-level", (event) => {
       callback(event.payload);
     });
   } catch (err) {

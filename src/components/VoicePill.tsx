@@ -8,6 +8,7 @@ import {
   triggerCancelRecording,
   triggerStartDragging,
   type AssistantStateEvent,
+  type AudioLevels,
   type BackendSettings,
 } from "@/lib/tauri";
 import { tok, type AccentColor, type Theme } from "@/lib/tokens";
@@ -48,7 +49,7 @@ export function VoicePill() {
     title: "Ready",
     subtitle: null,
   });
-  const [audioLevels, setAudioLevels] = useState<number[]>([0.0, 0.0, 0.0, 0.0, 0.0]);
+  const [audioLevels, setAudioLevels] = useState<AudioLevels | undefined>(undefined);
   const [settings, setSettings] = useState<BackendSettings | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
 
@@ -62,9 +63,7 @@ export function VoicePill() {
     });
 
     const unlistenAudio = subscribeToAudioLevels((levels) => {
-      if (levels && levels.length > 0) {
-        setAudioLevels(levels);
-      }
+      if (levels?.bands) setAudioLevels(levels);
     });
 
     let unlistenMoved: (() => void) | null = null;
@@ -215,7 +214,7 @@ export function VoicePill() {
         {/* State visual indicator icon */}
         <div
           className="flex items-center justify-center shrink-0"
-          style={{ width: 44, minWidth: 44 }}
+          style={{ width: 48, minWidth: 48 }}
         >
           <StateIndicator
             state={state.state}
