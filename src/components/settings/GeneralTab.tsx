@@ -32,6 +32,29 @@ const IDLE_OPTIONS = [
   { value: "0", label: "Off" },
 ];
 
+const DEFAULT_IDLE_SEC = 30;
+
+function formatIdle(sec: number): string {
+  if (sec < 60) return `${sec} s`;
+  const min = sec / 60;
+  return Number.isInteger(min) ? `${min} min` : `${min.toFixed(1)} min`;
+}
+
+// Keeps a saved value that isn't a preset (e.g. 120 s from older versions) visible and selected.
+function idleOptionsFor(sec: number) {
+  if (IDLE_OPTIONS.some((o) => o.value === String(sec))) return IDLE_OPTIONS;
+  const custom = { value: String(sec), label: formatIdle(sec) };
+  const presets = IDLE_OPTIONS.filter((o) => o.value !== "0");
+  const off = IDLE_OPTIONS.filter((o) => o.value === "0");
+  return [...presets, custom].sort((a, b) => Number(a.value) - Number(b.value)).concat(off);
+}
+
+function idleTimeoutHint(sec: number): string {
+  return sec === 0
+    ? "Off: the speech model stays in RAM"
+    : `Unloads the speech model from RAM after ${formatIdle(sec)} without use`;
+}
+
 const SOURCE_LANGUAGES = [
   { value: "Auto", label: "Auto-detect" },
   { value: "Ukrainian", label: "Ukrainian (українська)" },
@@ -254,6 +277,7 @@ export default function GeneralTab({ t }: { t: Tokens }) {
           { value: "parakeet-tdt-0.6b-v3", label: "Parakeet TDT 0.6B (Fast, 25 languages)" },
         ];
 
+  const idleSec = settings.model_idle_unload_sec ?? DEFAULT_IDLE_SEC;
   const selectedModel = models.find((m) => m.filename === settings.model_name);
   const isSelectedModelDownloaded = selectedModel ? selectedModel.downloaded : true;
 
@@ -534,10 +558,10 @@ export default function GeneralTab({ t }: { t: Tokens }) {
           </div>
         </Row>
 
-        <Row label="Idle timeout" hint="Stop recording and save RAM after silence" t={t} last>
+        <Row label="Idle timeout" hint={idleTimeoutHint(idleSec)} t={t} last>
           <Segmented
-            options={IDLE_OPTIONS}
-            value={String(settings.model_idle_unload_sec ?? 30)}
+            options={idleOptionsFor(idleSec)}
+            value={String(idleSec)}
             onChange={(v) => updateSettings({ model_idle_unload_sec: Number(v) })}
             t={t}
           />

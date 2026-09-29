@@ -155,7 +155,7 @@ fn default_theme() -> String {
 }
 
 fn default_idle_unload_sec() -> u64 {
-    120
+    30
 }
 
 impl Default for AppSettings {
@@ -178,7 +178,7 @@ impl Default for AppSettings {
             input_device: None,
             output_device: None,
             theme: "system".to_string(),
-            model_idle_unload_sec: 120,
+            model_idle_unload_sec: default_idle_unload_sec(),
             window_x: None,
             window_y: None,
             text_normalization: true,
