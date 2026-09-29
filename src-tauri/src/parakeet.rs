@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use parakeet_rs::Transcriber;
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
 use crate::settings::get_data_dir;
 
@@ -102,11 +102,24 @@ impl ParakeetTranscriber {
 
     /// Download all model files from HuggingFace. Skips files already on disk.
     pub async fn ensure_model(app_handle: &AppHandle) -> Result<PathBuf, String> {
-        let model_dir = Self::get_model_dir();
         if Self::model_ready() {
-            return Ok(model_dir);
+            return Ok(Self::get_model_dir());
+        }
+        // Another caller may already be downloading it; wait, then re-check the disk.
+        let _download = crate::model_download::lock().await;
+        if Self::model_ready() {
+            return Ok(Self::get_model_dir());
         }
 
+        let model = crate::model_download::PARAKEET_MODEL;
+        crate::model_download::began(app_handle, model);
+        let result = Self::download_model(app_handle).await;
+        crate::model_download::finished(app_handle, model, &result);
+        result
+    }
+
+    async fn download_model(app_handle: &AppHandle) -> Result<PathBuf, String> {
+        let model_dir = Self::get_model_dir();
         let client = reqwest::Client::new();
         let total_size = total_model_bytes();
         let mut cumulative: u64 = 0;
@@ -121,16 +134,6 @@ impl ParakeetTranscriber {
             }
 
             let url = format!("{}/{}", HF_BASE_URL, filename);
-
-            let _ = app_handle.emit(
-                "model-download-progress",
-                serde_json::json!({
-                    "status": "downloading",
-                    "model": "parakeet-tdt-0.6b-v3",
-                    "percent": (cumulative as f64 / total_size as f64 * 100.0) as u32,
-                    "file": filename
-                }),
-            );
 
             let resp = client
                 .get(&url)
@@ -157,13 +160,12 @@ impl ParakeetTranscriber {
                 cumulative += chunk.len() as u64;
 
                 let percent = (cumulative as f64 / total_size as f64 * 100.0) as u32;
-                let _ = app_handle.emit(
-                    "model-download-progress",
-                    serde_json::json!({
-                        "status": "downloading",
-                        "model": "parakeet-tdt-0.6b-v3",
-                        "percent": percent.min(99)
-                    }),
+                crate::model_download::progress(
+                    app_handle,
+                    crate::model_download::PARAKEET_MODEL,
+                    percent,
+                    cumulative,
+                    total_size,
                 );
             }
 
@@ -171,15 +173,6 @@ impl ParakeetTranscriber {
             fs::rename(&temp_path, &file_path)
                 .map_err(|e| format!("Rename failed for {}: {}", filename, e))?;
         }
-
-        let _ = app_handle.emit(
-            "model-download-progress",
-            serde_json::json!({
-                "status": "complete",
-                "model": "parakeet-tdt-0.6b-v3",
-                "percent": 100
-            }),
-        );
 
         Ok(model_dir)
     }

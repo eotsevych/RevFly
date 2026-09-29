@@ -17,6 +17,7 @@ pub mod updater;
 pub mod vad;
 pub mod parakeet;
 pub mod lab;
+pub mod model_download;
 pub mod sound;
 pub mod vitals;
 
@@ -367,6 +368,7 @@ pub fn run() {
             let _ = tray::create_tray(&app.handle(), &settings);
             crate::tray::update_tray_model_status(&app.handle(), false);
             updater::spawn_background_checks(app.handle());
+            model_download::spawn_initial_download(app.handle(), settings.model_name.clone());
 
             // Configure window collection behavior and restore saved position if valid
             if let Some(win) = app.get_webview_window("main") {

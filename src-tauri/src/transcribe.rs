@@ -3,7 +3,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 use crate::settings::get_data_dir;
@@ -266,11 +266,23 @@ impl Transcriber {
     }
 
     pub async fn ensure_model(app_handle: &AppHandle, model_name: &str) -> Result<PathBuf, String> {
-        let model_path = Self::get_model_path(model_name);
         if Self::model_exists(model_name) {
-            return Ok(model_path);
+            return Ok(Self::get_model_path(model_name));
+        }
+        // Another caller may already be downloading it; wait, then re-check the disk.
+        let _download = crate::model_download::lock().await;
+        if Self::model_exists(model_name) {
+            return Ok(Self::get_model_path(model_name));
         }
 
+        crate::model_download::began(app_handle, model_name);
+        let result = Self::download_model(app_handle, model_name).await;
+        crate::model_download::finished(app_handle, model_name, &result);
+        result
+    }
+
+    async fn download_model(app_handle: &AppHandle, model_name: &str) -> Result<PathBuf, String> {
+        let model_path = Self::get_model_path(model_name);
         let parent = model_path.parent().ok_or("Invalid model directory")?;
         if !parent.exists() {
             let _ = fs::create_dir_all(parent);
@@ -294,17 +306,7 @@ impl Transcriber {
             .map_err(|e| format!("Failed to create temporary file: {}", e))?;
 
         let mut downloaded: u64 = 0;
-        let mut last_emit_percent = 0;
         let mut resp = resp;
-
-        let _ = app_handle.emit(
-            "assistant-state-changed",
-            serde_json::json!({
-                "state": "transcribing",
-                "title": "Downloading speech model…",
-                "subtitle": format!("Downloading {} (0%)", model_name)
-            }),
-        );
 
         while let Some(chunk) = resp
             .chunk()
@@ -316,44 +318,12 @@ impl Transcriber {
             downloaded += chunk.len() as u64;
 
             let percent = (downloaded as f64 / total_size as f64 * 100.0) as u32;
-            let _ = app_handle.emit(
-                "model-download-progress",
-                serde_json::json!({
-                    "status": "downloading",
-                    "model": model_name,
-                    "percent": percent.min(99),
-                    "downloaded_bytes": downloaded,
-                    "total_bytes": total_size
-                }),
-            );
-
-            if percent != last_emit_percent {
-                last_emit_percent = percent;
-                let _ = app_handle.emit(
-                    "assistant-state-changed",
-                    serde_json::json!({
-                        "state": "transcribing",
-                        "title": "Downloading speech model…",
-                        "subtitle": format!("Downloading {} ({}%)", model_name, percent.min(99))
-                    }),
-                );
-            }
+            crate::model_download::progress(app_handle, model_name, percent, downloaded, total_size);
         }
 
         file.flush().map_err(|e| e.to_string())?;
         fs::rename(&temp_path, &model_path)
             .map_err(|e| format!("Failed to finalize model file: {}", e))?;
-
-        let _ = app_handle.emit(
-            "model-download-progress",
-            serde_json::json!({
-                "status": "complete",
-                "model": model_name,
-                "percent": 100,
-                "downloaded_bytes": total_size,
-                "total_bytes": total_size
-            }),
-        );
 
         Ok(model_path)
     }

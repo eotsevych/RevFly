@@ -271,6 +271,30 @@ pub(crate) fn apply_pill_window_behavior(win: &tauri::WebviewWindow, order_front
     }
 }
 
+/// Returns the model path for a recording that's waiting on it. If the model still has to download,
+/// the pill shows the download progress and is put back to "Transcribing…" afterwards.
+async fn ensure_model_for_recording(
+    app_handle: &AppHandle,
+    model_name: &str,
+    transcribing_subtitle: &str,
+) -> Result<std::path::PathBuf, String> {
+    if crate::model_download::is_model_present(model_name) {
+        return crate::model_download::ensure(app_handle, model_name).await;
+    }
+    let pill_wait = crate::model_download::PillWait::start(app_handle);
+    let result = crate::model_download::ensure(app_handle, model_name).await;
+    drop(pill_wait);
+    let _ = app_handle.emit(
+        "assistant-state-changed",
+        serde_json::json!({
+            "state": "transcribing",
+            "title": "Transcribing…",
+            "subtitle": transcribing_subtitle
+        }),
+    );
+    result
+}
+
 pub struct AppController {
     app_handle: AppHandle,
     phase: Arc<Mutex<AssistantPhase>>,
@@ -799,7 +823,7 @@ impl AppController {
                     tr.unload();
                 }
                 log_stage_event(&data_dir, "PARAKEET_START", &format!("Starting Parakeet TDT inference on {} samples ({:.2} s)...", vad_res.samples.len(), vad_res.trimmed_duration_sec));
-                let model_dir = match crate::parakeet::ParakeetTranscriber::ensure_model(&app_handle).await {
+                let model_dir = match ensure_model_for_recording(&app_handle, &settings.model_name, &transcribing_subtitle).await {
                     Ok(path) => {
                         log_stage_event(&data_dir, "MODEL", &format!("Using Parakeet model at {:?}", path));
                         path
@@ -945,7 +969,7 @@ impl AppController {
                     let mut pk = parakeet_arc.lock().unwrap();
                     pk.unload();
                 }
-                let model_path = match Transcriber::ensure_model(&app_handle, &settings.model_name).await {
+                let model_path = match ensure_model_for_recording(&app_handle, &settings.model_name, &transcribing_subtitle).await {
                     Ok(path) => {
                         log_stage_event(&data_dir, "MODEL", &format!("Using Whisper model {} at {:?}", settings.model_name, path));
                         path

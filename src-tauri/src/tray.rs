@@ -97,6 +97,13 @@ pub fn update_tray_model_status(app: &AppHandle, is_loaded: bool) {
     let _ = app; // silence unused if no tray yet
 }
 
+pub fn set_model_download_progress(percent: u32) {
+    if let Some(item) = STATUS_ITEM.get() {
+        let _ = item.set_text(format!("↓ Downloading Speech Model… {}%", percent));
+        let _ = item.set_enabled(false);
+    }
+}
+
 pub fn is_recording() -> bool {
     IS_RECORDING.load(std::sync::atomic::Ordering::SeqCst)
 }

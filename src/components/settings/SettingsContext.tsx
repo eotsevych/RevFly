@@ -27,7 +27,7 @@ const defaultSettings: BackendSettings = {
   storage_mode: "text_only",
   storage_cap_mb: 500,
   retention_days: 30,
-  model_name: "ggml-medium-q5_0.bin",
+  model_name: "parakeet-tdt-0.6b-v3",
   input_device: null,
   output_device: null,
   theme: "system",

@@ -14,7 +14,7 @@ pub struct AppSettings {
     pub storage_mode: String, // "text_only" | "text_audio" | "private"
     pub storage_cap_mb: u64,  // 100, 250, 500, 1000
     pub retention_days: u32,  // 7, 14, 30, 0 (0 = Never)
-    pub model_name: String,   // "ggml-medium-q5_0.bin" or "ggml-base.bin"
+    pub model_name: String,   // "parakeet-tdt-0.6b-v3" or a Whisper file such as "ggml-medium-q5_0.bin"
     #[serde(default)]
     pub input_device: Option<String>,
     #[serde(default)]
@@ -174,10 +174,7 @@ impl Default for AppSettings {
             storage_mode: "text_only".to_string(),
             storage_cap_mb: 500,
             retention_days: 30,
-            #[cfg(target_arch = "x86_64")]
-            model_name: "ggml-base.bin".to_string(),
-            #[cfg(not(target_arch = "x86_64"))]
-            model_name: "ggml-medium-q5_0.bin".to_string(),
+            model_name: crate::model_download::PARAKEET_MODEL.to_string(),
             input_device: None,
             output_device: None,
             theme: "system".to_string(),

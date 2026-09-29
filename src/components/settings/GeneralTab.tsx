@@ -251,7 +251,7 @@ export default function GeneralTab({ t }: { t: Tokens }) {
           { value: "ggml-medium-q5_0.bin", label: "Whisper Medium (q5_0 local)" },
           { value: "ggml-small-q5_0.bin", label: "Whisper Small (q5_0 local)" },
           { value: "ggml-base.bin", label: "Whisper Base (local)" },
-          { value: "parakeet-tdt-0.6b-v3", label: "Parakeet TDT 0.6B (Fast English)" },
+          { value: "parakeet-tdt-0.6b-v3", label: "Parakeet TDT 0.6B (Fast, 25 languages)" },
         ];
 
   const selectedModel = models.find((m) => m.filename === settings.model_name);
