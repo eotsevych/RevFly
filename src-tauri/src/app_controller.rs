@@ -228,13 +228,16 @@ fn show_main_window(app_handle: &AppHandle, settings: &AppSettings) {
     });
 }
 
-/// Makes the voice pill float above full-screen apps on every Space without taking keyboard focus,
-/// so the paste lands in the app the user was typing in.
+/// Makes the voice pill float above full-screen apps on every Space. The pill never takes keyboard
+/// focus (so the paste lands in the app the user was typing in) because the window is created with
+/// `"focusable": false` in tauri.conf.json. Don't toggle that at runtime: on Windows it rewrites the
+/// window's extended style, which can leave the transparent WebView2 pill unpainted.
 ///
 /// The window must stay the NSWindow subclass tao created: swapping its class (e.g. to NSPanel) breaks
 /// WebKit's KVO observers and aborts the app on macOS 27 when the view hierarchy is rebuilt.
 pub(crate) fn apply_pill_window_behavior(win: &tauri::WebviewWindow, order_front: bool) {
-    let _ = win.set_focusable(false);
+    #[cfg(not(target_os = "macos"))]
+    let _ = (win, order_front);
 
     #[cfg(target_os = "macos")]
     unsafe {
@@ -269,6 +272,12 @@ pub(crate) fn apply_pill_window_behavior(win: &tauri::WebviewWindow, order_front
             }
         }
     }
+}
+
+/// True when a recording carries no signal at all. A live microphone always has some noise floor, so
+/// this means the OS blocked or muted the input (e.g. Windows microphone privacy settings).
+fn is_digital_silence(samples: &[f32]) -> bool {
+    samples.iter().all(|s| s.abs() < 1e-4)
 }
 
 /// Returns the model path for a recording that's waiting on it. If the model still has to download,
@@ -1211,12 +1220,21 @@ impl AppController {
                     let mut p = phase_arc.lock().unwrap();
                     *p = AssistantPhase::Error;
                 }
+                let (title, subtitle) = if is_digital_silence(&raw_samples) {
+                    // The OS delivers zeros instead of an error when microphone access is blocked.
+                    log_stage_event(&data_dir, "AUDIO", "Recording is digital silence: microphone blocked or muted");
+                    ("Microphone Is Silent", "Allow mic access in privacy settings")
+                } else if raw_text == "[BLANK_AUDIO]" {
+                    ("Transcription Failed", "Blank audio — No voice detected")
+                } else {
+                    ("Transcription Failed", "No speech recognized in recording")
+                };
                 let _ = app_handle.emit(
                     "assistant-state-changed",
                     serde_json::json!({
                         "state": "error",
-                        "title": "Transcription Failed",
-                        "subtitle": if raw_text == "[BLANK_AUDIO]" { "Blank audio — No voice detected" } else { "No speech recognized in recording" }
+                        "title": title,
+                        "subtitle": subtitle
                     }),
                 );
                 tokio::time::sleep(Duration::from_millis(2800)).await;
@@ -1744,5 +1762,19 @@ impl AppController {
         let mut settings = self.get_settings();
         settings.translation_provider = provider.to_string();
         self.save_settings(settings)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_digital_silence;
+
+    #[test]
+    fn digital_silence_only_for_blocked_input() {
+        assert!(is_digital_silence(&[0.0; 16000]));
+        assert!(is_digital_silence(&[]));
+        // A quiet but live microphone still has a noise floor.
+        let noise: Vec<f32> = (0..16000).map(|i| if i % 2 == 0 { 0.002 } else { -0.002 }).collect();
+        assert!(!is_digital_silence(&noise));
     }
 }

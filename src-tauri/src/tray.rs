@@ -48,12 +48,21 @@ pub enum TrayIconState {
     Recording,
 }
 
+/// Sleeping-state tray icon. macOS gets a white template image that the system tints to match the
+/// menu bar; Windows and Linux draw icons as-is, so a white glyph vanishes on light taskbars and they
+/// get the full-color app icon instead.
+#[cfg(target_os = "macos")]
+const SLEEPING_ICON: &[u8] = include_bytes!("../icons/tray-ejected@2x.png");
+#[cfg(not(target_os = "macos"))]
+const SLEEPING_ICON: &[u8] = include_bytes!("../icons/32x32.png");
+const SLEEPING_ICON_IS_TEMPLATE: bool = cfg!(target_os = "macos");
+
 pub fn update_tray_icon(app: &AppHandle, state: TrayIconState) {
     if let Some(tray) = app.tray_by_id("main-tray") {
         let (icon_bytes, is_template, title): (&[u8], bool, Option<&str>) = match state {
             TrayIconState::Recording => (include_bytes!("../icons/tray-recording@2x.png"), false, Some(" REC")),
             TrayIconState::Loaded => (include_bytes!("../icons/tray-loaded@2x.png"), false, Some("")),
-            TrayIconState::Ejected => (include_bytes!("../icons/tray-ejected@2x.png"), true, Some("")),
+            TrayIconState::Ejected => (SLEEPING_ICON, SLEEPING_ICON_IS_TEMPLATE, Some("")),
         };
         if let Ok(icon) = tauri::image::Image::from_bytes(icon_bytes) {
             let _ = tray.set_icon(Some(icon));
@@ -300,7 +309,7 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
         .menu(&menu)
         .show_menu_on_left_click(true)
         .tooltip("RevFly — LLM Ejected (RAM Saved)")
-        .icon_as_template(true)
+        .icon_as_template(SLEEPING_ICON_IS_TEMPLATE)
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
             if id == "toggle_recording" {
@@ -342,7 +351,7 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
             }
         });
 
-    if let Ok(icon) = tauri::image::Image::from_bytes(include_bytes!("../icons/tray-ejected@2x.png")) {
+    if let Ok(icon) = tauri::image::Image::from_bytes(SLEEPING_ICON) {
         builder = builder.icon(icon);
     } else if let Some(icon) = app.default_window_icon() {
         builder = builder.icon(icon.clone());
