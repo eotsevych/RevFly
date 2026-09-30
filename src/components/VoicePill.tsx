@@ -177,6 +177,9 @@ export function VoicePill() {
   const displayedSubtitle =
     state.state === "error" && state.text ? `Copied: "${state.text}"` : dynamicSublabel;
 
+  // Errors that explain what to fix are shown in full, in a pill that grows to fit them.
+  const isLong = state.state === "error" && state.long === true;
+
   if (isIdle) {
     return null;
   }
@@ -194,11 +197,14 @@ export function VoicePill() {
         style={
           {
             WebkitAppRegion: "drag",
-            height: 68,
-            width: "fit-content",
+            height: isLong ? undefined : 68,
+            minHeight: isLong ? 68 : undefined,
+            paddingTop: isLong ? 12 : undefined,
+            paddingBottom: isLong ? 12 : undefined,
+            width: isLong ? "100%" : "fit-content",
             minWidth: 220,
-            maxWidth: 320,
-            borderRadius: 40,
+            maxWidth: isLong ? 384 : 320,
+            borderRadius: isLong ? 28 : 40,
             background: t.pillBg,
             border: `1px solid ${t.pillBorder}`,
             boxShadow: [
@@ -244,13 +250,15 @@ export function VoicePill() {
           </div>
 
           <span
-            className="truncate"
+            className={isLong ? undefined : "truncate"}
             style={{
-              fontSize: 13,
+              fontSize: isLong ? 12.5 : 13,
+              lineHeight: isLong ? 1.35 : undefined,
               color: state.state === "error" ? t.text : t.textMuted,
               marginTop: 2,
               fontFamily: "Inter, sans-serif",
-              maxWidth: 200,
+              maxWidth: isLong ? "none" : 200,
+              whiteSpace: isLong ? "normal" : undefined,
             }}
             title={displayedSubtitle}
           >

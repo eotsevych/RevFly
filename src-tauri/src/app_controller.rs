@@ -174,6 +174,8 @@ fn show_main_window(app_handle: &AppHandle, settings: &AppSettings) {
     let (win_x, win_y) = (settings.window_x, settings.window_y);
     let _ = app_handle.run_on_main_thread(move || {
         if let Some(win) = app.get_webview_window("main") {
+            // A previous long error may have enlarged the pill window.
+            let _ = win.set_size(tauri::Size::Logical(tauri::LogicalSize { width: PILL_WINDOW.0, height: PILL_WINDOW.1 }));
             let active_monitor = get_active_monitor(&win);
             let m_pos = active_monitor.as_ref().map(|m| m.position().clone()).unwrap_or(tauri::PhysicalPosition { x: 0, y: 0 });
             let m_size = active_monitor.as_ref().map(|m| m.size().clone()).unwrap_or(tauri::PhysicalSize { width: 1920, height: 1080 });
@@ -274,8 +276,188 @@ pub(crate) fn apply_pill_window_behavior(win: &tauri::WebviewWindow, order_front
     }
 }
 
+/// Entry point for the audio thread; routes a microphone problem to the running controller.
+pub fn report_mic_problem(app_handle: &AppHandle, report: crate::audio::MicReport) {
+    if let Some(state) = app_handle.try_state::<crate::AppState>() {
+        state.controller.on_mic_problem(report);
+    }
+}
+
+/// Where the user fixes the microphone choice.
+const MIC_SETTING: &str = "Settings → General → Microphone input";
+/// How long an error that needs reading stays on screen.
+const LONG_ERROR_HOLD: Duration = Duration::from_secs(9);
+/// Pill window size while it shows a long error, and its normal size.
+const LONG_ERROR_WINDOW: (f64, f64) = (400.0, 150.0);
+const PILL_WINDOW: (f64, f64) = (340.0, 100.0);
+
+/// Title and explanation shown in the pill for a microphone problem.
+fn mic_problem_message(report: &crate::audio::MicReport) -> (&'static str, String) {
+    use crate::audio::MicProblem;
+    let device = &report.device;
+    if let Some(missing) = &report.missing_device {
+        let what = match report.problem {
+            MicProblem::NoAudio | MicProblem::Silent => "sends no audio",
+            MicProblem::Stalled | MicProblem::Disconnected => "stopped sending audio",
+        };
+        return (
+            "Microphone Not Found",
+            format!("\"{missing}\" isn't connected, and the default \"{device}\" {what}. Pick a working mic in {MIC_SETTING}."),
+        );
+    }
+    match report.problem {
+        MicProblem::NoAudio => (
+            "Microphone Not Working",
+            format!("No audio from \"{device}\" in the first 2 seconds. Check it's connected, or pick another mic in {MIC_SETTING}."),
+        ),
+        MicProblem::Silent => (
+            "Microphone Is Silent",
+            format!("\"{device}\" sends only silence. It may be muted, or mic access is blocked in privacy settings. Check {MIC_SETTING}."),
+        ),
+        MicProblem::Stalled => (
+            "Microphone Stopped",
+            format!("\"{device}\" stopped sending audio, maybe it was unplugged. Check {MIC_SETTING}."),
+        ),
+        MicProblem::Disconnected => (
+            "Microphone Disconnected",
+            format!("\"{device}\" was disconnected while recording. Reconnect it or pick another mic in {MIC_SETTING}."),
+        ),
+    }
+}
+
+fn set_pill_window_size(app_handle: &AppHandle, (width, height): (f64, f64)) {
+    let app = app_handle.clone();
+    let _ = app_handle.run_on_main_thread(move || {
+        if let Some(win) = app.get_webview_window("main") {
+            let _ = win.set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }));
+        }
+    });
+}
+
+/// Shows an error the user needs to read in a larger pill for `LONG_ERROR_HOLD`, then hides it,
+/// unless a new recording (a new session) has started meanwhile.
+fn show_long_error(app_handle: &AppHandle, session_id: &Arc<AtomicU64>, session: u64, title: &str, subtitle: &str) {
+    set_pill_window_size(app_handle, LONG_ERROR_WINDOW);
+    let _ = app_handle.emit(
+        "assistant-state-changed",
+        serde_json::json!({ "state": "error", "title": title, "subtitle": subtitle, "long": true }),
+    );
+    let app = app_handle.clone();
+    let session_id = Arc::clone(session_id);
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(LONG_ERROR_HOLD).await;
+        if session_id.load(Ordering::SeqCst) != session {
+            return;
+        }
+        let _ = app.emit(
+            "assistant-state-changed",
+            serde_json::json!({ "state": "idle", "title": "Ready", "subtitle": null }),
+        );
+        hide_main_window(&app);
+        set_pill_window_size(&app, PILL_WINDOW);
+    });
+}
+
 /// True when a recording carries no signal at all. A live microphone always has some noise floor, so
 /// this means the OS blocked or muted the input (e.g. Windows microphone privacy settings).
+/// Simulated chunk events, or none when chunking is off and the recording went to the model whole.
+fn chunk_diagnostics(
+    chunking: bool,
+    total_audio_sec: f32,
+    vad_trimmed_sec: f32,
+    silence_removed_sec: f32,
+    raw_samples_count: usize,
+) -> (Vec<crate::pipeline_logger::ChunkDiagnosticEvent>, Vec<String>) {
+    if chunking {
+        crate::pipeline_logger::generate_chunk_diagnostics(total_audio_sec, vad_trimmed_sec, silence_removed_sec, raw_samples_count)
+    } else {
+        let actions = crate::pipeline_logger::whole_track_diagnostics(total_audio_sec, vad_trimmed_sec, silence_removed_sec, raw_samples_count);
+        (Vec::new(), actions)
+    }
+}
+
+/// Time allowed for one transcription: 30 s plus half the audio length, so long recordings fit.
+fn inference_timeout(audio_sec: f32) -> Duration {
+    Duration::from_secs_f32(30.0 + audio_sec.max(0.0) * 0.5)
+}
+
+/// Keeps a recording whose transcription failed: saves it to history and adds a Logs entry
+/// pointing at the whole recording, so it can be played back and retried with Second Try.
+#[allow(clippy::too_many_arguments)]
+fn keep_failed_recording(
+    history: &HistoryManager,
+    logger: &PipelineLogManager,
+    app_handle: &AppHandle,
+    captured: &crate::audio::CapturedAudio,
+    settings: &AppSettings,
+    vad: &crate::vad::VadResult,
+    duration_sec: f32,
+    data_dir: &std::path::Path,
+    session_audio: &Option<String>,
+    pipeline_ms: u64,
+    reason: &str,
+) {
+    let marker = format!("[{}]", reason);
+    let _ = history.add_entry(
+        &marker,
+        &marker,
+        "unknown",
+        &settings.target_lang,
+        duration_sec,
+        Some(captured),
+        &settings.storage_mode,
+        settings.storage_cap_mb,
+    );
+    let (chunks, mut actions) = chunk_diagnostics(
+        settings.audio_chunking,
+        duration_sec,
+        vad.trimmed_duration_sec,
+        vad.silence_removed_sec,
+        captured.speech.len(),
+    );
+    actions.push(format!("[FAILED] {}", reason));
+    let log = TranscriptionDiagnosticLog {
+        id: logger.next_id(),
+        timestamp: current_timestamp(),
+        audio_duration_sec: duration_sec,
+        audio_samples_count: captured.speech.len(),
+        vad_trim_ms: vad.duration_ms,
+        vad_original_sec: vad.original_duration_sec,
+        vad_trimmed_sec: vad.trimmed_duration_sec,
+        vad_silence_removed_sec: vad.silence_removed_sec,
+        model_name: settings.model_name.clone(),
+        gpu_metal_active: Transcriber::is_metal_supported(),
+        threads_count: 0,
+        whisper_inference_ms: 0,
+        whisper_speed_factor: 0.0,
+        detected_lang: "unknown".to_string(),
+        raw_text: marker,
+        translation_skipped: true,
+        translation_skip_reason: "Transcription failed".to_string(),
+        translation_ms: 0,
+        final_text: String::new(),
+        clipboard_paste_ms: 0,
+        history_save_ms: 0,
+        total_pipeline_ms: pipeline_ms,
+        audio_filename: session_audio.clone(),
+        vad_audio_filename: Some("latest_vad_trimmed.wav".to_string()),
+        whisper_raw_output: Some(reason.to_string()),
+        segments_count: 0,
+        chunk_events: chunks,
+        whole_track: !settings.audio_chunking,
+        action_logs: actions,
+    };
+    logger.add_log(log.clone(), data_dir);
+    let _ = app_handle.emit("transcription-diagnostic-log", &log);
+}
+
+/// Whole recording of this session for the log's playback and Second Try; none in private mode.
+fn session_audio_filename(data_dir: &std::path::Path, storage_mode: &str, audio: &crate::audio::CapturedAudio) -> Option<String> {
+    let private = storage_mode == "private" || storage_mode == "private_mode";
+    let saved = if private { None } else { crate::pipeline_logger::save_session_audio(data_dir, audio) };
+    saved.or_else(|| Some("latest_recording.wav".to_string()))
+}
+
 fn is_digital_silence(samples: &[f32]) -> bool {
     samples.iter().all(|s| s.abs() < 1e-4)
 }
@@ -596,6 +778,26 @@ impl AppController {
         hide_main_window(&self.app_handle);
     }
 
+    /// Called from the audio thread when the microphone health check fails during a recording.
+    /// Stops the recording (it has no usable audio) and shows what is wrong, long enough to read.
+    pub fn on_mic_problem(&self, report: crate::audio::MicReport) {
+        {
+            let mut phase = self.phase.lock().unwrap();
+            if *phase != AssistantPhase::Listening {
+                return;
+            }
+            // Idle, not Error: pressing the hotkey again starts a fresh recording right away.
+            *phase = AssistantPhase::Idle;
+        }
+        let session = self.session_id.fetch_add(1, Ordering::SeqCst) + 1;
+        self.recorder.cancel_recording();
+        crate::tray::set_tray_recording(&self.app_handle, false, self.is_model_loaded());
+
+        let (title, subtitle) = mic_problem_message(&report);
+        log_stage_event(&get_data_dir(), "MIC_CHECK", &format!("{}: {} ({:?})", title, subtitle, report));
+        show_long_error(&self.app_handle, &self.session_id, session, title, &subtitle);
+    }
+
     pub fn toggle_recording(&self) -> Result<(), String> {
         let cur_phase = { self.phase.lock().unwrap().clone() };
 
@@ -647,33 +849,14 @@ impl AppController {
         if let Err(e) = self.recorder.start_recording(self.app_handle.clone(), settings.input_device.clone()) {
             log::error!("Failed to start recording: {}", e);
             {
+                // Idle, not Error: pressing the hotkey again retries right away.
                 let mut p = self.phase.lock().unwrap();
-                *p = AssistantPhase::Error;
-            }
-            let _ = self.app_handle.emit(
-                "assistant-state-changed",
-                serde_json::json!({
-                    "state": "error",
-                    "title": "Recording Failed",
-                    "subtitle": "Microphone unavailable or blocked"
-                }),
-            );
-            let app_h = self.app_handle.clone();
-            let phase_arc = Arc::clone(&self.phase);
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(Duration::from_millis(3200)).await;
-                let mut p = phase_arc.lock().unwrap();
                 *p = AssistantPhase::Idle;
-                let _ = app_h.emit(
-                    "assistant-state-changed",
-                    serde_json::json!({
-                        "state": "idle",
-                        "title": "Ready",
-                        "subtitle": null
-                    }),
-                );
-                hide_main_window(&app_h);
-            });
+            }
+            crate::tray::set_tray_recording(&self.app_handle, false, self.is_model_loaded());
+            let session = self.session_id.load(Ordering::SeqCst);
+            let subtitle = format!("Couldn't open the microphone: {}. Check {}.", e.trim_end_matches('.'), MIC_SETTING);
+            show_long_error(&self.app_handle, &self.session_id, session, "Recording Failed", &subtitle);
             return Err(e);
         }
 
@@ -751,7 +934,7 @@ impl AppController {
             crate::sound::play_sound(crate::sound::AppSound::StopRecording);
         }
 
-        let raw_samples = self.recorder.stop_recording();
+        let captured = self.recorder.stop_recording(crate::denoise::strength_wet(&settings.noise_reduction));
 
         let app_handle = self.app_handle.clone();
         let phase_arc = Arc::clone(&self.phase);
@@ -771,8 +954,12 @@ impl AppController {
                 log_stage_event(&data_dir, "CANCELLED", "Aborted transcription: cancelled by user");
                 return;
             }
+            // Leveled 16 kHz speech; history gets the native-rate copy from `captured`.
+            let raw_samples = &captured.speech;
             let duration_sec = raw_samples.len() as f32 / 16000.0;
             log_stage_event(&data_dir, "AUDIO", &format!("Captured {} samples ({:.2} s)", raw_samples.len(), duration_sec));
+            let plan = captured.level_plan();
+            log_stage_event(&data_dir, "LEVEL", &format!("Voice leveling: gain {:+.1} dB, make-up {:+.1} dB", plan.gain_db, plan.makeup_db));
 
             // Save full original audio (uncut) to latest_recording.wav for playback in UI
             let latest_wav = data_dir.join("latest_recording.wav");
@@ -822,6 +1009,9 @@ impl AppController {
                 return;
             }
 
+            // Saved before inference so a failed transcription still keeps the whole recording.
+            let session_audio = session_audio_filename(&data_dir, &settings.storage_mode, &captured);
+
             let is_parakeet = settings.model_name == "parakeet-tdt-0.6b-v3";
 
             // Step 2 & 3: Model inference
@@ -840,6 +1030,7 @@ impl AppController {
                     Err(e) => {
                         let vitals = crate::vitals::SystemVitals::collect();
                         log_stage_event(&data_dir, "MODEL_ERROR", &format!("Failed to ensure Parakeet model: {}\n{}", e, vitals.format_report()));
+                        keep_failed_recording(&history_arc, &pipeline_logger_arc, &app_handle, &captured, &settings, &vad_res, duration_sec, &data_dir, &session_audio, pipeline_start.elapsed().as_millis() as u64, &format!("Model download failed: {}", e));
                         log::error!("Failed to ensure Parakeet model: {}", e);
                         {
                             let mut p = phase_arc.lock().unwrap();
@@ -873,8 +1064,9 @@ impl AppController {
                 let vad_samples = vad_res.samples.clone();
                 let model_dir_clone = model_dir.clone();
 
+                let timeout = inference_timeout(vad_res.trimmed_duration_sec);
                 let pk_transcribe_res = tokio::time::timeout(
-                    Duration::from_secs(30),
+                    timeout,
                     tokio::task::spawn_blocking(move || {
                         let mut pk = parakeet_clone.lock().unwrap();
                         pk.transcribe(&vad_samples, &model_dir_clone)
@@ -895,6 +1087,7 @@ impl AppController {
                     Ok(Ok(Err(e))) => {
                         let vitals = crate::vitals::SystemVitals::collect();
                         log_stage_event(&data_dir, "PARAKEET_ERROR", &format!("Parakeet transcription error: {}\n{}", e, vitals.format_report()));
+                        keep_failed_recording(&history_arc, &pipeline_logger_arc, &app_handle, &captured, &settings, &vad_res, duration_sec, &data_dir, &session_audio, pipeline_start.elapsed().as_millis() as u64, &format!("Transcription failed: {}", e));
                         log::error!("Parakeet transcription error: {}", e);
                         {
                             let mut p = phase_arc.lock().unwrap();
@@ -929,8 +1122,9 @@ impl AppController {
                     Err(_timeout) => {
                         let vitals = crate::vitals::SystemVitals::collect();
                         let vitals_report = vitals.format_report();
-                        log_stage_event(&data_dir, "TRANSCRIPTION_TIMEOUT", &format!("Parakeet timed out after 30s!\n{}", vitals_report));
-                        log::error!("Parakeet timed out after 30s!\n{}", vitals_report);
+                        log_stage_event(&data_dir, "TRANSCRIPTION_TIMEOUT", &format!("Parakeet timed out after {}s!\n{}", timeout.as_secs(), vitals_report));
+                        keep_failed_recording(&history_arc, &pipeline_logger_arc, &app_handle, &captured, &settings, &vad_res, duration_sec, &data_dir, &session_audio, pipeline_start.elapsed().as_millis() as u64, &format!("Transcription timed out after {}s", timeout.as_secs()));
+                        log::error!("Parakeet timed out after {}s!\n{}", timeout.as_secs(), vitals_report);
 
                         let vitals_log = data_dir.join("system_vitals_on_timeout.log");
                         let _ = std::fs::write(&vitals_log, format!("{}\nTimestamp: {}\nAudio Duration: {:.2}s\nModel: Parakeet TDT\n", vitals_report, current_timestamp(), vad_res.trimmed_duration_sec));
@@ -944,18 +1138,8 @@ impl AppController {
                             serde_json::json!({
                                 "state": "error",
                                 "title": "Transcription Timed Out",
-                                "subtitle": format!("Parakeet 30s timeout. {}", vitals.short_summary())
+                                "subtitle": format!("Parakeet {}s timeout. {}", timeout.as_secs(), vitals.short_summary())
                             }),
-                        );
-                        let _ = history_arc.add_entry(
-                            "[Transcription timed out]",
-                            &format!("[Timed out after 30s: {}]", vitals.short_summary()),
-                            "auto",
-                            &settings.target_lang,
-                            duration_sec,
-                            Some(&raw_samples),
-                            &settings.storage_mode,
-                            settings.storage_cap_mb,
                         );
                         tokio::time::sleep(Duration::from_millis(3500)).await;
                         let mut p = phase_arc.lock().unwrap();
@@ -986,6 +1170,7 @@ impl AppController {
                     Err(e) => {
                         let vitals = crate::vitals::SystemVitals::collect();
                         log_stage_event(&data_dir, "MODEL_ERROR", &format!("Failed to ensure model {}: {}\n{}", settings.model_name, e, vitals.format_report()));
+                        keep_failed_recording(&history_arc, &pipeline_logger_arc, &app_handle, &captured, &settings, &vad_res, duration_sec, &data_dir, &session_audio, pipeline_start.elapsed().as_millis() as u64, &format!("Model download failed: {}", e));
                         log::error!("Failed to ensure Whisper model: {}", e);
                         {
                             let mut p = phase_arc.lock().unwrap();
@@ -1021,8 +1206,9 @@ impl AppController {
                 let transcriber_clone = Arc::clone(&transcriber_arc);
 
                 let lang_hint = crate::transcribe::map_language_hint(&settings.source_lang);
+                let timeout = inference_timeout(vad_res.trimmed_duration_sec);
                 let inference_res = tokio::time::timeout(
-                    Duration::from_secs(30),
+                    timeout,
                     tokio::task::spawn_blocking(move || {
                         let mut tr = transcriber_clone.lock().unwrap();
                         tr.transcribe_detailed(&samples_clone, &model_path_clone, false, lang_hint)
@@ -1060,7 +1246,7 @@ impl AppController {
                             let forced_hint = crate::transcribe::map_language_hint(&fallback_lang);
 
                             let retry_res = tokio::time::timeout(
-                                Duration::from_secs(15),
+                                timeout,
                                 tokio::task::spawn_blocking(move || {
                                     let mut tr = transcriber_retry.lock().unwrap();
                                     tr.transcribe_detailed(&samples_retry, &model_retry, false, forced_hint)
@@ -1086,6 +1272,7 @@ impl AppController {
                     Ok(Ok(Err(e))) => {
                         let vitals = crate::vitals::SystemVitals::collect();
                         log_stage_event(&data_dir, "WHISPER_ERROR", &format!("Whisper transcription error: {}\n{}", e, vitals.format_report()));
+                        keep_failed_recording(&history_arc, &pipeline_logger_arc, &app_handle, &captured, &settings, &vad_res, duration_sec, &data_dir, &session_audio, pipeline_start.elapsed().as_millis() as u64, &format!("Transcription failed: {}", e));
                         log::error!("Transcription error: {}", e);
                         {
                             let mut p = phase_arc.lock().unwrap();
@@ -1120,8 +1307,9 @@ impl AppController {
                     Err(_timeout) => {
                         let vitals = crate::vitals::SystemVitals::collect();
                         let vitals_report = vitals.format_report();
-                        log_stage_event(&data_dir, "TRANSCRIPTION_TIMEOUT", &format!("Transcription timed out after 30s!\n{}", vitals_report));
-                        log::error!("Transcription timed out after 30 seconds!\n{}", vitals_report);
+                        log_stage_event(&data_dir, "TRANSCRIPTION_TIMEOUT", &format!("Transcription timed out after {}s!\n{}", timeout.as_secs(), vitals_report));
+                        keep_failed_recording(&history_arc, &pipeline_logger_arc, &app_handle, &captured, &settings, &vad_res, duration_sec, &data_dir, &session_audio, pipeline_start.elapsed().as_millis() as u64, &format!("Transcription timed out after {}s", timeout.as_secs()));
+                        log::error!("Transcription timed out after {}s!\n{}", timeout.as_secs(), vitals_report);
 
                         let vitals_log_path = data_dir.join("system_vitals_on_timeout.log");
                         let _ = std::fs::write(
@@ -1140,19 +1328,8 @@ impl AppController {
                             serde_json::json!({
                                 "state": "error",
                                 "title": "Transcription Timed Out",
-                                "subtitle": format!("30s timeout on {}. {}", settings.model_name, vitals.short_summary())
+                                "subtitle": format!("{}s timeout on {}. {}", timeout.as_secs(), settings.model_name, vitals.short_summary())
                             }),
-                        );
-
-                        let _ = history_arc.add_entry(
-                            "[Transcription timed out]",
-                            &format!("[Timed out after 30s: {}]", vitals.short_summary()),
-                            "unknown",
-                            &settings.target_lang,
-                            duration_sec,
-                            Some(&raw_samples),
-                            &settings.storage_mode,
-                            settings.storage_cap_mb,
                         );
 
                         tokio::time::sleep(Duration::from_millis(3500)).await;
@@ -1175,7 +1352,8 @@ impl AppController {
             crate::tray::update_tray_model_status(&app_handle, true);
 
             if raw_text.is_empty() || raw_text == "[BLANK_AUDIO]" {
-                let (chunks, mut actions) = crate::pipeline_logger::generate_chunk_diagnostics(
+                let (chunks, mut actions) = chunk_diagnostics(
+                    settings.audio_chunking,
                     duration_sec,
                     vad_res.trimmed_duration_sec,
                     vad_res.silence_removed_sec,
@@ -1206,11 +1384,12 @@ impl AppController {
                     clipboard_paste_ms: 0,
                     history_save_ms: 0,
                     total_pipeline_ms: pipeline_start.elapsed().as_millis() as u64,
-                    audio_filename: Some("latest_recording.wav".to_string()),
+                    audio_filename: session_audio.clone(),
                     vad_audio_filename: Some("latest_vad_trimmed.wav".to_string()),
                     whisper_raw_output: Some(whisper_raw_output.clone()),
                     segments_count,
                     chunk_events: chunks,
+                    whole_track: !settings.audio_chunking,
                     action_logs: actions,
                 };
                 pipeline_logger_arc.add_log(empty_log.clone(), &data_dir);
@@ -1648,7 +1827,7 @@ impl AppController {
                 &detected_lang,
                 &settings.target_lang,
                 duration_sec,
-                Some(&raw_samples),
+                Some(&captured),
                 &settings.storage_mode,
                 settings.storage_cap_mb,
             );
@@ -1663,7 +1842,8 @@ impl AppController {
             };
             log_stage_event(&data_dir, "COMPLETE", &format!("Pipeline complete in {} ms! Speed factor: {:.1}x", total_pipeline_ms, speed_factor));
 
-            let (chunks, mut actions) = crate::pipeline_logger::generate_chunk_diagnostics(
+            let (chunks, mut actions) = chunk_diagnostics(
+                    settings.audio_chunking,
                 duration_sec,
                 vad_res.trimmed_duration_sec,
                 vad_res.silence_removed_sec,
@@ -1702,11 +1882,12 @@ impl AppController {
                 clipboard_paste_ms: paste_ms,
                 history_save_ms: history_ms,
                 total_pipeline_ms,
-                audio_filename: Some("latest_recording.wav".to_string()),
+                audio_filename: session_audio.clone(),
                 vad_audio_filename: Some("latest_vad_trimmed.wav".to_string()),
                 whisper_raw_output: Some(whisper_raw_output),
                 segments_count,
                 chunk_events: chunks,
+                whole_track: !settings.audio_chunking,
                 action_logs: actions,
             };
 
@@ -1767,7 +1948,25 @@ impl AppController {
 
 #[cfg(test)]
 mod tests {
-    use super::is_digital_silence;
+    use super::{is_digital_silence, mic_problem_message};
+    use crate::audio::{MicProblem, MicReport};
+
+    fn report(problem: MicProblem, missing: Option<&str>) -> MicReport {
+        MicReport { problem, device: "MacBook Pro Microphone".into(), missing_device: missing.map(Into::into) }
+    }
+
+    #[test]
+    fn mic_messages_name_the_device_and_the_setting() {
+        let (title, text) = mic_problem_message(&report(MicProblem::NoAudio, None));
+        assert_eq!(title, "Microphone Not Working");
+        assert!(text.contains("\"MacBook Pro Microphone\""), "{text}");
+        assert!(text.contains("Settings → General → Microphone input"), "{text}");
+
+        let (title, text) = mic_problem_message(&report(MicProblem::Silent, Some("Jabra Evolve")));
+        assert_eq!(title, "Microphone Not Found");
+        assert!(text.contains("\"Jabra Evolve\" isn't connected"), "{text}");
+        assert!(text.contains("default \"MacBook Pro Microphone\" sends no audio"), "{text}");
+    }
 
     #[test]
     fn digital_silence_only_for_blocked_input() {

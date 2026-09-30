@@ -37,6 +37,8 @@ export interface BackendSettings {
   chunk_pause_ms?: number;
   chunk_safety_sec?: number;
   chunk_overlap_ms?: number;
+  audio_chunking?: boolean;
+  noise_reduction?: NoiseReduction;
   gemini_model?: string;
   mask_confidential?: boolean;
   mask_words?: string;
@@ -118,6 +120,8 @@ export interface AssistantStateEvent {
   title: string;
   subtitle: string | null;
   text?: string;
+  /** An error the user needs to read: shown in full (wrapped, not truncated) in a larger pill. */
+  long?: boolean;
 }
 
 export async function fetchSettings(): Promise<BackendSettings | null> {
@@ -422,6 +426,7 @@ export interface TranscriptionDiagnosticLog {
   whisper_raw_output?: string | null;
   segments_count?: number;
   chunk_events?: ChunkDiagnosticEvent[];
+  whole_track?: boolean;
   action_logs?: string[];
 }
 
@@ -538,6 +543,16 @@ export interface LabAudioItem {
   is_vad_trimmed: boolean;
 }
 
+export type NoiseReduction = "off" | "light" | "balanced" | "strong";
+
+/** RNNoise strengths, matching Cap's Studio Sound tiers. */
+export const NOISE_REDUCTION_OPTIONS: { value: NoiseReduction; label: string }[] = [
+  { value: "off", label: "Off" },
+  { value: "light", label: "Light" },
+  { value: "balanced", label: "Balanced" },
+  { value: "strong", label: "Strong" },
+];
+
 export interface LabExperimentRequest {
   audio_filename: string;
   model_name: string;
@@ -552,6 +567,7 @@ export interface LabExperimentRequest {
   collapse_redundancy?: boolean;
   annotate_ambiguity?: boolean;
   normalize_structured_values?: boolean;
+  noise_reduction?: NoiseReduction;
 }
 
 export interface LabExperimentResult {

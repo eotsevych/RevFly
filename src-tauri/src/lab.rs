@@ -45,6 +45,9 @@ pub struct LabExperimentRequest {
     pub annotate_ambiguity: bool,
     #[serde(default = "lab_default_true")]
     pub normalize_structured_values: bool,
+    /// "off" | "light" | "balanced" | "strong", applied to the file before the models.
+    #[serde(default)]
+    pub noise_reduction: Option<String>,
 }
 
 fn lab_default_true() -> bool { true }
@@ -129,7 +132,35 @@ pub fn list_available_audio_files() -> Vec<LabAudioItem> {
         }
     }
 
-    // 3. Check audio/ directory for saved historical recordings
+    // 3. Whole recordings of this launch's logged sessions (Second Try targets these)
+    let session_dir = data_dir.join("session_audio");
+    if let Ok(entries) = fs::read_dir(&session_dir) {
+        let mut entries_vec: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("wav"))
+            .collect();
+        entries_vec.sort_by(|a, b| b.cmp(a)); // Newest first
+
+        for p in entries_vec.into_iter().take(50) {
+            if let Some(fname) = p.file_name().and_then(|s| s.to_str()) {
+                if let Ok((samples, rate)) = read_wav_file(&p) {
+                    let size = p.metadata().map(|m| m.len()).unwrap_or(0);
+                    let rel = format!("session_audio/{}", fname);
+                    list.push(LabAudioItem {
+                        id: rel.clone(),
+                        name: format!("Session Recording ({})", fname),
+                        filename: rel,
+                        duration_sec: samples.len() as f32 / rate as f32,
+                        size_bytes: size,
+                        is_vad_trimmed: false,
+                    });
+                }
+            }
+        }
+    }
+
+    // 4. Check audio/ directory for saved historical recordings
     let audio_dir = data_dir.join("audio");
     if let Ok(entries) = fs::read_dir(&audio_dir) {
         let mut entries_vec: Vec<PathBuf> = entries
@@ -186,7 +217,18 @@ pub async fn run_experiment(
         return Err(format!("Audio file not found: {:?}", audio_path));
     }
 
-    let (raw_samples, _sample_rate) = read_wav_file(&audio_path)?;
+    let (file_samples, sample_rate) = read_wav_file(&audio_path)?;
+    let file_samples = match req.noise_reduction.as_deref().and_then(crate::denoise::strength_wet) {
+        Some(wet) => {
+            let clean = crate::denoise::denoise(&file_samples, sample_rate, wet);
+            // Saved so the denoised version can be listened to.
+            let _ = crate::history::write_wav_file(&data_dir.join("lab_denoised.wav"), &clean, sample_rate);
+            clean
+        }
+        None => file_samples,
+    };
+    // History recordings are saved at the microphone's own rate; the models need 16 kHz.
+    let raw_samples = crate::audio::resample_to_16k(&file_samples, sample_rate);
     if raw_samples.is_empty() {
         return Err("Audio file is empty".to_string());
     }

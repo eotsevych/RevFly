@@ -67,7 +67,7 @@ impl HistoryManager {
         source_lang: &str,
         target_lang: &str,
         duration: f32,
-        audio_samples: Option<&[f32]>,
+        audio: Option<&crate::audio::CapturedAudio>,
         storage_mode: &str,
         storage_cap_mb: u64,
     ) -> Result<i64, String> {
@@ -85,11 +85,13 @@ impl HistoryManager {
         let mut audio_file_rel: Option<String> = None;
 
         if storage_mode == "text_audio" || storage_mode == "text_and_audio" {
-            if let Some(samples) = audio_samples {
+            if let Some(audio) = audio {
                 let filename = format!("rec_{}.wav", now);
                 let full_path = self.audio_dir.join(&filename);
 
-                if let Ok(()) = write_wav_file(&full_path, samples, 16000) {
+                // Saved leveled at the microphone's own rate, so playback keeps the full bandwidth.
+                let (samples, sample_rate) = audio.playback();
+                if let Ok(()) = write_wav_file(&full_path, &samples, sample_rate) {
                     audio_file_rel = Some(filename);
                 }
 

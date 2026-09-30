@@ -2,7 +2,7 @@ use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +52,9 @@ pub struct TranscriptionDiagnosticLog {
     pub segments_count: usize,
     #[serde(default)]
     pub chunk_events: Vec<ChunkDiagnosticEvent>,
+    /// True when chunking is off: the recording went to the model as one track.
+    #[serde(default)]
+    pub whole_track: bool,
     #[serde(default)]
     pub action_logs: Vec<String>,
 }
@@ -142,6 +145,8 @@ pub struct PipelineLogManager {
 
 impl PipelineLogManager {
     pub fn new() -> Self {
+        // Logs live in memory only, so session recordings from an earlier launch belong to no log.
+        let _ = fs::remove_dir_all(session_audio_dir(&crate::settings::get_data_dir()));
         Self {
             logs: Arc::new(Mutex::new(Vec::new())),
             counter: Arc::new(Mutex::new(1)),
@@ -166,7 +171,9 @@ impl PipelineLogManager {
         let mut list = self.logs.lock().unwrap();
         list.insert(0, log);
         if list.len() > 50 {
-            list.truncate(50);
+            for dropped in list.drain(50..) {
+                remove_session_audio(data_dir, dropped.audio_filename.as_deref());
+            }
         }
     }
 
@@ -178,7 +185,45 @@ impl PipelineLogManager {
     pub fn clear_logs(&self) {
         let mut list = self.logs.lock().unwrap();
         list.clear();
+        let _ = fs::remove_dir_all(session_audio_dir(&crate::settings::get_data_dir()));
     }
+}
+
+/// Folder with the whole recording of each logged session, for playback and Second Try.
+const SESSION_AUDIO_DIR: &str = "session_audio";
+
+fn session_audio_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join(SESSION_AUDIO_DIR)
+}
+
+/// Saves the entire recording of one session and returns its path relative to the data dir.
+pub fn save_session_audio(data_dir: &Path, audio: &crate::audio::CapturedAudio) -> Option<String> {
+    let dir = session_audio_dir(data_dir);
+    fs::create_dir_all(&dir).ok()?;
+    let filename = format!("session_{}.wav", Local::now().format("%Y%m%d_%H%M%S_%3f"));
+    let (samples, sample_rate) = audio.playback();
+    crate::history::write_wav_file(&dir.join(&filename), &samples, sample_rate).ok()?;
+    Some(format!("{}/{}", SESSION_AUDIO_DIR, filename))
+}
+
+fn remove_session_audio(data_dir: &Path, relative: Option<&str>) {
+    if let Some(rel) = relative.filter(|r| r.starts_with(SESSION_AUDIO_DIR)) {
+        let _ = fs::remove_file(data_dir.join(rel));
+    }
+}
+
+/// Diagnostics for a recording sent to the model as one whole track (chunking off).
+pub fn whole_track_diagnostics(
+    total_audio_sec: f32,
+    vad_trimmed_sec: f32,
+    silence_removed_sec: f32,
+    raw_samples_count: usize,
+) -> Vec<String> {
+    vec![
+        format!("[CAPTURE] Mic recording completed: {:.2}s ({} samples @ 16kHz)", total_audio_sec, raw_samples_count),
+        format!("[VAD] Silence analysis: cut {:.2}s dead air, kept {:.2}s active voice", silence_removed_sec, vad_trimmed_sec),
+        format!("[TRACK] Chunking off: the whole {:.2}s recording went to the model as one track", vad_trimmed_sec.max(0.0)),
+    ]
 }
 
 pub fn current_timestamp() -> String {
