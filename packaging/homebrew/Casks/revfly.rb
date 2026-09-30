@@ -4,8 +4,8 @@
 # After each release, run scripts/update_homebrew_cask.sh <version> to refresh version and sha256,
 # then copy this file to Casks/revfly.rb in the tap repo (see DEPLOYMENT.md).
 cask "revfly" do
-  version "0.1.4"
-  sha256 "9e6e3ec5dbdd848cc8fb558e41aaa93f86e0447dd6a422da725bff2694f415c0"
+  version "0.1.5"
+  sha256 "df41f60f2a93debe4be4510c89217697c1e8bc868b4ff89a6e9254e6428b2624"
 
   url "https://github.com/eotsevych/RevFly/releases/download/v#{version}/RevFly_Universal.dmg"
   name "RevFly"
