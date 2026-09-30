@@ -22,6 +22,7 @@ import {
   getModelsDirPath,
   fetchHardwareProfile,
   type HardwareProfile,
+  NOISE_REDUCTION_OPTIONS,
 } from "@/lib/tauri";
 
 const IDLE_OPTIONS = [
@@ -556,6 +557,19 @@ export default function GeneralTab({ t }: { t: Tokens }) {
               {isPlayingTestSound ? "Playing…" : "Test Sound"}
             </button>
           </div>
+        </Row>
+
+        <Row
+          label="Noise reduction"
+          hint="Removes fans, hum and room noise from each recording (RNNoise)"
+          t={t}
+        >
+          <Segmented
+            options={NOISE_REDUCTION_OPTIONS}
+            value={settings.noise_reduction ?? "off"}
+            onChange={(v) => updateSettings({ noise_reduction: v })}
+            t={t}
+          />
         </Row>
 
         <Row label="Idle timeout" hint={idleTimeoutHint(idleSec)} t={t} last>

@@ -47,6 +47,7 @@ const defaultSettings: BackendSettings = {
   chunk_safety_sec: 10,
   chunk_overlap_ms: 400,
   audio_chunking: false,
+  noise_reduction: "off",
   gemini_model: "gemini-3.6-flash",
   mask_confidential: false,
   mask_words: "",

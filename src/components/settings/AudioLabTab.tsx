@@ -4,6 +4,7 @@ import { errorMessage } from "@/lib/utils";
 import { Section, Row, FieldSelect } from "./SettingsPrimitives";
 import { useSettingsContext } from "./useSettingsContext";
 import Toggle from "@/components/ui/Toggle";
+import Segmented from "@/components/ui/Segmented";
 import {
   fetchLabAudioFiles,
   triggerRunLabExperiment,
@@ -11,6 +12,8 @@ import {
   isTauri,
   type LabAudioItem,
   type LabExperimentResult,
+  NOISE_REDUCTION_OPTIONS,
+  type NoiseReduction,
 } from "@/lib/tauri";
 
 export default function AudioLabTab({
@@ -35,6 +38,9 @@ export default function AudioLabTab({
   const [collapse, setCollapse] = useState(!!settings.collapse_redundancy);
   const [ambiguity, setAmbiguity] = useState(!!settings.annotate_ambiguity);
   const [structured, setStructured] = useState(!!settings.normalize_structured_values);
+  const [noiseReduction, setNoiseReduction] = useState<NoiseReduction>(
+    settings.noise_reduction ?? "off",
+  );
   const [phase, setPhase] = useState<"idle" | "running" | "done" | "error">("idle");
   const [result, setResult] = useState<LabExperimentResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -148,6 +154,7 @@ export default function AudioLabTab({
         collapse_redundancy: collapse,
         annotate_ambiguity: ambiguity,
         normalize_structured_values: structured,
+        noise_reduction: noiseReduction,
       });
       if (res) {
         setResult(res);
@@ -250,6 +257,18 @@ export default function AudioLabTab({
         </Row>
         <Row label="Language hint" hint="null = auto" t={t}>
           <FieldSelect value={language} onChange={setLanguage} options={languageOptions} t={t} />
+        </Row>
+        <Row
+          label="Noise reduction"
+          hint="RNNoise before the model; saved as lab_denoised.wav"
+          t={t}
+        >
+          <Segmented
+            options={NOISE_REDUCTION_OPTIONS}
+            value={noiseReduction}
+            onChange={setNoiseReduction}
+            t={t}
+          />
         </Row>
         <Row label="VAD trimming" hint="Silero VAD cut + 400ms padding" t={t}>
           <Toggle value={useVad} onChange={setUseVad} accent={t.accent} />

@@ -58,6 +58,9 @@ pub struct AppSettings {
     /// Off: a recording is sent to the model as one whole track and logged as such.
     #[serde(default)]
     pub audio_chunking: bool,
+    /// "off" | "light" | "balanced" | "strong": RNNoise strength applied when recording stops.
+    #[serde(default = "default_noise_reduction")]
+    pub noise_reduction: String,
     #[serde(default = "default_gemini_model")]
     pub gemini_model: String,
     #[serde(default)]
@@ -199,6 +202,7 @@ impl Default for AppSettings {
             chunk_safety_sec: 10,
             chunk_overlap_ms: 400,
             audio_chunking: false,
+            noise_reduction: default_noise_reduction(),
             gemini_model: "gemini-3.6-flash".to_string(),
             mask_confidential: false,
             mask_words: String::new(),
@@ -228,6 +232,10 @@ pub fn get_config_dir() -> PathBuf {
     } else {
         PathBuf::from(".revfly")
     }
+}
+
+fn default_noise_reduction() -> String {
+    "off".to_string()
 }
 
 pub fn get_data_dir() -> PathBuf {

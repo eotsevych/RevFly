@@ -45,6 +45,9 @@ pub struct LabExperimentRequest {
     pub annotate_ambiguity: bool,
     #[serde(default = "lab_default_true")]
     pub normalize_structured_values: bool,
+    /// "off" | "light" | "balanced" | "strong", applied to the file before the models.
+    #[serde(default)]
+    pub noise_reduction: Option<String>,
 }
 
 fn lab_default_true() -> bool { true }
@@ -215,6 +218,15 @@ pub async fn run_experiment(
     }
 
     let (file_samples, sample_rate) = read_wav_file(&audio_path)?;
+    let file_samples = match req.noise_reduction.as_deref().and_then(crate::denoise::strength_wet) {
+        Some(wet) => {
+            let clean = crate::denoise::denoise(&file_samples, sample_rate, wet);
+            // Saved so the denoised version can be listened to.
+            let _ = crate::history::write_wav_file(&data_dir.join("lab_denoised.wav"), &clean, sample_rate);
+            clean
+        }
+        None => file_samples,
+    };
     // History recordings are saved at the microphone's own rate; the models need 16 kHz.
     let raw_samples = crate::audio::resample_to_16k(&file_samples, sample_rate);
     if raw_samples.is_empty() {

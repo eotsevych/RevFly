@@ -12,10 +12,11 @@ const BAR_MAX_H = 29; // stays clear of the pill edge
 const BAR_GROWTH = 20; // extra height at full energy and volume
 const BAR_OVERSHOOT_MAX = 2; // spring overshoot when a loud word starts
 const WAVE_BOX_H = BAR_MAX_H + BAR_OVERSHOOT_MAX + 1;
-// Silence: a slow rolling wave around the resting height shows the app is still listening.
-const IDLE_REST_H = 11;
-const IDLE_AMPLITUDE = 3;
-const SILENCE_VOLUME = 0.02;
+// Bars rest flat at BAR_MIN_H until a voice is detected. The gate opens above VOICE_OPEN and
+// closes once volume stays below VOICE_CLOSE for VOICE_HOLD_MS, so pauses between words don't flicker.
+const VOICE_OPEN = 0.03;
+const VOICE_CLOSE = 0.02;
+const VOICE_HOLD_MS = 200;
 // Falling bars keep 80% of their height per 60 fps frame; rises are instant.
 const FALL_KEEP_PER_FRAME = 0.8;
 const FRAME_MS = 1000 / 60;
@@ -45,7 +46,9 @@ export function SoundWave({ levels }: { levels?: AudioLevels | undefined }) {
   levelsRef.current = levels;
 
   useEffect(() => {
-    const heights = new Array<number>(BAR_COUNT).fill(IDLE_REST_H);
+    const heights = new Array<number>(BAR_COUNT).fill(BAR_MIN_H);
+    let voice = false;
+    let quietSince = 0;
     let loud = 0;
     let paintedLoud = -1;
     let last = performance.now();
@@ -56,17 +59,26 @@ export function SoundWave({ levels }: { levels?: AudioLevels | undefined }) {
       const fallKeep = Math.pow(FALL_KEEP_PER_FRAME, dt / FRAME_MS);
       const volume = levelsRef.current?.volume ?? 0;
       const bands = levelsRef.current?.bands ?? [];
-      const silent = volume < SILENCE_VOLUME;
+      if (volume >= VOICE_OPEN) {
+        voice = true;
+        quietSince = 0;
+      } else if (voice && volume < VOICE_CLOSE) {
+        if (!quietSince) quietSince = now;
+        if (now - quietSince >= VOICE_HOLD_MS) voice = false;
+      } else {
+        quietSince = 0;
+      }
+      const silent = !voice;
 
       // Glow and colour shift follow loudness with the same fast-rise, slow-fall feel.
-      const loudTarget = Math.min(1, Math.max(0, (volume - LOUD_START) / (LOUD_FULL - LOUD_START)));
+      const loudTarget = silent
+        ? 0
+        : Math.min(1, Math.max(0, (volume - LOUD_START) / (LOUD_FULL - LOUD_START)));
       loud = loudTarget > loud ? loudTarget : loud * fallKeep + loudTarget * (1 - fallKeep);
 
       for (let i = 0; i < BAR_COUNT; i++) {
-        const target = silent
-          ? IDLE_REST_H + Math.sin((now / 1000) * 3 + i * 0.8) * IDLE_AMPLITUDE
-          : BAR_MIN_H + (bands[i] ?? 0) * volume * BAR_GROWTH;
-        const cur = heights[i] ?? IDLE_REST_H;
+        const target = silent ? BAR_MIN_H : BAR_MIN_H + (bands[i] ?? 0) * volume * BAR_GROWTH;
+        const cur = heights[i] ?? BAR_MIN_H;
         let next: number;
         if (target > cur) {
           // Instant rise, with a small spring overshoot on the onset of a loud word.
@@ -109,7 +121,7 @@ export function SoundWave({ levels }: { levels?: AudioLevels | undefined }) {
           }}
           style={{
             width: BAR_WIDTH,
-            height: IDLE_REST_H,
+            height: BAR_MIN_H,
             borderRadius: BAR_WIDTH,
             background: barGradient(0),
             willChange: "height",
