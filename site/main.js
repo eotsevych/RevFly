@@ -65,10 +65,9 @@ function applyLanguage(next) {
   });
 
   document.title = dict?.["meta.title"] ?? englishMeta.title;
-  document.querySelector('meta[name="description"]')?.setAttribute(
-    "content",
-    dict?.["meta.description"] ?? englishMeta.description,
-  );
+  document
+    .querySelector('meta[name="description"]')
+    ?.setAttribute("content", dict?.["meta.description"] ?? englishMeta.description);
 
   document.querySelectorAll(".lang-switch [data-lang]").forEach((b) => {
     b.setAttribute("aria-pressed", String(b.dataset.lang === lang));
