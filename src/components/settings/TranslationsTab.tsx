@@ -71,7 +71,7 @@ const LLM_PRESETS = [
     name: "Gemini (Cloud)",
     endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
     model: "gemini-3.6-flash",
-    hint: "1000 free requests/day with Gemini API key",
+    hint: "Free daily requests with a Gemini API key (aistudio.google.com/apikey)",
   },
   {
     name: "Ollama (Local)",

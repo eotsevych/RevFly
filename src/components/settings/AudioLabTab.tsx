@@ -209,7 +209,7 @@ export default function AudioLabTab({
                 fontFamily: "JetBrains Mono, monospace",
               }}
             >
-              {selItem.filename} \u00b7 {(selItem.size_bytes / 1024).toFixed(0)} KB
+              {selItem.filename} · {(selItem.size_bytes / 1024).toFixed(0)} KB
             </p>
           )}
           <div
@@ -281,10 +281,10 @@ export default function AudioLabTab({
             <Row label="Remove filler words" hint="um, uh" t={t}>
               <Toggle value={remFillers} onChange={setRemFillers} accent={t.accent} />
             </Row>
-            <Row label="Numbers to digits" hint="twenty four \u2192 24" t={t}>
+            <Row label="Numbers to digits" hint="twenty four → 24" t={t}>
               <Toggle value={convNumbers} onChange={setConvNumbers} accent={t.accent} />
             </Row>
-            <Row label="Remove stutters" hint="the the \u2192 the" t={t}>
+            <Row label="Remove stutters" hint="the the → the" t={t}>
               <Toggle value={remStutters} onChange={setRemStutters} accent={t.accent} />
             </Row>
           </>
@@ -457,7 +457,7 @@ export default function AudioLabTab({
                         fontFamily: "JetBrains Mono, monospace",
                       }}
                     >
-                      \u00b7 {u}
+                      · {u}
                     </p>
                   ))}
                 </div>
@@ -470,8 +470,8 @@ export default function AudioLabTab({
                   fontFamily: "JetBrains Mono, monospace",
                 }}
               >
-                Post: {(result.post_applied || []).join(", ") || "none"} \u00b7 lang:{" "}
-                {result.detected_lang} \u00b7 {result.hardware_engine}
+                Post: {(result.post_applied || []).join(", ") || "none"} · lang:{" "}
+                {result.detected_lang} · {result.hardware_engine}
               </p>
             </div>
           </Section>
@@ -533,7 +533,7 @@ export default function AudioLabTab({
                       margin: "4px 0",
                     }}
                   >
-                    [{(s.start_ms / 1000).toFixed(2)}\u2013{(s.end_ms / 1000).toFixed(2)}s \u00b7{" "}
+                    [{(s.start_ms / 1000).toFixed(2)}–{(s.end_ms / 1000).toFixed(2)}s ·{" "}
                     {(s.no_speech_prob * 100).toFixed(0)}%] {s.text}
                   </p>
                 ))}
