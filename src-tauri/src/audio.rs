@@ -112,6 +112,9 @@ fn resolve_input_device_reporting_fallback(device_name: Option<&str>) -> Option<
 pub const MIC_CHECK_AFTER: Duration = Duration::from_millis(2500);
 /// Once audio has flowed, this long without new samples means the device went away.
 const MIC_STALL_AFTER: Duration = Duration::from_millis(1500);
+/// Once real audio has flowed, this long of pure digital silence means the microphone stopped
+/// delivering sound (natural pauses always keep a noise floor).
+const MIC_WENT_SILENT_AFTER: Duration = Duration::from_secs(3);
 /// A live microphone always has a noise floor above this; below it the OS is feeding zeros.
 const MIC_SILENCE_PEAK: f32 = 1e-4;
 
@@ -123,8 +126,26 @@ pub enum MicProblem {
     Silent,
     /// Audio flowed, then stopped (typically unplugged mid-recording).
     Stalled,
+    /// Real audio flowed, then only digital silence arrived (the device stopped delivering sound).
+    WentSilent,
     /// The audio system reported the device as gone.
     Disconnected,
+}
+
+impl MicProblem {
+    /// Problems found before any usable audio arrived. Those cancel the recording; later ones only
+    /// warn, so speech captured before the problem is still transcribed.
+    pub fn is_startup(self) -> bool {
+        matches!(self, MicProblem::NoAudio | MicProblem::Silent)
+    }
+}
+
+/// What the health check noticed in the latest audio.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MicEvent {
+    Problem(MicProblem),
+    /// Audio is flowing again after a mid-recording problem.
+    Recovered,
 }
 
 /// A microphone failure detected while recording, reported to the controller.
@@ -144,41 +165,63 @@ struct MicHealth {
     samples: usize,
     peak: f32,
     last_audio: Option<Instant>,
+    /// Start of the current stretch of digital silence.
+    dead_since: Option<Instant>,
+    /// The mid-recording problem currently reported, until audio recovers.
+    dropout: Option<MicProblem>,
     checked: bool,
 }
 
 impl MicHealth {
     fn new(started: Instant) -> Self {
-        Self { started, samples: 0, peak: 0.0, last_audio: None, checked: false }
+        Self { started, samples: 0, peak: 0.0, last_audio: None, dead_since: None, dropout: None, checked: false }
     }
 
-    fn observe(&mut self, new_samples: &[f32], now: Instant) -> Option<MicProblem> {
-        if !new_samples.is_empty() {
+    fn observe(&mut self, new_samples: &[f32], now: Instant) -> Option<MicEvent> {
+        let has_new = !new_samples.is_empty();
+        let all_dead = new_samples.iter().all(|s| !s.is_finite() || s.abs() < MIC_SILENCE_PEAK);
+        if has_new {
             self.samples += new_samples.len();
-            self.peak = new_samples.iter().fold(self.peak, |p, s| p.max(s.abs()));
+            self.peak = new_samples.iter().filter(|s| s.is_finite()).fold(self.peak, |p, s| p.max(s.abs()));
             self.last_audio = Some(now);
+            self.dead_since = if all_dead { Some(self.dead_since.unwrap_or(now)) } else { None };
         }
+
         if !self.checked {
             if now.duration_since(self.started) < MIC_CHECK_AFTER {
                 return None;
             }
             self.checked = true;
             if self.samples == 0 {
-                return Some(MicProblem::NoAudio);
+                return Some(MicEvent::Problem(MicProblem::NoAudio));
             }
             if self.peak < MIC_SILENCE_PEAK {
-                return Some(MicProblem::Silent);
+                return Some(MicEvent::Problem(MicProblem::Silent));
             }
             return None;
         }
-        match self.last_audio {
-            Some(last) if now.duration_since(last) >= MIC_STALL_AFTER => Some(MicProblem::Stalled),
-            _ => None,
+
+        if self.dropout.is_some() {
+            return (has_new && !all_dead).then(|| {
+                self.dropout = None;
+                MicEvent::Recovered
+            });
         }
+        let stalled = self.last_audio.is_some_and(|last| now.duration_since(last) >= MIC_STALL_AFTER);
+        let went_silent = self.dead_since.is_some_and(|since| now.duration_since(since) >= MIC_WENT_SILENT_AFTER);
+        let problem = if stalled {
+            MicProblem::Stalled
+        } else if went_silent {
+            MicProblem::WentSilent
+        } else {
+            return None;
+        };
+        self.dropout = Some(problem);
+        Some(MicEvent::Problem(problem))
     }
 }
 
-/// Sends a microphone problem to the controller once per recording.
+/// Sends a device-gone report to the controller once per recording.
 fn report_mic_problem(app_handle: &AppHandle, reported: &AtomicBool, report: MicReport) {
     if reported.swap(true, Ordering::SeqCst) {
         return;
@@ -337,7 +380,7 @@ enum AudioCmd {
     Start {
         app_handle: AppHandle,
         device_name: Option<String>,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<StreamInfo, String>>,
     },
     Stop {
         /// Noise reduction mix, None when off.
@@ -355,6 +398,60 @@ pub struct CapturedAudio {
     native: Vec<f32>,
     native_rate: u32,
     plan: crate::leveler::LevelPlan,
+    /// What the microphone delivered, measured before leveling and noise reduction.
+    pub stats: CaptureStats,
+}
+
+/// The input stream a recording opened.
+#[derive(Clone, Debug)]
+pub struct StreamInfo {
+    pub device: String,
+    pub sample_rate: u32,
+    pub channels: u16,
+    /// The user's chosen device, when it was missing and `device` is the fallback default.
+    pub missing_device: Option<String>,
+}
+
+/// Facts about the raw 16 kHz capture, for the stop log: how much audio arrived and whether parts of
+/// it were dead (digital silence, invalid values), which shows a microphone that quietly stopped.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CaptureStats {
+    pub captured_sec: f32,
+    /// Total digital silence, in seconds (a live microphone never produces it).
+    pub zero_sec: f32,
+    /// Longest stretch of digital silence and where it started, in seconds.
+    pub longest_zero_sec: f32,
+    pub longest_zero_at_sec: f32,
+    /// NaN or infinite samples.
+    pub invalid_samples: usize,
+}
+
+impl CaptureStats {
+    /// Measures 16 kHz mono samples. Silence is counted in 10 ms blocks.
+    pub fn measure(samples: &[f32]) -> Self {
+        const BLOCK: usize = 160;
+        let rate = 16000.0;
+        let mut stats = Self { captured_sec: samples.len() as f32 / rate, ..Self::default() };
+        stats.invalid_samples = samples.iter().filter(|s| !s.is_finite()).count();
+        let (mut run_start, mut run_len) = (0usize, 0usize);
+        for (i, block) in samples.chunks(BLOCK).enumerate() {
+            let dead = block.iter().all(|s| s.is_finite() && s.abs() < MIC_SILENCE_PEAK);
+            if dead {
+                if run_len == 0 {
+                    run_start = i * BLOCK;
+                }
+                run_len += block.len();
+                stats.zero_sec += block.len() as f32 / rate;
+                if run_len as f32 / rate > stats.longest_zero_sec {
+                    stats.longest_zero_sec = run_len as f32 / rate;
+                    stats.longest_zero_at_sec = run_start as f32 / rate;
+                }
+            } else {
+                run_len = 0;
+            }
+        }
+        stats
+    }
 }
 
 impl CapturedAudio {
@@ -370,11 +467,11 @@ impl CapturedAudio {
             None => (speech_raw, native),
         };
         let (speech, plan) = crate::leveler::level(&speech_raw, 16000);
-        Self { speech, native, native_rate, plan }
+        Self { speech, native, native_rate, plan, stats: CaptureStats::default() }
     }
 
     pub fn empty() -> Self {
-        Self { speech: Vec::new(), native: Vec::new(), native_rate: 16000, plan: Default::default() }
+        Self { speech: Vec::new(), native: Vec::new(), native_rate: 16000, plan: Default::default(), stats: CaptureStats::default() }
     }
 
     pub fn level_plan(&self) -> crate::leveler::LevelPlan {
@@ -441,17 +538,19 @@ impl AudioRecorder {
                         );
 
                         match &res {
-                            Ok(rate) => {
-                                native_rate = *rate;
+                            Ok(info) => {
+                                native_rate = info.sample_rate;
                                 log::info!(
-                                    "Microphone stream opened in {} ms at {} Hz",
+                                    "Microphone stream \"{}\" opened in {} ms at {} Hz, {} ch",
+                                    info.device,
                                     open_started.elapsed().as_millis(),
-                                    rate
+                                    info.sample_rate,
+                                    info.channels
                                 );
                             }
                             Err(_) => is_rec_thread.store(false, Ordering::SeqCst),
                         }
-                        let _ = reply.send(res.map(|_| ()));
+                        let _ = reply.send(res);
                     }
                     AudioCmd::Stop { denoise, reply } => {
                         // Allow a brief flush window for audio captured before the stop to arrive from the callback.
@@ -462,11 +561,13 @@ impl AudioRecorder {
                             let _ = stream.pause();
                         }
                         let speech = buffer.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
+                        let stats = CaptureStats::measure(&speech);
                         // At 16 kHz the speech buffer already is the native audio.
                         let native = native_buffer.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
                         let native = if native_rate == 16000 { Vec::new() } else { native };
                         let processing_started = Instant::now();
-                        let captured = CapturedAudio::new(speech, native, native_rate, denoise);
+                        let mut captured = CapturedAudio::new(speech, native, native_rate, denoise);
+                        captured.stats = stats;
                         let plan = captured.level_plan();
                         log::info!(
                             "Noise reduction {:?}, voice leveling gain {:+.1} dB, make-up {:+.1} dB, in {} ms",
@@ -504,7 +605,7 @@ impl AudioRecorder {
         self.is_recording.load(Ordering::SeqCst)
     }
 
-    pub fn start_recording(&self, app_handle: AppHandle, device_name: Option<String>) -> Result<(), String> {
+    pub fn start_recording(&self, app_handle: AppHandle, device_name: Option<String>) -> Result<StreamInfo, String> {
         let (reply_tx, reply_rx) = channel();
         self.cmd_tx
             .send(AudioCmd::Start {
@@ -545,7 +646,7 @@ fn start_stream_inner(
     stop_at: Arc<Mutex<Option<Instant>>>,
     app_handle: AppHandle,
     device_name: Option<String>,
-) -> Result<u32, String> {
+) -> Result<StreamInfo, String> {
     let (device, missing_device) = resolve_input_device_reporting_fallback(device_name.as_deref())
         .ok_or_else(|| "no microphone is connected".to_string())?;
     let device_label = device.name().unwrap_or_else(|_| "Default microphone".to_string());
@@ -566,6 +667,12 @@ fn start_stream_inner(
     let sample_rate = supported_config.sample_rate().0;
     let channels = supported_config.channels() as usize;
     let sample_format = supported_config.sample_format();
+    let stream_info = StreamInfo {
+        device: device_label.clone(),
+        sample_rate,
+        channels: channels as u16,
+        missing_device: missing_device.clone(),
+    };
 
     let resampler_state = Arc::new(Mutex::new(ResamplerState::new()));
     let resampler_clone = Arc::clone(&resampler_state);
@@ -663,16 +770,24 @@ fn start_stream_inner(
                 Err(_) => (false, None),
             };
 
-            if let Some(problem) = problem {
-                if is_rec_monitor.load(Ordering::Relaxed) {
+            match problem {
+                Some(MicEvent::Problem(problem)) if is_rec_monitor.load(Ordering::Relaxed) => {
                     let report = MicReport {
                         problem,
                         device: device_label.clone(),
                         missing_device: missing_device.clone(),
                     };
-                    report_mic_problem(&app_handle, &reported, report);
+                    log::warn!("Microphone health check: {:?}", report);
+                    crate::app_controller::report_mic_problem(&app_handle, report);
+                    if problem.is_startup() {
+                        break; // the recording is cancelled
+                    }
                 }
-                break;
+                Some(MicEvent::Recovered) if is_rec_monitor.load(Ordering::Relaxed) => {
+                    log::info!("Microphone audio recovered on \"{}\"", device_label);
+                    crate::app_controller::report_mic_recovered(&app_handle);
+                }
+                _ => {}
             }
 
             let levels = if has_new_audio { analyzer.analyze(&window) } else { AudioLevels::silent() };
@@ -680,7 +795,7 @@ fn start_stream_inner(
         }
     });
 
-    Ok(sample_rate)
+    Ok(stream_info)
 }
 
 /// Number of leading frames in this callback that were captured before the user pressed stop.
@@ -971,11 +1086,11 @@ mod tests {
     fn mic_health_flags_no_audio_and_silence() {
         let t0 = Instant::now();
         let mut none = MicHealth::new(t0);
-        assert_eq!(none.observe(&[], ms(t0, 2600)), Some(MicProblem::NoAudio));
+        assert_eq!(none.observe(&[], ms(t0, 2600)), Some(MicEvent::Problem(MicProblem::NoAudio)));
 
         let mut zeros = MicHealth::new(t0);
         assert_eq!(zeros.observe(&[0.0; 1600], ms(t0, 500)), None);
-        assert_eq!(zeros.observe(&[0.0; 1600], ms(t0, 2600)), Some(MicProblem::Silent));
+        assert_eq!(zeros.observe(&[0.0; 1600], ms(t0, 2600)), Some(MicEvent::Problem(MicProblem::Silent)));
     }
 
     #[test]
@@ -986,7 +1101,50 @@ mod tests {
         assert_eq!(h.observe(&noise, ms(t0, 500)), None);
         assert_eq!(h.observe(&noise, ms(t0, 2600)), None, "live mic passes the check");
         assert_eq!(h.observe(&[], ms(t0, 3500)), None, "short gap is fine");
-        assert_eq!(h.observe(&[], ms(t0, 4200)), Some(MicProblem::Stalled));
+        assert_eq!(h.observe(&[], ms(t0, 4200)), Some(MicEvent::Problem(MicProblem::Stalled)));
+        assert_eq!(h.observe(&[], ms(t0, 5000)), None, "reported once");
+        assert_eq!(h.observe(&noise, ms(t0, 5100)), Some(MicEvent::Recovered));
+    }
+
+    #[test]
+    fn mic_health_flags_audio_that_turns_into_digital_silence() {
+        let t0 = Instant::now();
+        let mut h = MicHealth::new(t0);
+        let voice = [0.2f32, -0.15, 0.1, -0.05];
+        assert_eq!(h.observe(&voice, ms(t0, 1000)), None);
+        assert_eq!(h.observe(&voice, ms(t0, 2600)), None);
+        // Samples keep arriving, but they are all zeros.
+        assert_eq!(h.observe(&[0.0; 640], ms(t0, 3000)), None);
+        assert_eq!(h.observe(&[0.0; 640], ms(t0, 5000)), None, "under 3 s of silence is a pause");
+        assert_eq!(h.observe(&[0.0; 640], ms(t0, 6100)), Some(MicEvent::Problem(MicProblem::WentSilent)));
+        assert_eq!(h.observe(&[0.0; 640], ms(t0, 6500)), None, "reported once");
+        assert_eq!(h.observe(&voice, ms(t0, 7000)), Some(MicEvent::Recovered));
+    }
+
+    #[test]
+    fn mic_health_ignores_quiet_but_live_pauses() {
+        let t0 = Instant::now();
+        let mut h = MicHealth::new(t0);
+        let room_tone = [0.0004f32, -0.0003, 0.0005, -0.0002];
+        for step in 1..=200 {
+            assert_eq!(h.observe(&room_tone, ms(t0, step * 50)), None);
+        }
+    }
+
+    #[test]
+    fn capture_stats_find_the_dead_stretch() {
+        // 2 s of voice, then 3 s of zeros, then 1 s of voice, with two invalid samples.
+        let mut samples: Vec<f32> = (0..32000).map(|i| (i as f32 * 0.05).sin() * 0.2).collect();
+        samples.extend(std::iter::repeat(0.0).take(48000));
+        samples.extend((0..16000).map(|i| (i as f32 * 0.05).sin() * 0.2));
+        samples[100] = f32::NAN;
+        samples[200] = f32::INFINITY;
+        let stats = CaptureStats::measure(&samples);
+        assert!((stats.captured_sec - 6.0).abs() < 1e-3);
+        assert!((stats.zero_sec - 3.0).abs() < 0.02, "{stats:?}");
+        assert!((stats.longest_zero_sec - 3.0).abs() < 0.02, "{stats:?}");
+        assert!((stats.longest_zero_at_sec - 2.0).abs() < 0.02, "{stats:?}");
+        assert_eq!(stats.invalid_samples, 2);
     }
 
     #[test]

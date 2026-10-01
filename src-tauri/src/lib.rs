@@ -89,12 +89,12 @@ fn save_settings(
 
 #[tauri::command]
 fn toggle_recording(state: State<'_, AppState>) -> Result<(), String> {
-    state.controller.toggle_recording()
+    state.controller.toggle_recording("app")
 }
 
 #[tauri::command]
 fn cancel_recording(state: State<'_, AppState>) -> Result<(), String> {
-    state.controller.cancel();
+    state.controller.cancel("Esc in the pill");
     Ok(())
 }
 
@@ -350,7 +350,7 @@ pub fn run() {
                         if let Some(state) = app.try_state::<AppState>() {
                             let controller = Arc::clone(&state.controller);
                             tauri::async_runtime::spawn(async move {
-                                let _ = controller.toggle_recording();
+                                let _ = controller.toggle_recording("keyboard shortcut");
                             });
                         }
                     }

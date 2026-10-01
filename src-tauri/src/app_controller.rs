@@ -392,6 +392,69 @@ pub fn report_mic_problem(app_handle: &AppHandle, report: crate::audio::MicRepor
     }
 }
 
+/// Entry point for the audio thread; audio is flowing again after a mid-recording dropout.
+pub fn report_mic_recovered(app_handle: &AppHandle) {
+    if let Some(state) = app_handle.try_state::<crate::AppState>() {
+        state.controller.on_mic_recovered();
+    }
+}
+
+/// When and how the current recording started.
+pub(crate) struct RecordingStart {
+    at: Instant,
+    trigger: &'static str,
+}
+
+/// Captured audio shorter than the wall-clock recording by more than this means audio was dropped.
+const CAPTURE_GAP_WARN_SEC: f32 = 0.5;
+
+/// Logs how a recording ended and whether the audio matches it: wall-clock time between start and
+/// stop against the audio actually captured, plus dead (digital silence) or invalid stretches.
+fn log_recording_stop(recording_start: &Mutex<Option<RecordingStart>>, trigger: &str, stats: &crate::audio::CaptureStats) {
+    let data_dir = get_data_dir();
+    let Some(start) = recording_start.lock().unwrap().take() else {
+        log_stage_event(&data_dir, "REC_STOP", &format!("Recording stopped by {}; captured {:.2} s (start time unknown)", trigger, stats.captured_sec));
+        return;
+    };
+    let wall = start.at.elapsed().as_secs_f32();
+    let missing = wall - stats.captured_sec;
+    let dead = if stats.zero_sec >= 0.05 {
+        format!(
+            "; digital silence {:.2} s (longest {:.2} s starting at {:.2} s)",
+            stats.zero_sec, stats.longest_zero_sec, stats.longest_zero_at_sec
+        )
+    } else {
+        "; no digital silence".to_string()
+    };
+    let invalid = if stats.invalid_samples > 0 { format!("; {} invalid samples", stats.invalid_samples) } else { String::new() };
+    log_stage_event(
+        &data_dir,
+        "REC_STOP",
+        &format!(
+            "Recording stopped by {} (started by {}): {:.2} s between start and stop, {:.2} s of audio captured ({:+.2} s){}{}",
+            trigger, start.trigger, wall, stats.captured_sec, -missing, dead, invalid
+        ),
+    );
+    if missing > CAPTURE_GAP_WARN_SEC {
+        log_stage_event(&data_dir, "REC_GAP", &format!("{:.2} s of the recording never arrived from the microphone", missing));
+        log::warn!("Recording lost {:.2} s of audio ({:.2} s wall, {:.2} s captured)", missing, wall, stats.captured_sec);
+    }
+    if stats.longest_zero_sec >= 1.0 || stats.invalid_samples > 0 {
+        log::warn!("Recording had dead audio: {:?}", stats);
+    }
+}
+
+/// Pill title and text for a microphone problem that started after real audio arrived.
+fn mic_dropout_message(report: &crate::audio::MicReport) -> (&'static str, String) {
+    use crate::audio::MicProblem;
+    let device = &report.device;
+    match report.problem {
+        MicProblem::Disconnected => ("Mic Disconnected", format!("\"{device}\" was disconnected. Press the hotkey to finish; what you said so far is kept.")),
+        MicProblem::Stalled => ("Mic Stopped", format!("No audio from \"{device}\" for 2 s. Press the hotkey to finish; what you said so far is kept.")),
+        _ => ("Mic Went Silent", format!("\"{device}\" sends only silence. Press the hotkey to finish; what you said so far is kept.")),
+    }
+}
+
 /// Where the user fixes the microphone choice.
 const MIC_SETTING: &str = "Settings → General → Microphone input";
 /// How long an error that needs reading stays on screen.
@@ -407,7 +470,7 @@ fn mic_problem_message(report: &crate::audio::MicReport) -> (&'static str, Strin
     if let Some(missing) = &report.missing_device {
         let what = match report.problem {
             MicProblem::NoAudio | MicProblem::Silent => "sends no audio",
-            MicProblem::Stalled | MicProblem::Disconnected => "stopped sending audio",
+            MicProblem::Stalled | MicProblem::WentSilent | MicProblem::Disconnected => "stopped sending audio",
         };
         return (
             "Microphone Not Found",
@@ -423,7 +486,7 @@ fn mic_problem_message(report: &crate::audio::MicReport) -> (&'static str, Strin
             "Microphone Is Silent",
             format!("\"{device}\" sends only silence. It may be muted, or mic access is blocked in privacy settings. Check {MIC_SETTING}."),
         ),
-        MicProblem::Stalled => (
+        MicProblem::Stalled | MicProblem::WentSilent => (
             "Microphone Stopped",
             format!("\"{device}\" stopped sending audio, maybe it was unplugged. Check {MIC_SETTING}."),
         ),
@@ -636,6 +699,8 @@ pub struct AppController {
     session_id: Arc<AtomicU64>,
     /// The last failed translation, offered for retry until another recording finishes.
     pending_retry: Arc<Mutex<Option<PendingRetry>>>,
+    /// When and how the current recording started, for the start/stop log.
+    recording_start: Arc<Mutex<Option<RecordingStart>>>,
 }
 
 impl AppController {
@@ -731,6 +796,7 @@ impl AppController {
             last_activity,
             session_id,
             pending_retry: Arc::new(Mutex::new(None)),
+            recording_start: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -897,7 +963,19 @@ impl AppController {
         Ok("lab_custom.wav".to_string())
     }
 
-    pub fn cancel(&self) {
+    pub fn cancel(&self, trigger: &'static str) {
+        if let Some(start) = self.recording_start.lock().unwrap().take() {
+            log_stage_event(
+                &get_data_dir(),
+                "REC_CANCEL",
+                &format!(
+                    "Recording cancelled by {} after {:.2} s (started by {})",
+                    trigger,
+                    start.at.elapsed().as_secs_f32(),
+                    start.trigger
+                ),
+            );
+        }
         self.session_id.fetch_add(1, Ordering::SeqCst);
         {
             let mut phase = self.phase.lock().unwrap();
@@ -921,6 +999,10 @@ impl AppController {
     /// Called from the audio thread when the microphone health check fails during a recording.
     /// Stops the recording (it has no usable audio) and shows what is wrong, long enough to read.
     pub fn on_mic_problem(&self, report: crate::audio::MicReport) {
+        if !report.problem.is_startup() {
+            self.on_mic_dropout(report);
+            return;
+        }
         {
             let mut phase = self.phase.lock().unwrap();
             if *phase != AssistantPhase::Listening {
@@ -935,7 +1017,58 @@ impl AppController {
 
         let (title, subtitle) = mic_problem_message(&report);
         log_stage_event(&get_data_dir(), "MIC_CHECK", &format!("{}: {} ({:?})", title, subtitle, report));
+        if let Some(start) = self.recording_start.lock().unwrap().take() {
+            log_stage_event(
+                &get_data_dir(),
+                "REC_CANCEL",
+                &format!("Recording cancelled by the mic check after {:.2} s (started by {})", start.at.elapsed().as_secs_f32(), start.trigger),
+            );
+        }
         show_long_error(&self.app_handle, &self.session_id, session, title, &subtitle);
+    }
+
+    /// The microphone failed after real audio arrived. Keep recording, so what was said before is still
+    /// transcribed, and warn in the pill until audio comes back or the user stops.
+    fn on_mic_dropout(&self, report: crate::audio::MicReport) {
+        if *self.phase.lock().unwrap() != AssistantPhase::Listening {
+            return;
+        }
+        let at = self
+            .recording_start
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|s| s.at.elapsed().as_secs_f32())
+            .unwrap_or_default();
+        let (title, subtitle) = mic_dropout_message(&report);
+        log_stage_event(
+            &get_data_dir(),
+            "MIC_DROPOUT",
+            &format!("{} at {:.1} s into the recording: {} ({:?})", title, at, subtitle, report),
+        );
+        let _ = self.app_handle.emit(
+            "assistant-state-changed",
+            serde_json::json!({ "state": "listening", "title": title, "subtitle": subtitle, "warning": true }),
+        );
+    }
+
+    /// Audio is flowing again after a mid-recording dropout: clear the pill's warning.
+    pub fn on_mic_recovered(&self) {
+        if *self.phase.lock().unwrap() != AssistantPhase::Listening {
+            return;
+        }
+        let at = self
+            .recording_start
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|s| s.at.elapsed().as_secs_f32())
+            .unwrap_or_default();
+        log_stage_event(&get_data_dir(), "MIC_RECOVERED", &format!("Microphone audio came back at {:.1} s into the recording", at));
+        let _ = self.app_handle.emit(
+            "assistant-state-changed",
+            serde_json::json!({ "state": "listening", "title": "Listening…", "subtitle": null }),
+        );
     }
 
     pub fn has_pending_retry(&self) -> bool {
@@ -1058,12 +1191,14 @@ impl AppController {
         Ok(())
     }
 
-    pub fn toggle_recording(&self) -> Result<(), String> {
+    /// Starts or stops a recording. `trigger` says what asked for it (e.g. "hotkey press"); it goes
+    /// into the start/stop log.
+    pub fn toggle_recording(&self, trigger: &'static str) -> Result<(), String> {
         let cur_phase = { self.phase.lock().unwrap().clone() };
 
         match cur_phase {
-            AssistantPhase::Idle => self.start_listening(),
-            AssistantPhase::Listening => self.stop_listening_and_process(),
+            AssistantPhase::Idle => self.start_listening(trigger),
+            AssistantPhase::Listening => self.stop_listening_and_process(trigger),
             _ => {
                 // If currently processing or in Done state, ignore toggle or cancel
                 Ok(())
@@ -1071,7 +1206,7 @@ impl AppController {
         }
     }
 
-    fn start_listening(&self) -> Result<(), String> {
+    fn start_listening(&self, trigger: &'static str) -> Result<(), String> {
         self.session_id.fetch_add(1, Ordering::SeqCst);
         {
             let mut phase = self.phase.lock().unwrap();
@@ -1106,7 +1241,25 @@ impl AppController {
         }
 
         // 4. Start recording on the dedicated audio thread
-        if let Err(e) = self.recorder.start_recording(self.app_handle.clone(), settings.input_device.clone()) {
+        let stream = self.recorder.start_recording(self.app_handle.clone(), settings.input_device.clone());
+        if let Ok(info) = &stream {
+            let fallback = info
+                .missing_device
+                .as_ref()
+                .map(|m| format!(" (chosen \"{}\" not found, using default)", m))
+                .unwrap_or_default();
+            log_stage_event(
+                &get_data_dir(),
+                "REC_START",
+                &format!(
+                    "Recording started by {} on \"{}\" at {} Hz, {} ch{}",
+                    trigger, info.device, info.sample_rate, info.channels, fallback
+                ),
+            );
+            *self.recording_start.lock().unwrap() = Some(RecordingStart { at: Instant::now(), trigger });
+        }
+        if let Err(e) = stream {
+            log_stage_event(&get_data_dir(), "REC_START_FAILED", &format!("Recording requested by {} failed: {}", trigger, e));
             log::error!("Failed to start recording: {}", e);
             {
                 // Idle, not Error: pressing the hotkey again retries right away.
@@ -1156,7 +1309,7 @@ impl AppController {
         Ok(())
     }
 
-    fn stop_listening_and_process(&self) -> Result<(), String> {
+    fn stop_listening_and_process(&self, trigger: &'static str) -> Result<(), String> {
         let pipeline_start = Instant::now();
 
         {
@@ -1195,6 +1348,7 @@ impl AppController {
         }
 
         let captured = self.recorder.stop_recording(crate::denoise::strength_wet(&settings.noise_reduction));
+        log_recording_stop(&self.recording_start, trigger, &captured.stats);
 
         let app_handle = self.app_handle.clone();
         let phase_arc = Arc::clone(&self.phase);

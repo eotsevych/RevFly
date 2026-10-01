@@ -205,7 +205,7 @@ pub mod macos {
 
             let controller = Arc::clone(&self.controller);
             tauri::async_runtime::spawn(async move {
-                let _ = controller.toggle_recording();
+                let _ = controller.toggle_recording("hotkey press");
             });
         }
 
@@ -225,7 +225,7 @@ pub mod macos {
             if elapsed.as_millis() >= 350 && elapsed.as_secs() < 10 && self.controller.is_listening() {
                 let controller = Arc::clone(&self.controller);
                 tauri::async_runtime::spawn(async move {
-                    let _ = controller.toggle_recording();
+                    let _ = controller.toggle_recording("hotkey release (hold-to-talk)");
                 });
             }
         }
@@ -263,7 +263,7 @@ pub mod macos {
                     log::info!("Global Esc detected. Cancelling recording or transcription...");
                     let controller = Arc::clone(&state.controller);
                     tauri::async_runtime::spawn(async move {
-                        controller.cancel();
+                        controller.cancel("Esc key");
                     });
                 }
             }

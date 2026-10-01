@@ -124,6 +124,8 @@ export interface AssistantStateEvent {
   long?: boolean;
   /** A failed translation that can be sent again: the pill shows a Retry button. */
   retry?: boolean;
+  /** While listening: the microphone stopped delivering audio; title and subtitle explain it. */
+  warning?: boolean;
 }
 
 export async function fetchSettings(): Promise<BackendSettings | null> {

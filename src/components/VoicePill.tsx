@@ -153,7 +153,8 @@ export function VoicePill() {
   const themeMode: Theme = useResolvedTheme(settings?.theme);
   const accentKey: AccentColor = (localStorage.getItem("revfly_accent") as AccentColor) || "violet";
   const t = tok(themeMode, accentKey);
-  const accent = getStateAccent(state.state, t.accent, state.title);
+  const micWarning = state.state === "listening" && state.warning === true;
+  const accent = micWarning ? "#ff9f43" : getStateAccent(state.state, t.accent, state.title);
 
   const targetLang = settings?.target_lang || "English";
   const isNoTranslation =
@@ -246,7 +247,9 @@ export function VoicePill() {
                 transition: "color 0.3s ease",
               }}
             >
-              {state.title && state.state !== "listening" ? state.title : meta.label}
+              {state.title && (state.state !== "listening" || micWarning)
+                ? state.title
+                : meta.label}
             </span>
           </div>
 

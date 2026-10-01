@@ -328,7 +328,7 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
                 if let Some(state) = app.try_state::<crate::AppState>() {
                     let controller = std::sync::Arc::clone(&state.controller);
                     tauri::async_runtime::spawn(async move {
-                        let _ = controller.toggle_recording();
+                        let _ = controller.toggle_recording("tray menu");
                     });
                 }
             } else if id == "retry_translation" {
