@@ -1,6 +1,6 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Sample;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -115,6 +115,11 @@ const MIC_STALL_AFTER: Duration = Duration::from_millis(1500);
 /// Once real audio has flowed, this long of pure digital silence means the microphone stopped
 /// delivering sound (natural pauses always keep a noise floor).
 const MIC_WENT_SILENT_AFTER: Duration = Duration::from_secs(3);
+/// Exact zeros are a stronger signal than near-silence: a working microphone never delivers a full
+/// second of them. This is what macOS feeds when a Bluetooth headset drops its call-audio (SCO) link.
+const MIC_EXACT_ZERO_AFTER: Duration = Duration::from_secs(1);
+/// How many times one recording may reopen a microphone that went dead.
+const MAX_STREAM_RESTARTS: u32 = 2;
 /// A live microphone always has a noise floor above this; below it the OS is feeding zeros.
 const MIC_SILENCE_PEAK: f32 = 1e-4;
 
@@ -156,6 +161,8 @@ pub struct MicReport {
     pub device: String,
     /// The user's chosen device, when it was missing and `device` is the fallback default.
     pub missing_device: Option<String>,
+    /// The stream is being reopened to recover from this problem.
+    pub reconnecting: bool,
 }
 
 /// Decides from the incoming audio whether the microphone works. Fed by the level monitor.
@@ -167,24 +174,51 @@ struct MicHealth {
     last_audio: Option<Instant>,
     /// Start of the current stretch of digital silence.
     dead_since: Option<Instant>,
+    /// Start of the current stretch of exact zeros.
+    exact_zero_since: Option<Instant>,
     /// The mid-recording problem currently reported, until audio recovers.
     dropout: Option<MicProblem>,
+    /// After a reopen: when to report that the reopened stream is still dead.
+    resume_deadline: Option<Instant>,
     checked: bool,
 }
 
 impl MicHealth {
     fn new(started: Instant) -> Self {
-        Self { started, samples: 0, peak: 0.0, last_audio: None, dead_since: None, dropout: None, checked: false }
+        Self {
+            started,
+            samples: 0,
+            peak: 0.0,
+            last_audio: None,
+            dead_since: None,
+            exact_zero_since: None,
+            dropout: None,
+            resume_deadline: None,
+            checked: false,
+        }
+    }
+
+    /// For a stream reopened after `problem`: no startup check (speech was already captured), and
+    /// the first real audio reports recovery.
+    fn resumed(started: Instant, problem: MicProblem) -> Self {
+        Self {
+            checked: true,
+            dropout: Some(problem),
+            resume_deadline: Some(started + MIC_WENT_SILENT_AFTER),
+            ..Self::new(started)
+        }
     }
 
     fn observe(&mut self, new_samples: &[f32], now: Instant) -> Option<MicEvent> {
         let has_new = !new_samples.is_empty();
         let all_dead = new_samples.iter().all(|s| !s.is_finite() || s.abs() < MIC_SILENCE_PEAK);
+        let all_exact_zero = new_samples.iter().all(|s| *s == 0.0);
         if has_new {
             self.samples += new_samples.len();
             self.peak = new_samples.iter().filter(|s| s.is_finite()).fold(self.peak, |p, s| p.max(s.abs()));
             self.last_audio = Some(now);
             self.dead_since = if all_dead { Some(self.dead_since.unwrap_or(now)) } else { None };
+            self.exact_zero_since = if all_exact_zero { Some(self.exact_zero_since.unwrap_or(now)) } else { None };
         }
 
         if !self.checked {
@@ -201,14 +235,22 @@ impl MicHealth {
             return None;
         }
 
-        if self.dropout.is_some() {
-            return (has_new && !all_dead).then(|| {
+        if let Some(problem) = self.dropout {
+            if has_new && !all_dead {
                 self.dropout = None;
-                MicEvent::Recovered
-            });
+                self.resume_deadline = None;
+                return Some(MicEvent::Recovered);
+            }
+            // A reopened stream that still delivers nothing: report it again (another reopen, or a warning).
+            if self.resume_deadline.is_some_and(|at| now >= at) {
+                self.resume_deadline = None;
+                return Some(MicEvent::Problem(problem));
+            }
+            return None;
         }
         let stalled = self.last_audio.is_some_and(|last| now.duration_since(last) >= MIC_STALL_AFTER);
-        let went_silent = self.dead_since.is_some_and(|since| now.duration_since(since) >= MIC_WENT_SILENT_AFTER);
+        let went_silent = self.dead_since.is_some_and(|since| now.duration_since(since) >= MIC_WENT_SILENT_AFTER)
+            || self.exact_zero_since.is_some_and(|since| now.duration_since(since) >= MIC_EXACT_ZERO_AFTER);
         let problem = if stalled {
             MicProblem::Stalled
         } else if went_silent {
@@ -388,6 +430,9 @@ enum AudioCmd {
         reply: Sender<CapturedAudio>,
     },
     Cancel,
+    /// Sent by a stream's own monitor: reopen it because it went dead. Ignored unless `generation`
+    /// is still the current stream (a stop or a newer stream wins).
+    Reopen { generation: u64, problem: MicProblem },
 }
 
 /// One finished recording.
@@ -501,6 +546,7 @@ impl AudioRecorder {
         let is_rec_thread = Arc::clone(&is_recording);
         let stop_at = Arc::new(Mutex::new(None::<Instant>));
         let stop_at_thread = Arc::clone(&stop_at);
+        let reopen_tx = cmd_tx.clone();
 
         // Dedicated audio recording thread so cpal::Stream stays on one thread
         thread::spawn(move || {
@@ -508,6 +554,14 @@ impl AudioRecorder {
             let buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
             let native_buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
             let mut native_rate = 16000;
+            // A reopened stream at another rate makes the full-bandwidth copy inconsistent; playback
+            // then falls back to the 16 kHz speech audio.
+            let mut native_valid = true;
+            // Identifies the current stream; bumped by every start, reopen, stop and cancel so a
+            // stale monitor or Reopen request is ignored.
+            let generation = Arc::new(AtomicU64::new(0));
+            let mut current: Option<(AppHandle, Option<String>)> = None;
+            let mut restarts = 0u32;
 
             while let Ok(cmd) = cmd_rx.recv() {
                 match cmd {
@@ -526,6 +580,16 @@ impl AudioRecorder {
                         // Mark recording active before starting stream so initial audio buffers are captured immediately
                         is_rec_thread.store(true, Ordering::SeqCst);
                         let open_started = Instant::now();
+                        restarts = 0;
+                        native_valid = true;
+                        current = Some((app_handle.clone(), device_name.clone()));
+                        let control = StreamControl {
+                            reopen_tx: reopen_tx.clone(),
+                            generation: Arc::clone(&generation),
+                            id: generation.fetch_add(1, Ordering::SeqCst) + 1,
+                            resumed_from: None,
+                            can_reopen: true,
+                        };
 
                         let res = start_stream_inner(
                             &mut active_stream,
@@ -535,6 +599,7 @@ impl AudioRecorder {
                             Arc::clone(&stop_at_thread),
                             app_handle,
                             device_name,
+                            control,
                         );
 
                         match &res {
@@ -557,6 +622,8 @@ impl AudioRecorder {
                         // Frames captured after the stop are discarded in the callback (see frames_before_stop).
                         thread::sleep(Duration::from_millis(120));
                         is_rec_thread.store(false, Ordering::SeqCst);
+                        generation.fetch_add(1, Ordering::SeqCst);
+                        current = None;
                         if let Some(stream) = active_stream.take() {
                             let _ = stream.pause();
                         }
@@ -564,7 +631,7 @@ impl AudioRecorder {
                         let stats = CaptureStats::measure(&speech);
                         // At 16 kHz the speech buffer already is the native audio.
                         let native = native_buffer.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
-                        let native = if native_rate == 16000 { Vec::new() } else { native };
+                        let native = if native_rate == 16000 || !native_valid { Vec::new() } else { native };
                         let processing_started = Instant::now();
                         let mut captured = CapturedAudio::new(speech, native, native_rate, denoise);
                         captured.stats = stats;
@@ -580,6 +647,8 @@ impl AudioRecorder {
                     }
                     AudioCmd::Cancel => {
                         is_rec_thread.store(false, Ordering::SeqCst);
+                        generation.fetch_add(1, Ordering::SeqCst);
+                        current = None;
                         if let Some(stream) = active_stream.take() {
                             let _ = stream.pause();
                         }
@@ -588,6 +657,75 @@ impl AudioRecorder {
                         }
                         if let Ok(mut b) = native_buffer.lock() {
                             b.clear();
+                        }
+                    }
+                    AudioCmd::Reopen { generation: requested, problem } => {
+                        let still_current = is_rec_thread.load(Ordering::SeqCst) && requested == generation.load(Ordering::SeqCst);
+                        let Some((app_handle, device_name)) = current.clone().filter(|_| still_current) else {
+                            continue;
+                        };
+                        // Closing and reopening the input makes macOS bring back e.g. a Bluetooth
+                        // headset's dropped call-audio link. Audio keeps appending to the same buffers.
+                        if let Some(stream) = active_stream.take() {
+                            let _ = stream.pause();
+                        }
+                        restarts += 1;
+                        let reopen_started = Instant::now();
+                        let control = StreamControl {
+                            reopen_tx: reopen_tx.clone(),
+                            generation: Arc::clone(&generation),
+                            id: generation.fetch_add(1, Ordering::SeqCst) + 1,
+                            resumed_from: Some(problem),
+                            can_reopen: restarts < MAX_STREAM_RESTARTS,
+                        };
+                        let captured_sec = buffer.lock().map(|b| b.len() as f32 / 16000.0).unwrap_or_default();
+                        let res = start_stream_inner(
+                            &mut active_stream,
+                            Arc::clone(&buffer),
+                            Arc::clone(&native_buffer),
+                            Arc::clone(&is_rec_thread),
+                            Arc::clone(&stop_at_thread),
+                            app_handle.clone(),
+                            device_name,
+                            control,
+                        );
+                        let data_dir = crate::settings::get_data_dir();
+                        match res {
+                            Ok(info) => {
+                                if info.sample_rate != native_rate {
+                                    native_valid = false;
+                                }
+                                crate::pipeline_logger::log_stage_event(
+                                    &data_dir,
+                                    "REC_RESTART",
+                                    &format!(
+                                        "Reopened the microphone after {:?} at {:.1} s of audio (attempt {}/{}): \"{}\" at {} Hz in {} ms",
+                                        problem,
+                                        captured_sec,
+                                        restarts,
+                                        MAX_STREAM_RESTARTS,
+                                        info.device,
+                                        info.sample_rate,
+                                        reopen_started.elapsed().as_millis()
+                                    ),
+                                );
+                            }
+                            Err(e) => {
+                                crate::pipeline_logger::log_stage_event(
+                                    &data_dir,
+                                    "REC_RESTART_FAILED",
+                                    &format!("Could not reopen the microphone after {:?} (attempt {}): {}", problem, restarts, e),
+                                );
+                                crate::app_controller::report_mic_problem(
+                                    &app_handle,
+                                    MicReport {
+                                        problem: MicProblem::Disconnected,
+                                        device: "the microphone".to_string(),
+                                        missing_device: None,
+                                        reconnecting: false,
+                                    },
+                                );
+                            }
                         }
                     }
                 }
@@ -638,6 +776,20 @@ impl AudioRecorder {
     }
 }
 
+/// How a stream's monitor may ask the recorder thread to reopen it.
+struct StreamControl {
+    reopen_tx: Sender<AudioCmd>,
+    /// The recorder's current stream generation; this stream stops monitoring once it moves on.
+    generation: Arc<AtomicU64>,
+    /// This stream's generation.
+    id: u64,
+    /// Set when this stream replaces one that went dead.
+    resumed_from: Option<MicProblem>,
+    /// Whether another reopen is allowed for this recording.
+    can_reopen: bool,
+}
+
+#[allow(clippy::too_many_arguments)]
 fn start_stream_inner(
     active_stream: &mut Option<cpal::Stream>,
     buffer: Arc<Mutex<Vec<f32>>>,
@@ -646,6 +798,7 @@ fn start_stream_inner(
     stop_at: Arc<Mutex<Option<Instant>>>,
     app_handle: AppHandle,
     device_name: Option<String>,
+    control: StreamControl,
 ) -> Result<StreamInfo, String> {
     let (device, missing_device) = resolve_input_device_reporting_fallback(device_name.as_deref())
         .ok_or_else(|| "no microphone is connected".to_string())?;
@@ -684,15 +837,24 @@ fn start_stream_inner(
     let err_app = app_handle.clone();
     let err_reported = Arc::clone(&reported);
     let err_rec = Arc::clone(&is_rec);
+    let err_reopen_tx = control.reopen_tx.clone();
+    let err_generation = Arc::clone(&control.generation);
+    let (err_id, err_can_reopen) = (control.id, control.can_reopen);
     let err_report = MicReport {
         problem: MicProblem::Disconnected,
         device: device_label.clone(),
         missing_device: missing_device.clone(),
+        reconnecting: err_can_reopen,
     };
     let err_fn = move |err: cpal::StreamError| {
         log::error!("Audio stream error: {}", err);
-        if matches!(err, cpal::StreamError::DeviceNotAvailable) && err_rec.load(Ordering::Relaxed) {
+        let is_current = err_generation.load(Ordering::SeqCst) == err_id;
+        if matches!(err, cpal::StreamError::DeviceNotAvailable) && err_rec.load(Ordering::Relaxed) && is_current {
             report_mic_problem(&err_app, &err_reported, err_report.clone());
+            if err_can_reopen {
+                // Reopen picks the chosen mic again, or the system default if it's gone for good.
+                let _ = err_reopen_tx.send(AudioCmd::Reopen { generation: err_id, problem: MicProblem::Disconnected });
+            }
         }
     };
 
@@ -748,10 +910,15 @@ fn start_stream_inner(
     thread::spawn(move || {
         let analyzer = SpectrumAnalyzer::new();
         let mut window = vec![0.0f32; SPECTRUM_WINDOW];
-        let mut last_len = 0;
-        let mut health = MicHealth::new(Instant::now());
+        // A reopened stream appends to the existing buffer: only audio from here on is this stream's.
+        let mut last_len = buf_monitor.lock().map(|b| b.len()).unwrap_or(0);
+        let mut health = match control.resumed_from {
+            Some(problem) => MicHealth::resumed(Instant::now(), problem),
+            None => MicHealth::new(Instant::now()),
+        };
+        let is_current = || control.generation.load(Ordering::SeqCst) == control.id;
 
-        while is_rec_monitor.load(Ordering::Relaxed) {
+        while is_rec_monitor.load(Ordering::Relaxed) && is_current() {
             thread::sleep(Duration::from_millis(40));
 
             let (has_new_audio, problem) = match buf_monitor.lock() {
@@ -771,14 +938,22 @@ fn start_stream_inner(
             };
 
             match problem {
-                Some(MicEvent::Problem(problem)) if is_rec_monitor.load(Ordering::Relaxed) => {
+                Some(MicEvent::Problem(problem)) if is_rec_monitor.load(Ordering::Relaxed) && is_current() => {
+                    // A microphone that died mid-recording is reopened (up to MAX_STREAM_RESTARTS);
+                    // problems before any audio arrived cancel the recording instead.
+                    let reopen = !problem.is_startup() && control.can_reopen;
                     let report = MicReport {
                         problem,
                         device: device_label.clone(),
                         missing_device: missing_device.clone(),
+                        reconnecting: reopen,
                     };
                     log::warn!("Microphone health check: {:?}", report);
                     crate::app_controller::report_mic_problem(&app_handle, report);
+                    if reopen {
+                        let _ = control.reopen_tx.send(AudioCmd::Reopen { generation: control.id, problem });
+                        break; // the replacement stream gets its own monitor
+                    }
                     if problem.is_startup() {
                         break; // the recording is cancelled
                     }
@@ -1113,12 +1288,38 @@ mod tests {
         let voice = [0.2f32, -0.15, 0.1, -0.05];
         assert_eq!(h.observe(&voice, ms(t0, 1000)), None);
         assert_eq!(h.observe(&voice, ms(t0, 2600)), None);
-        // Samples keep arriving, but they are all zeros.
+        // Samples keep arriving, but they are all exact zeros (a dropped Bluetooth call-audio link).
         assert_eq!(h.observe(&[0.0; 640], ms(t0, 3000)), None);
-        assert_eq!(h.observe(&[0.0; 640], ms(t0, 5000)), None, "under 3 s of silence is a pause");
-        assert_eq!(h.observe(&[0.0; 640], ms(t0, 6100)), Some(MicEvent::Problem(MicProblem::WentSilent)));
-        assert_eq!(h.observe(&[0.0; 640], ms(t0, 6500)), None, "reported once");
-        assert_eq!(h.observe(&voice, ms(t0, 7000)), Some(MicEvent::Recovered));
+        assert_eq!(h.observe(&[0.0; 640], ms(t0, 3800)), None, "under 1 s of exact zeros");
+        assert_eq!(h.observe(&[0.0; 640], ms(t0, 4100)), Some(MicEvent::Problem(MicProblem::WentSilent)));
+        assert_eq!(h.observe(&[0.0; 640], ms(t0, 4500)), None, "reported once");
+        assert_eq!(h.observe(&voice, ms(t0, 5000)), Some(MicEvent::Recovered));
+    }
+
+    #[test]
+    fn mic_health_needs_3_s_of_near_silence_that_is_not_exact_zeros() {
+        let t0 = Instant::now();
+        let mut h = MicHealth::new(t0);
+        let voice = [0.2f32, -0.15, 0.1, -0.05];
+        let faint = [0.00002f32, -0.00001, 0.00003, -0.00002];
+        assert_eq!(h.observe(&voice, ms(t0, 2600)), None);
+        assert_eq!(h.observe(&faint, ms(t0, 3000)), None);
+        assert_eq!(h.observe(&faint, ms(t0, 5500)), None, "near-silence under 3 s");
+        assert_eq!(h.observe(&faint, ms(t0, 6100)), Some(MicEvent::Problem(MicProblem::WentSilent)));
+    }
+
+    #[test]
+    fn reopened_stream_recovers_on_first_real_audio_or_reports_again() {
+        let t0 = Instant::now();
+        let voice = [0.2f32, -0.15, 0.1, -0.05];
+        let mut back = MicHealth::resumed(t0, MicProblem::WentSilent);
+        assert_eq!(back.observe(&[0.0; 640], ms(t0, 400)), None, "no startup check after a reopen");
+        assert_eq!(back.observe(&voice, ms(t0, 700)), Some(MicEvent::Recovered));
+
+        let mut still_dead = MicHealth::resumed(t0, MicProblem::WentSilent);
+        assert_eq!(still_dead.observe(&[0.0; 640], ms(t0, 2900)), None);
+        assert_eq!(still_dead.observe(&[0.0; 640], ms(t0, 3100)), Some(MicEvent::Problem(MicProblem::WentSilent)));
+        assert_eq!(still_dead.observe(&[0.0; 640], ms(t0, 3500)), None, "reported once");
     }
 
     #[test]

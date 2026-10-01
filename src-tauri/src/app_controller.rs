@@ -448,6 +448,12 @@ fn log_recording_stop(recording_start: &Mutex<Option<RecordingStart>>, trigger: 
 fn mic_dropout_message(report: &crate::audio::MicReport) -> (&'static str, String) {
     use crate::audio::MicProblem;
     let device = &report.device;
+    if report.reconnecting {
+        return (
+            "Reconnecting Mic…",
+            format!("\"{device}\" stopped sending sound. Reopening it; what you said so far is kept."),
+        );
+    }
     match report.problem {
         MicProblem::Disconnected => ("Mic Disconnected", format!("\"{device}\" was disconnected. Press the hotkey to finish; what you said so far is kept.")),
         MicProblem::Stalled => ("Mic Stopped", format!("No audio from \"{device}\" for 2 s. Press the hotkey to finish; what you said so far is kept.")),
@@ -2368,7 +2374,7 @@ mod tests {
     use crate::audio::{MicProblem, MicReport};
 
     fn report(problem: MicProblem, missing: Option<&str>) -> MicReport {
-        MicReport { problem, device: "MacBook Pro Microphone".into(), missing_device: missing.map(Into::into) }
+        MicReport { problem, device: "MacBook Pro Microphone".into(), missing_device: missing.map(Into::into), reconnecting: false }
     }
 
     #[test]
