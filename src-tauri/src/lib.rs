@@ -99,6 +99,11 @@ fn cancel_recording(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn retry_translation(state: State<'_, AppState>) -> Result<(), String> {
+    state.controller.retry_translation()
+}
+
+#[tauri::command]
 fn get_history(
     state: State<'_, AppState>,
     limit: Option<usize>,
@@ -427,6 +432,7 @@ pub fn run() {
             save_settings,
             toggle_recording,
             cancel_recording,
+            retry_translation,
             check_accessibility,
             request_accessibility,
             open_accessibility_settings,

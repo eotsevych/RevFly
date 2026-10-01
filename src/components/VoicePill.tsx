@@ -6,6 +6,7 @@ import {
   subscribeToAudioLevels,
   subscribeToStateChanges,
   triggerCancelRecording,
+  triggerRetryTranslation,
   triggerStartDragging,
   type AssistantStateEvent,
   type AudioLevels,
@@ -264,6 +265,28 @@ export function VoicePill() {
           >
             {displayedSubtitle}
           </span>
+
+          {state.state === "error" && state.retry && (
+            <button
+              type="button"
+              onClick={() => void triggerRetryTranslation()}
+              style={{
+                alignSelf: "flex-start",
+                marginTop: 8,
+                padding: "4px 12px",
+                borderRadius: 999,
+                border: `1px solid ${accent}66`,
+                background: `${accent}1f`,
+                color: accent,
+                fontFamily: "Inter, sans-serif",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              ↻ Retry translation
+            </button>
+          )}
         </div>
 
         {/* Recording timer, vertically centred on the right edge of the pill */}

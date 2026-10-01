@@ -120,6 +120,20 @@ impl HistoryManager {
         Ok(row_id)
     }
 
+    /// Replaces the translated text of a saved entry (used when a failed translation is retried).
+    pub fn update_translation(&self, id: i64, translated_text: &str) -> Result<(), String> {
+        if id <= 0 {
+            return Ok(()); // private mode: nothing was saved
+        }
+        let conn = self.db_conn.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE history SET translated_text = ?1 WHERE id = ?2",
+            params![translated_text, id],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     pub fn get_records(&self, limit: usize) -> Result<Vec<HistoryRecord>, String> {
         let conn = self.db_conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn

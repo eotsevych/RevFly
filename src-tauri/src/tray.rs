@@ -83,6 +83,7 @@ static STATUS_ITEM: std::sync::OnceLock<tauri::menu::MenuItem<tauri::Wry>> = std
 static EJECT_ITEM: std::sync::OnceLock<tauri::menu::MenuItem<tauri::Wry>> = std::sync::OnceLock::new();
 static TOGGLE_ITEM: std::sync::OnceLock<tauri::menu::MenuItem<tauri::Wry>> = std::sync::OnceLock::new();
 static UPDATE_ITEM: std::sync::OnceLock<tauri::menu::MenuItem<tauri::Wry>> = std::sync::OnceLock::new();
+static RETRY_ITEM: std::sync::OnceLock<tauri::menu::MenuItem<tauri::Wry>> = std::sync::OnceLock::new();
 static IS_RECORDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn update_tray_model_status(app: &AppHandle, is_loaded: bool) {
@@ -110,6 +111,13 @@ pub fn set_model_download_progress(percent: u32) {
     if let Some(item) = STATUS_ITEM.get() {
         let _ = item.set_text(format!("↓ Downloading Speech Model… {}%", percent));
         let _ = item.set_enabled(false);
+    }
+}
+
+/// Enables "Retry Last Translation" while a failed translation is waiting to be retried.
+pub fn set_retry_item(enabled: bool) {
+    if let Some(item) = RETRY_ITEM.get() {
+        let _ = item.set_enabled(enabled);
     }
 }
 
@@ -166,6 +174,9 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
 
     let toggle_item = MenuItem::with_id(app, "toggle_recording", "Start Recording", true, None::<&str>)?;
     let _ = TOGGLE_ITEM.set(toggle_item.clone());
+    // Enabled while the last translation failed and can be sent again.
+    let retry_item = MenuItem::with_id(app, "retry_translation", "Retry Last Translation", false, None::<&str>)?;
+    let _ = RETRY_ITEM.set(retry_item.clone());
     let sep1 = PredefinedMenuItem::separator(app)?;
 
     // Microphone Input submenu
@@ -294,6 +305,7 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
         &eject_item,
         &sep0,
         &toggle_item,
+        &retry_item,
         &sep1,
         &input_submenu,
         &output_submenu,
@@ -318,6 +330,12 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
                     tauri::async_runtime::spawn(async move {
                         let _ = controller.toggle_recording();
                     });
+                }
+            } else if id == "retry_translation" {
+                if let Some(state) = app.try_state::<crate::AppState>() {
+                    if let Err(e) = state.controller.retry_translation() {
+                        log::warn!("Retry translation from tray: {}", e);
+                    }
                 }
             } else if id == "preferences" {
                 open_preferences(app);

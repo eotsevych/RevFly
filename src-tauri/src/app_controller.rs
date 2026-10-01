@@ -276,6 +276,115 @@ pub(crate) fn apply_pill_window_behavior(win: &tauri::WebviewWindow, order_front
     }
 }
 
+/// Longest a translation request may take before it counts as failed.
+const TRANSLATION_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// The translation service a recording goes to, resolved from settings. Shared by the pipeline and
+/// the "Retry translation" action so both send text the same way.
+struct TranslationRoute {
+    is_custom: bool,
+    endpoint: String,
+    key: String,
+    model: String,
+}
+
+impl TranslationRoute {
+    fn from_settings(settings: &AppSettings) -> Self {
+        let is_custom = settings.translation_provider.to_lowercase().contains("custom");
+        let endpoint = if !settings.llm_endpoint.trim().is_empty() {
+            settings.llm_endpoint.trim().to_string()
+        } else if !settings.local_llm_url.trim().is_empty() {
+            settings.local_llm_url.trim().to_string()
+        } else {
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions".to_string()
+        };
+        let key = if !settings.llm_api_key.trim().is_empty() {
+            settings.llm_api_key.trim().to_string()
+        } else if !settings.api_key.trim().is_empty() {
+            settings.api_key.trim().to_string()
+        } else {
+            settings.local_llm_api_key.trim().to_string()
+        };
+        let model = if is_custom {
+            if settings.custom_api_model.trim().is_empty() {
+                "gpt-4o-mini".to_string()
+            } else {
+                settings.custom_api_model.trim().to_string()
+            }
+        } else if !settings.llm_model.trim().is_empty() {
+            settings.llm_model.trim().to_string()
+        } else if !settings.gemini_model.trim().is_empty() {
+            settings.gemini_model.trim().to_string()
+        } else if !settings.local_llm_model.trim().is_empty() {
+            settings.local_llm_model.trim().to_string()
+        } else {
+            "gemini-3.6-flash".to_string()
+        };
+        Self { is_custom, endpoint, key, model }
+    }
+
+    fn label(&self) -> &'static str {
+        if self.is_custom { "Custom API" } else { "LLM" }
+    }
+
+    /// One-line description for logs, e.g. `LLM gemini-3.6-flash at https://…`.
+    fn describe(&self, settings: &AppSettings) -> String {
+        let url = if self.is_custom { settings.custom_api_url.trim() } else { self.endpoint.as_str() };
+        format!("{} {} at {}", self.label(), self.model, url)
+    }
+
+    async fn translate(&self, settings: &AppSettings, text: &str) -> Result<String, String> {
+        let request = async {
+            if self.is_custom {
+                crate::translate::translate_with_openai_compatible(
+                    text,
+                    &settings.custom_api_url,
+                    &settings.custom_api_key,
+                    &settings.source_lang,
+                    &settings.target_lang,
+                    &self.model,
+                    &settings.prompt_template,
+                )
+                .await
+            } else if self.endpoint.contains("generativelanguage.googleapis.com") && !self.endpoint.contains("/openai") {
+                crate::translate::translate_with_gemini(
+                    text,
+                    &self.key,
+                    &settings.source_lang,
+                    &settings.target_lang,
+                    &self.model,
+                    &settings.prompt_template,
+                )
+                .await
+            } else {
+                crate::translate::translate_with_openai_compatible(
+                    text,
+                    &self.endpoint,
+                    &self.key,
+                    &settings.source_lang,
+                    &settings.target_lang,
+                    &self.model,
+                    &settings.prompt_template,
+                )
+                .await
+            }
+        };
+        match tokio::time::timeout(TRANSLATION_TIMEOUT, request).await {
+            Ok(result) => result,
+            Err(_) => Err(format!("timed out after {} s", TRANSLATION_TIMEOUT.as_secs())),
+        }
+    }
+}
+
+/// A translation that failed, kept so the user can retry it from the pill or the tray menu.
+#[derive(Clone)]
+pub(crate) struct PendingRetry {
+    /// Text that was sent for translation (already normalized and masked).
+    text: String,
+    from_lang: String,
+    history_id: i64,
+}
+
 /// Entry point for the audio thread; routes a microphone problem to the running controller.
 pub fn report_mic_problem(app_handle: &AppHandle, report: crate::audio::MicReport) {
     if let Some(state) = app_handle.try_state::<crate::AppState>() {
@@ -337,11 +446,18 @@ fn set_pill_window_size(app_handle: &AppHandle, (width, height): (f64, f64)) {
 /// Shows an error the user needs to read in a larger pill for `LONG_ERROR_HOLD`, then hides it,
 /// unless a new recording (a new session) has started meanwhile.
 fn show_long_error(app_handle: &AppHandle, session_id: &Arc<AtomicU64>, session: u64, title: &str, subtitle: &str) {
-    set_pill_window_size(app_handle, LONG_ERROR_WINDOW);
-    let _ = app_handle.emit(
-        "assistant-state-changed",
+    show_long_error_payload(
+        app_handle,
+        session_id,
+        session,
         serde_json::json!({ "state": "error", "title": title, "subtitle": subtitle, "long": true }),
     );
+}
+
+/// `show_long_error` with a full pill state payload (e.g. one that offers a Retry button).
+fn show_long_error_payload(app_handle: &AppHandle, session_id: &Arc<AtomicU64>, session: u64, payload: serde_json::Value) {
+    set_pill_window_size(app_handle, LONG_ERROR_WINDOW);
+    let _ = app_handle.emit("assistant-state-changed", payload);
     let app = app_handle.clone();
     let session_id = Arc::clone(session_id);
     tauri::async_runtime::spawn(async move {
@@ -356,6 +472,26 @@ fn show_long_error(app_handle: &AppHandle, session_id: &Arc<AtomicU64>, session:
         hide_main_window(&app);
         set_pill_window_size(&app, PILL_WINDOW);
     });
+}
+
+fn mask_config_from(settings: &AppSettings) -> crate::masker::MaskConfig {
+    crate::masker::MaskConfig {
+        enabled: settings.mask_confidential,
+        rules: crate::masker::parse_rules(&settings.mask_words, &settings.mask_format),
+        threshold: settings.mask_threshold,
+        default_mask: settings.mask_format.clone(),
+        mask_emails: settings.mask_emails,
+        mask_phones: settings.mask_phones,
+        mask_cards: settings.mask_cards,
+    }
+}
+
+fn capitalize(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
 }
 
 /// True when a recording carries no signal at all. A live microphone always has some noise floor, so
@@ -435,6 +571,7 @@ fn keep_failed_recording(
         translation_skipped: true,
         translation_skip_reason: "Transcription failed".to_string(),
         translation_ms: 0,
+        translation_error: None,
         final_text: String::new(),
         clipboard_paste_ms: 0,
         history_save_ms: 0,
@@ -497,6 +634,8 @@ pub struct AppController {
     pipeline_logger: Arc<PipelineLogManager>,
     last_activity: Arc<Mutex<Instant>>,
     session_id: Arc<AtomicU64>,
+    /// The last failed translation, offered for retry until another recording finishes.
+    pending_retry: Arc<Mutex<Option<PendingRetry>>>,
 }
 
 impl AppController {
@@ -591,6 +730,7 @@ impl AppController {
             pipeline_logger,
             last_activity,
             session_id,
+            pending_retry: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -798,6 +938,126 @@ impl AppController {
         show_long_error(&self.app_handle, &self.session_id, session, title, &subtitle);
     }
 
+    pub fn has_pending_retry(&self) -> bool {
+        self.pending_retry.lock().unwrap().is_some()
+    }
+
+    /// Translates the last failed text again, with the current settings (so a fixed API key or
+    /// endpoint takes effect), pastes the result and updates its history entry.
+    pub fn retry_translation(&self) -> Result<(), String> {
+        let pending = self
+            .pending_retry
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| "There is no failed translation to retry".to_string())?;
+        {
+            let mut phase = self.phase.lock().unwrap();
+            if *phase != AssistantPhase::Idle {
+                return Err("RevFly is busy; try again when it finishes".to_string());
+            }
+            *phase = AssistantPhase::Translating;
+        }
+        // A new session also stops the error pill's hide timer.
+        let session = self.session_id.fetch_add(1, Ordering::SeqCst) + 1;
+        let settings = self.get_settings();
+        let route = TranslationRoute::from_settings(&settings);
+        let from_name = crate::translate::format_lang_name(&pending.from_lang);
+        let to_name = crate::translate::format_lang_name(&settings.target_lang);
+
+        show_main_window(&self.app_handle, &settings);
+        let _ = self.app_handle.emit(
+            "assistant-state-changed",
+            serde_json::json!({
+                "state": "translating",
+                "title": "Retrying translation…",
+                "subtitle": format!("{} → {} ({})", from_name, to_name, route.label())
+            }),
+        );
+
+        let app_handle = self.app_handle.clone();
+        let phase_arc = Arc::clone(&self.phase);
+        let session_id_arc = Arc::clone(&self.session_id);
+        let pending_retry_arc = Arc::clone(&self.pending_retry);
+        let history_arc = Arc::clone(&self.history);
+        tauri::async_runtime::spawn(async move {
+            let data_dir = get_data_dir();
+            log_stage_event(
+                &data_dir,
+                "TRANSLATE_RETRY_START",
+                &format!("Retrying {} → {} with {}: \"{}\"", from_name, to_name, route.describe(&settings), pending.text),
+            );
+            let started = Instant::now();
+            let result = route.translate(&settings, &pending.text).await;
+            let ms = started.elapsed().as_millis() as u64;
+            if session_id_arc.load(Ordering::SeqCst) != session {
+                log_stage_event(&data_dir, "TRANSLATE_RETRY_CANCELLED", "A new recording started; retry result dropped");
+                return;
+            }
+
+            match result {
+                Ok(translated) => {
+                    let mask_config = mask_config_from(&settings);
+                    let final_text = if mask_config.enabled {
+                        crate::masker::apply_masking(&translated, &mask_config)
+                    } else {
+                        translated
+                    };
+                    log_stage_event(&data_dir, "TRANSLATE_RETRY_DONE", &format!("Translated in {} ms: \"{}\"", ms, final_text));
+                    *phase_arc.lock().unwrap() = AssistantPhase::Done;
+                    if settings.auto_paste {
+                        let _ = copy_and_paste(&final_text);
+                    } else {
+                        let _ = crate::paste::copy_to_clipboard(&final_text);
+                    }
+                    if let Err(e) = history_arc.update_translation(pending.history_id, &final_text) {
+                        log::warn!("Could not update history with the retried translation: {}", e);
+                    }
+                    *pending_retry_arc.lock().unwrap() = None;
+                    crate::tray::set_retry_item(false);
+                    let _ = app_handle.emit(
+                        "assistant-state-changed",
+                        serde_json::json!({
+                            "state": "done",
+                            "title": "Copied to clipboard",
+                            "subtitle": null,
+                            "text": final_text
+                        }),
+                    );
+                    tokio::time::sleep(Duration::from_millis(600)).await;
+                    let mut p = phase_arc.lock().unwrap();
+                    if *p == AssistantPhase::Done && session_id_arc.load(Ordering::SeqCst) == session {
+                        *p = AssistantPhase::Idle;
+                        let _ = app_handle.emit(
+                            "assistant-state-changed",
+                            serde_json::json!({ "state": "idle", "title": "Ready", "subtitle": null }),
+                        );
+                        hide_main_window(&app_handle);
+                    }
+                }
+                Err(e) => {
+                    let detail = format!("{} → {} via {} failed again after {} ms: {}", from_name, to_name, route.describe(&settings), ms, e);
+                    log_stage_event(&data_dir, "TRANSLATE_RETRY_ERROR", &detail);
+                    log::error!("Translation retry failed: {}", detail);
+                    *phase_arc.lock().unwrap() = AssistantPhase::Idle;
+                    show_long_error_payload(
+                        &app_handle,
+                        &session_id_arc,
+                        session,
+                        serde_json::json!({
+                            "state": "error",
+                            "title": "Translation Failed Again",
+                            "subtitle": format!("{}. Check your translation settings, then retry.", capitalize(&e)),
+                            "long": true,
+                            "retry": true
+                        }),
+                    );
+                }
+            }
+        });
+        Ok(())
+    }
+
     pub fn toggle_recording(&self) -> Result<(), String> {
         let cur_phase = { self.phase.lock().unwrap().clone() };
 
@@ -944,6 +1204,7 @@ impl AppController {
         let last_activity_arc = Arc::clone(&self.last_activity);
         let pipeline_logger_arc = Arc::clone(&self.pipeline_logger);
         let session_id_arc = Arc::clone(&self.session_id);
+        let pending_retry_arc = Arc::clone(&self.pending_retry);
         let session = self.session_id.load(Ordering::SeqCst);
 
         // Run processing in background thread using Tauri's async runtime
@@ -1380,6 +1641,7 @@ impl AppController {
                     translation_skipped: true,
                     translation_skip_reason: "Empty transcription / Blank audio".to_string(),
                     translation_ms: 0,
+                    translation_error: None,
                     final_text: String::new(),
                     clipboard_paste_ms: 0,
                     history_save_ms: 0,
@@ -1477,16 +1739,7 @@ impl AppController {
             }
 
             // Step 3.6: Confidential text masking and redaction
-            let mask_rules = crate::masker::parse_rules(&settings.mask_words, &settings.mask_format);
-            let mask_config = crate::masker::MaskConfig {
-                enabled: settings.mask_confidential,
-                rules: mask_rules,
-                threshold: settings.mask_threshold,
-                default_mask: settings.mask_format.clone(),
-                mask_emails: settings.mask_emails,
-                mask_phones: settings.mask_phones,
-                mask_cards: settings.mask_cards,
-            };
+            let mask_config = mask_config_from(&settings);
 
             let pre_translate_text = if mask_config.enabled {
                 let masked = crate::masker::apply_masking(&normalized_source_text, &mask_config);
@@ -1542,41 +1795,17 @@ impl AppController {
             let is_custom = provider_norm.contains("custom");
             let is_llm = !is_no_trans && !is_custom;
 
-            let endpoint_to_use = if !settings.llm_endpoint.trim().is_empty() {
-                settings.llm_endpoint.trim().to_string()
-            } else if !settings.local_llm_url.trim().is_empty() {
-                settings.local_llm_url.trim().to_string()
-            } else {
-                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions".to_string()
-            };
-
-            let key_to_use = if !settings.llm_api_key.trim().is_empty() {
-                settings.llm_api_key.trim().to_string()
-            } else if !settings.api_key.trim().is_empty() {
-                settings.api_key.trim().to_string()
-            } else {
-                settings.local_llm_api_key.trim().to_string()
-            };
-
-            let model_to_use = if !settings.llm_model.trim().is_empty() {
-                settings.llm_model.trim().to_string()
-            } else if !settings.gemini_model.trim().is_empty() {
-                settings.gemini_model.trim().to_string()
-            } else if !settings.local_llm_model.trim().is_empty() {
-                settings.local_llm_model.trim().to_string()
-            } else {
-                "gemini-3.6-flash".to_string()
-            };
+            let route = TranslationRoute::from_settings(&settings);
 
             let can_translate = if is_no_trans {
                 false
             } else if is_custom {
                 !settings.custom_api_url.trim().is_empty()
             } else if is_llm {
-                if endpoint_to_use.contains("localhost") || endpoint_to_use.contains("127.0.0.1") {
+                if route.endpoint.contains("localhost") || route.endpoint.contains("127.0.0.1") {
                     true
                 } else {
-                    !key_to_use.is_empty()
+                    !route.key.is_empty()
                 }
             } else {
                 false
@@ -1608,6 +1837,10 @@ impl AppController {
 
             let mut translation_failed = false;
             let mut translation_fail_reason = String::new();
+            // Full description for the diagnostic log: languages, provider, model, endpoint and error.
+            let mut translation_error_detail: Option<String> = None;
+            // Only service translations can be retried; local Whisper translation needs the audio.
+            let mut retryable = false;
 
             let trans_start = Instant::now();
             let (final_text, translation_ms) = if skip_translation {
@@ -1616,29 +1849,14 @@ impl AppController {
             } else if can_translate {
                 let from_name = crate::translate::format_lang_name(&detected_effective);
                 let to_name = crate::translate::format_lang_name(&settings.target_lang);
-
-                let provider_label = if is_custom {
-                    "Custom API"
-                } else {
-                    "LLM"
-                };
-
-                let active_model = if is_custom {
-                    if settings.custom_api_model.trim().is_empty() {
-                        "gpt-4o-mini".to_string()
-                    } else {
-                        settings.custom_api_model.trim().to_string()
-                    }
-                } else {
-                    model_to_use.clone()
-                };
+                let provider_label = route.label();
 
                 log_stage_event(
                     &data_dir,
                     "TRANSLATE_START",
                     &format!(
-                        "Translating from {} to {} with {} (model: {}): \"{}\"",
-                        from_name, to_name, provider_label, active_model, pre_translate_text
+                        "Translating from {} to {} with {}: \"{}\"",
+                        from_name, to_name, route.describe(&settings), pre_translate_text
                     ),
                 );
                 // Step 5A: Translate with configured provider
@@ -1656,65 +1874,25 @@ impl AppController {
                     }),
                 );
 
-                let trans_timeout = Duration::from_secs(20);
-                let (trans_result, ms) = match tokio::time::timeout(
-                    trans_timeout,
-                    async {
-                        if is_custom {
-                            crate::translate::translate_with_openai_compatible(
-                                &pre_translate_text,
-                                &settings.custom_api_url,
-                                &settings.custom_api_key,
-                                &settings.source_lang,
-                                &settings.target_lang,
-                                &active_model,
-                                &settings.prompt_template,
-                            ).await
-                        } else if endpoint_to_use.contains("generativelanguage.googleapis.com")
-                            && !endpoint_to_use.contains("/openai")
-                        {
-                            crate::translate::translate_with_gemini(
-                                &pre_translate_text,
-                                &key_to_use,
-                                &settings.source_lang,
-                                &settings.target_lang,
-                                &active_model,
-                                &settings.prompt_template,
-                            ).await
-                        } else {
-                            crate::translate::translate_with_openai_compatible(
-                                &pre_translate_text,
-                                &endpoint_to_use,
-                                &key_to_use,
-                                &settings.source_lang,
-                                &settings.target_lang,
-                                &active_model,
-                                &settings.prompt_template,
-                            ).await
-                        }
-                    },
-                )
-                .await
-                {
-                    Ok(Ok(t)) => {
+                let (trans_result, ms) = match route.translate(&settings, &pre_translate_text).await {
+                    Ok(t) => {
                         let ms = trans_start.elapsed().as_millis() as u64;
                         log_stage_event(&data_dir, "TRANSLATE_DONE", &format!("{} translated in {} ms: \"{}\"", provider_label, ms, t));
                         (t, ms)
                     }
-                    Ok(Err(e)) => {
+                    Err(e) => {
+                        let ms = trans_start.elapsed().as_millis() as u64;
                         let vitals = crate::vitals::SystemVitals::collect();
-                        log_stage_event(&data_dir, "TRANSLATE_ERROR", &format!("{} translation error: {}\n{}", provider_label, e, vitals.format_report()));
-                        log::warn!("Translation error: {}. Using normalized recognized text.", e);
+                        let detail = format!(
+                            "{} → {} via {} failed after {} ms: {}",
+                            from_name, to_name, route.describe(&settings), ms, e
+                        );
+                        log_stage_event(&data_dir, "TRANSLATE_ERROR", &format!("{}\n{}", detail, vitals.format_report()));
+                        log::error!("Translation failed: {}. Pasting the spoken text instead.", detail);
                         translation_failed = true;
-                        translation_fail_reason = format!("API Error ({})", e);
-                        (pre_translate_text.clone(), 0)
-                    }
-                    Err(_timeout) => {
-                        let vitals = crate::vitals::SystemVitals::collect();
-                        log_stage_event(&data_dir, "TRANSLATE_TIMEOUT", &format!("{} translation timed out after 20s!\n{}", provider_label, vitals.format_report()));
-                        log::warn!("Translation timed out after 20s. Using normalized recognized text.");
-                        translation_failed = true;
-                        translation_fail_reason = "Network timed out after 20s".to_string();
+                        translation_fail_reason = e;
+                        translation_error_detail = Some(detail);
+                        retryable = true;
                         (pre_translate_text.clone(), 0)
                     }
                 };
@@ -1745,9 +1923,12 @@ impl AppController {
                     match tr.transcribe(&vad_res.samples, &whisper_model_path, true) {
                         Ok(res) => res,
                         Err(e) => {
-                            log::warn!("Local translation error: {}. Using raw recognized text.", e);
+                            let detail = format!("{} → English via local Whisper ({:?}) failed: {}", detected_lang, whisper_model_path, e);
+                            log_stage_event(&data_dir, "TRANSLATE_WHISPER_ERROR", &detail);
+                            log::error!("Local translation failed: {}. Pasting the spoken text instead.", detail);
                             translation_failed = true;
-                            translation_fail_reason = "Local translation failed".to_string();
+                            translation_fail_reason = format!("local Whisper translation failed: {}", e);
+                            translation_error_detail = Some(detail);
                             (pre_translate_text.clone(), detected_lang.clone(), 0, 4)
                         }
                     }
@@ -1772,11 +1953,12 @@ impl AppController {
                 return;
             }
 
-            // Step 6: Set phase (Done or Error)
+            // Step 6: Set phase. A failed translation goes straight back to Idle so the hotkey works while
+            // the error (with its Retry button) is still on screen.
             {
                 let mut p = phase_arc.lock().unwrap();
                 if translation_failed {
-                    *p = AssistantPhase::Error;
+                    *p = AssistantPhase::Idle;
                 } else {
                     *p = AssistantPhase::Done;
                 }
@@ -1792,17 +1974,8 @@ impl AppController {
             let paste_ms = paste_start.elapsed().as_millis() as u64;
             log_stage_event(&data_dir, "PASTE", &format!("Auto-paste {} in {} ms", if settings.auto_paste { "dispatched" } else { "skipped" }, paste_ms));
 
-            if translation_failed {
-                let _ = app_handle.emit(
-                    "assistant-state-changed",
-                    serde_json::json!({
-                        "state": "error",
-                        "title": "Translation Failed",
-                        "subtitle": format!("{}. Spoken text copied.", translation_fail_reason),
-                        "text": final_text
-                    }),
-                );
-            } else {
+            // A failed translation is announced after it's saved to history (the retry needs its id).
+            if !translation_failed {
                 let _ = app_handle.emit(
                     "assistant-state-changed",
                     serde_json::json!({
@@ -1821,18 +1994,51 @@ impl AppController {
             } else {
                 raw_text.clone()
             };
-            let _ = history_arc.add_entry(
-                &history_source_text,
-                &final_text,
-                &detected_lang,
-                &settings.target_lang,
-                duration_sec,
-                Some(&captured),
-                &settings.storage_mode,
-                settings.storage_cap_mb,
-            );
+            let history_id = history_arc
+                .add_entry(
+                    &history_source_text,
+                    &final_text,
+                    &detected_lang,
+                    &settings.target_lang,
+                    duration_sec,
+                    Some(&captured),
+                    &settings.storage_mode,
+                    settings.storage_cap_mb,
+                )
+                .unwrap_or(0);
             let history_ms = db_start.elapsed().as_millis() as u64;
             log_stage_event(&data_dir, "DB", &format!("Saved to database in {} ms", history_ms));
+
+            // Remember a failed service translation so it can be retried from the pill or the tray.
+            let pending = (translation_failed && retryable).then(|| PendingRetry {
+                text: pre_translate_text.clone(),
+                from_lang: detected_effective.clone(),
+                history_id,
+            });
+            let can_retry = pending.is_some();
+            *pending_retry_arc.lock().unwrap() = pending;
+            crate::tray::set_retry_item(can_retry);
+
+            if translation_failed {
+                let what_was_pasted = if settings.auto_paste { "pasted" } else { "copied" };
+                let subtitle = if can_retry {
+                    format!("{}. Your spoken text was {} instead. Retry, or check your translation settings.", capitalize(&translation_fail_reason), what_was_pasted)
+                } else {
+                    format!("{}. Your spoken text was {} instead.", capitalize(&translation_fail_reason), what_was_pasted)
+                };
+                show_long_error_payload(
+                    &app_handle,
+                    &session_id_arc,
+                    session,
+                    serde_json::json!({
+                        "state": "error",
+                        "title": "Translation Failed",
+                        "subtitle": subtitle,
+                        "long": true,
+                        "retry": can_retry
+                    }),
+                );
+            }
 
             let total_pipeline_ms = pipeline_start.elapsed().as_millis() as u64;
             let speed_factor = if whisper_inference_ms > 0 {
@@ -1852,8 +2058,16 @@ impl AppController {
             actions.push(format!("[MODEL] Transcribed with {} in {} ms ({:.1}x real-time)", settings.model_name, whisper_inference_ms, speed_factor));
             if skip_translation {
                 actions.push(format!("[TRANSLATION] Skipped ({})", skip_reason));
+            } else if let Some(detail) = &translation_error_detail {
+                actions.push(format!("[TRANSLATION] FAILED: {}", detail));
+                actions.push("[TRANSLATION] Pasted the spoken text instead".to_string());
+                if can_retry {
+                    actions.push("[TRANSLATION] Retry available from the pill or the tray menu".to_string());
+                }
+            } else if can_translate {
+                actions.push(format!("[TRANSLATION] Translated in {} ms via {}", translation_ms, route.describe(&settings)));
             } else {
-                actions.push(format!("[TRANSLATION] Translated in {} ms via Gemini API", translation_ms));
+                actions.push(format!("[TRANSLATION] Translated locally in {} ms via Whisper", translation_ms));
             }
             actions.push(format!("[DISPATCH] Pasted output in {} ms", paste_ms));
             actions.push(format!("[COMPLETE] Total pipeline finished in {} ms", total_pipeline_ms));
@@ -1878,6 +2092,7 @@ impl AppController {
                 translation_skipped: skip_translation,
                 translation_skip_reason: skip_reason,
                 translation_ms,
+                translation_error: translation_error_detail.clone(),
                 final_text: final_text.clone(),
                 clipboard_paste_ms: paste_ms,
                 history_save_ms: history_ms,
@@ -1894,9 +2109,12 @@ impl AppController {
             pipeline_logger_arc.add_log(log_entry.clone(), &get_data_dir());
             let _ = app_handle.emit("transcription-diagnostic-log", &log_entry);
 
-            // Wait default time (3.5s for error pill, 600ms for done pill) then revert to Idle and hide window
-            let display_hold_ms = if translation_failed { 3500 } else { 600 };
-            tokio::time::sleep(Duration::from_millis(display_hold_ms)).await;
+            // A failed translation hides itself after LONG_ERROR_HOLD (see show_long_error_payload).
+            if translation_failed {
+                return;
+            }
+            // Show the done pill briefly, then revert to Idle and hide the window.
+            tokio::time::sleep(Duration::from_millis(600)).await;
             {
                 let mut p = phase_arc.lock().unwrap();
                 if *p == AssistantPhase::Done || *p == AssistantPhase::Error {
@@ -1948,7 +2166,51 @@ impl AppController {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_digital_silence, mic_problem_message};
+    use super::{capitalize, is_digital_silence, mic_problem_message, TranslationRoute};
+    use crate::settings::AppSettings;
+
+    #[test]
+    fn translation_route_prefers_explicit_llm_settings() {
+        let mut s = AppSettings::default();
+        s.translation_provider = "LLM".into();
+        s.llm_endpoint = " http://127.0.0.1:11434/v1/chat/completions ".into();
+        s.llm_api_key = " key-1 ".into();
+        s.llm_model = "llama3.2".into();
+        let route = TranslationRoute::from_settings(&s);
+        assert_eq!(route.endpoint, "http://127.0.0.1:11434/v1/chat/completions");
+        assert_eq!(route.key, "key-1");
+        assert_eq!(route.model, "llama3.2");
+        assert_eq!(route.describe(&s), "LLM llama3.2 at http://127.0.0.1:11434/v1/chat/completions");
+    }
+
+    #[test]
+    fn translation_route_custom_api_defaults_its_model() {
+        let mut s = AppSettings::default();
+        s.translation_provider = "Custom API".into();
+        s.custom_api_url = "https://api.example.com/v1/chat/completions".into();
+        s.custom_api_model = String::new();
+        let route = TranslationRoute::from_settings(&s);
+        assert_eq!(route.label(), "Custom API");
+        assert_eq!(route.model, "gpt-4o-mini");
+        assert_eq!(route.describe(&s), "Custom API gpt-4o-mini at https://api.example.com/v1/chat/completions");
+    }
+
+    #[tokio::test]
+    async fn translation_route_reports_an_unreachable_service_as_an_error() {
+        let mut s = AppSettings::default();
+        s.translation_provider = "LLM".into();
+        // Port 9 (discard) is closed on test machines, so the request fails right away.
+        s.llm_endpoint = "http://127.0.0.1:9/v1/chat/completions".into();
+        s.llm_model = "test-model".into();
+        let err = TranslationRoute::from_settings(&s).translate(&s, "Привіт").await.unwrap_err();
+        assert!(!err.is_empty());
+    }
+
+    #[test]
+    fn capitalize_first_letter_only() {
+        assert_eq!(capitalize("timed out after 20 s"), "Timed out after 20 s");
+        assert_eq!(capitalize(""), "");
+    }
     use crate::audio::{MicProblem, MicReport};
 
     fn report(problem: MicProblem, missing: Option<&str>) -> MicReport {

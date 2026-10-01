@@ -122,6 +122,8 @@ export interface AssistantStateEvent {
   text?: string;
   /** An error the user needs to read: shown in full (wrapped, not truncated) in a larger pill. */
   long?: boolean;
+  /** A failed translation that can be sent again: the pill shows a Retry button. */
+  retry?: boolean;
 }
 
 export async function fetchSettings(): Promise<BackendSettings | null> {
@@ -151,6 +153,17 @@ export async function triggerToggleRecording(): Promise<void> {
     await invoke("toggle_recording");
   } catch (err) {
     console.error("Failed to toggle recording:", err);
+  }
+}
+
+/** Sends the last failed translation again. Resolves to an error message, or null when it started. */
+export async function triggerRetryTranslation(): Promise<string | null> {
+  if (!isTauri()) return null;
+  try {
+    await invoke("retry_translation");
+    return null;
+  } catch (err) {
+    return String(err);
   }
 }
 

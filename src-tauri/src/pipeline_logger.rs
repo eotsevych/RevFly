@@ -38,6 +38,9 @@ pub struct TranscriptionDiagnosticLog {
     pub translation_skipped: bool,
     pub translation_skip_reason: String,
     pub translation_ms: u64,
+    /// Why translation failed (provider, model and error), when it did; the spoken text was used instead.
+    #[serde(default)]
+    pub translation_error: Option<String>,
     pub final_text: String,
     pub clipboard_paste_ms: u64,
     pub history_save_ms: u64,
