@@ -535,6 +535,21 @@
   animation: pill-pulse-glow 2.2s ease-in-out infinite;
 }
 
+/* Mic reconnecting: flattened bars light up one after another, like a search sweep */
+@keyframes mic-search {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+.mic-search-bar {
+  animation: mic-search 1.1s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

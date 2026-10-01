@@ -393,9 +393,9 @@ pub fn report_mic_problem(app_handle: &AppHandle, report: crate::audio::MicRepor
 }
 
 /// Entry point for the audio thread; audio is flowing again after a mid-recording dropout.
-pub fn report_mic_recovered(app_handle: &AppHandle) {
+pub fn report_mic_recovered(app_handle: &AppHandle, switched_to: Option<String>) {
     if let Some(state) = app_handle.try_state::<crate::AppState>() {
-        state.controller.on_mic_recovered();
+        state.controller.on_mic_recovered(switched_to);
     }
 }
 
@@ -1052,14 +1052,18 @@ impl AppController {
             "MIC_DROPOUT",
             &format!("{} at {:.1} s into the recording: {} ({:?})", title, at, subtitle, report),
         );
+        // "reconnecting" while the stream is being reopened, "down" once reopening didn't help.
+        let mic = if report.reconnecting { "reconnecting" } else { "down" };
+        set_pill_window_size(&self.app_handle, LONG_ERROR_WINDOW);
         let _ = self.app_handle.emit(
             "assistant-state-changed",
-            serde_json::json!({ "state": "listening", "title": title, "subtitle": subtitle, "warning": true }),
+            serde_json::json!({ "state": "listening", "title": title, "subtitle": subtitle, "warning": true, "mic": mic, "long": true }),
         );
     }
 
-    /// Audio is flowing again after a mid-recording dropout: clear the pill's warning.
-    pub fn on_mic_recovered(&self) {
+    /// Audio is flowing again after a mid-recording dropout: clear the pill's warning. `switched_to`
+    /// names the device now in use when the chosen one was gone and the system default took over.
+    pub fn on_mic_recovered(&self, switched_to: Option<String>) {
         if *self.phase.lock().unwrap() != AssistantPhase::Listening {
             return;
         }
@@ -1070,10 +1074,15 @@ impl AppController {
             .as_ref()
             .map(|s| s.at.elapsed().as_secs_f32())
             .unwrap_or_default();
-        log_stage_event(&get_data_dir(), "MIC_RECOVERED", &format!("Microphone audio came back at {:.1} s into the recording", at));
+        let via = switched_to.as_ref().map(|d| format!(" on \"{}\"", d)).unwrap_or_default();
+        log_stage_event(&get_data_dir(), "MIC_RECOVERED", &format!("Microphone audio came back{} at {:.1} s into the recording", via, at));
+        // Say which mic took over when it changed, in the larger pill so the name fits.
+        let subtitle = switched_to.map(|d| format!("Switched to \"{}\"", d));
+        let long = subtitle.is_some();
+        set_pill_window_size(&self.app_handle, if long { LONG_ERROR_WINDOW } else { PILL_WINDOW });
         let _ = self.app_handle.emit(
             "assistant-state-changed",
-            serde_json::json!({ "state": "listening", "title": "Listening…", "subtitle": null }),
+            serde_json::json!({ "state": "listening", "title": "Listening…", "subtitle": subtitle, "long": long }),
         );
     }
 
@@ -1323,6 +1332,8 @@ impl AppController {
             *phase = AssistantPhase::Transcribing;
         }
         crate::tray::set_tray_recording(&self.app_handle, false, self.is_model_loaded());
+        // A mic warning may have enlarged the pill; processing states use the normal size.
+        set_pill_window_size(&self.app_handle, PILL_WINDOW);
 
         {
             let mut t = self.last_activity.lock().unwrap();

@@ -126,6 +126,8 @@ export interface AssistantStateEvent {
   retry?: boolean;
   /** While listening: the microphone stopped delivering audio; title and subtitle explain it. */
   warning?: boolean;
+  /** While listening: the mic is being reopened, or reopening didn't bring sound back. */
+  mic?: "reconnecting" | "down";
 }
 
 export async function fetchSettings(): Promise<BackendSettings | null> {

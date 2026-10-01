@@ -329,19 +329,77 @@ export function ErrorIndicator({
   );
 }
 
+/** The microphone stopped delivering sound while listening. */
+export type MicDownMode = "reconnecting" | "down";
+
+/**
+ * Shown instead of the sound wave when the microphone stops delivering sound mid-recording: the seven
+ * bars lie flat and dimmed with a strike through them. While RevFly reopens the mic they pulse one
+ * after another; once it gives up they stay still.
+ */
+export function MicDownIndicator({ mode, accent }: { mode: MicDownMode; accent: string }) {
+  const reconnecting = mode === "reconnecting";
+  const width = BAR_COUNT * BAR_WIDTH + (BAR_COUNT - 1) * BAR_GAP;
+  return (
+    <div
+      role="img"
+      aria-label={reconnecting ? "Microphone reconnecting" : "Microphone not delivering sound"}
+      style={{
+        position: "relative",
+        display: "flex",
+        alignItems: "center",
+        height: WAVE_BOX_H,
+        gap: BAR_GAP,
+      }}
+    >
+      {Array.from({ length: BAR_COUNT }, (_, i) => (
+        <div
+          key={i}
+          className={reconnecting ? "mic-search-bar" : undefined}
+          style={{
+            width: BAR_WIDTH,
+            height: BAR_MIN_H,
+            borderRadius: BAR_WIDTH,
+            background: "#8a90a6",
+            opacity: reconnecting ? undefined : 0.35,
+            animationDelay: reconnecting ? `${i * 0.12}s` : undefined,
+          }}
+        />
+      ))}
+      {/* The strike-through: a slanted line across the flattened bars */}
+      <div
+        style={{
+          position: "absolute",
+          left: -3,
+          top: "50%",
+          width: width + 6,
+          height: 2,
+          borderRadius: 2,
+          background: accent,
+          transform: "translateY(-50%) rotate(-24deg)",
+          boxShadow: `0 0 0 1.5px ${accent}33`,
+        }}
+      />
+    </div>
+  );
+}
+
 export function StateIndicator({
   state,
   t,
   accent,
   levels,
   title,
+  micDown,
 }: {
   state: "idle" | "listening" | "transcribing" | "translating" | "done" | "error";
   t: Tokens;
   accent: string;
   levels?: AudioLevels | undefined;
   title?: string | undefined;
+  micDown?: MicDownMode | undefined;
 }) {
+  if (state === "listening" && micDown) return <MicDownIndicator mode={micDown} accent={accent} />;
   if (state === "listening") return <SoundWave levels={levels} />;
   if (state === "transcribing") return <TranscribingIndicator t={t} />;
   if (state === "translating") return <TranslatingIndicator accent={accent} />;

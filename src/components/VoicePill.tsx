@@ -179,8 +179,8 @@ export function VoicePill() {
   const displayedSubtitle =
     state.state === "error" && state.text ? `Copied: "${state.text}"` : dynamicSublabel;
 
-  // Errors that explain what to fix are shown in full, in a pill that grows to fit them.
-  const isLong = state.state === "error" && state.long === true;
+  // Errors and mic warnings that explain what to fix are shown in full, in a pill that grows to fit them.
+  const isLong = (state.state === "error" || state.state === "listening") && state.long === true;
 
   if (isIdle) {
     return null;
@@ -230,6 +230,7 @@ export function VoicePill() {
             accent={accent}
             levels={audioLevels}
             title={state.title}
+            micDown={micWarning ? state.mic : undefined}
           />
         </div>
 

@@ -960,7 +960,9 @@ fn start_stream_inner(
                 }
                 Some(MicEvent::Recovered) if is_rec_monitor.load(Ordering::Relaxed) => {
                     log::info!("Microphone audio recovered on \"{}\"", device_label);
-                    crate::app_controller::report_mic_recovered(&app_handle);
+                    // A reopened stream that landed on the system default because the chosen mic is gone.
+                    let switched_to = missing_device.as_ref().map(|_| device_label.clone());
+                    crate::app_controller::report_mic_recovered(&app_handle, switched_to);
                 }
                 _ => {}
             }
