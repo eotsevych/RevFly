@@ -6,6 +6,92 @@ const INSTALL_COMMANDS = {
   brew: "brew install --cask eotsevych/tap/revfly",
 };
 
+// ── Language (English is in the HTML; others come from i18n.js) ─────────────
+const DICTS = window.REVFLY_I18N || {};
+const englishText = new Map(); // element → original innerHTML
+const englishAttrs = new Map(); // element → { attr: original value }
+const englishMeta = {
+  title: document.title,
+  description: document.querySelector('meta[name="description"]')?.content || "",
+};
+
+// English fallbacks for strings that only exist in JS.
+const EN = {
+  "ui.copy": "Copy",
+  "ui.copied": "Copied",
+  "ui.selectCopy": "Select & copy",
+  "hero.download": "Download RevFly",
+  "hero.downloadFor": "Download for {os}",
+  "dl.latestTag": "Latest: {tag}",
+  "demo.listening": "Listening",
+  "demo.hold": "Hold ⌥ to talk",
+  "demo.transcribing": "Transcribing",
+  "demo.onDevice": "Parakeet · on-device",
+  "demo.translating": "Translating",
+  "demo.direction": "Ukrainian → English",
+  "demo.done": "Done",
+  "demo.pasted": "Pasted",
+  "demo.pastedSlack": "Pasted into Slack",
+};
+
+let lang = document.documentElement.dataset.lang === "uk" ? "uk" : "en";
+
+function t(key, vars = {}) {
+  const text = (lang !== "en" && DICTS[lang]?.[key]) || EN[key] || key;
+  return text.replace(/\{(\w+)\}/g, (_, name) => vars[name] ?? "");
+}
+
+function applyLanguage(next) {
+  lang = DICTS[next] ? next : "en";
+  const dict = lang === "en" ? null : DICTS[lang];
+  const root = document.documentElement;
+  root.lang = lang;
+  root.dataset.lang = lang;
+
+  document.querySelectorAll("[data-i18n]").forEach((el) => {
+    if (!englishText.has(el)) englishText.set(el, el.innerHTML);
+    const value = dict?.[el.dataset.i18n];
+    el.innerHTML = value ?? englishText.get(el);
+  });
+
+  document.querySelectorAll("[data-i18n-attr]").forEach((el) => {
+    if (!englishAttrs.has(el)) englishAttrs.set(el, {});
+    const saved = englishAttrs.get(el);
+    el.dataset.i18nAttr.split(";").forEach((pair) => {
+      const [attr, key] = pair.split(":");
+      if (!(attr in saved)) saved[attr] = el.getAttribute(attr);
+      el.setAttribute(attr, dict?.[key] ?? saved[attr]);
+    });
+  });
+
+  document.title = dict?.["meta.title"] ?? englishMeta.title;
+  document.querySelector('meta[name="description"]')?.setAttribute(
+    "content",
+    dict?.["meta.description"] ?? englishMeta.description,
+  );
+
+  document.querySelectorAll(".lang-switch [data-lang]").forEach((b) => {
+    b.setAttribute("aria-pressed", String(b.dataset.lang === lang));
+  });
+
+  updateDynamicText();
+  root.classList.remove("i18n-pending");
+}
+
+document.querySelectorAll(".lang-switch [data-lang]").forEach((button) => {
+  button.addEventListener("click", () => {
+    applyLanguage(button.dataset.lang);
+    try {
+      localStorage.setItem("revfly_lang", lang);
+    } catch {
+      // Storage blocked: the choice lasts for this visit only.
+    }
+    const url = new URL(location.href);
+    url.searchParams.set("lang", lang);
+    history.replaceState(null, "", url);
+  });
+});
+
 // ── Copy buttons ─────────────────────────────────────────────────────────────
 document.querySelectorAll(".copy").forEach((button) => {
   button.addEventListener("click", async () => {
@@ -13,11 +99,11 @@ document.querySelectorAll(".copy").forEach((button) => {
     if (!target) return;
     try {
       await navigator.clipboard.writeText(target.textContent.trim());
-      button.textContent = "Copied";
+      button.textContent = t("ui.copied");
     } catch {
-      button.textContent = "Select & copy";
+      button.textContent = t("ui.selectCopy");
     }
-    setTimeout(() => (button.textContent = "Copy"), 1600);
+    setTimeout(() => (button.textContent = t("ui.copy")), 1600);
   });
 });
 
@@ -27,7 +113,7 @@ document.querySelectorAll(".install-tabs [role=tab]").forEach((tab) => {
   tab.addEventListener("click", () => {
     document
       .querySelectorAll(".install-tabs [role=tab]")
-      .forEach((t) => t.setAttribute("aria-selected", String(t === tab)));
+      .forEach((x) => x.setAttribute("aria-selected", String(x === tab)));
     installCode.textContent = INSTALL_COMMANDS[tab.dataset.cmd];
   });
 });
@@ -45,9 +131,17 @@ function detectOS() {
 
 const OS_NAMES = { mac: "macOS", windows: "Windows", linux: "Linux" };
 const os = detectOS();
-if (os) {
-  document.getElementById("hero-download-label").textContent = `Download for ${OS_NAMES[os]}`;
-  document.querySelector(`.dl[data-os="${os}"]`)?.classList.add("is-current");
+if (os) document.querySelector(`.dl[data-os="${os}"]`)?.classList.add("is-current");
+let releaseTag = null;
+
+// Text that depends on runtime state (OS, release) as well as the language.
+function updateDynamicText() {
+  const heroLabel = document.getElementById("hero-download-label");
+  heroLabel.textContent = os ? t("hero.downloadFor", { os: OS_NAMES[os] }) : t("hero.download");
+  if (releaseTag) {
+    document.getElementById("release-version").textContent = t("dl.latestTag", { tag: releaseTag });
+  }
+  if (demoState) setPill(...demoState);
 }
 
 // ── Latest release assets ────────────────────────────────────────────────────
@@ -77,8 +171,10 @@ async function loadRelease() {
       const url = urls[link.dataset.asset];
       if (url) link.href = url;
     });
-    const version = document.getElementById("release-version");
-    if (release.tag_name) version.textContent = `Latest: ${release.tag_name}`;
+    if (release.tag_name) {
+      releaseTag = release.tag_name;
+      updateDynamicText();
+    }
     if (os && urls[HERO_ASSET[os]]) {
       document.getElementById("hero-download").href = urls[HERO_ASSET[os]];
     }
@@ -88,7 +184,6 @@ async function loadRelease() {
 }
 
 document.querySelectorAll("[data-asset]").forEach((link) => (link.href = RELEASES_URL));
-loadRelease();
 
 // ── Hero demo: speak in Ukrainian, paste in English ──────────────────────────
 const pill = document.getElementById("demo-pill");
@@ -102,11 +197,13 @@ const replyText = document.getElementById("demo-reply-text");
 
 const RESULT = "We can show the demo on Thursday at 3 pm, okay?";
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+let demoState = null; // [state, labelKey, subKey], re-rendered on language change
 
-function setPill(state, label, sub) {
+function setPill(state, labelKey, subKey) {
+  demoState = [state, labelKey, subKey];
   pill.dataset.state = state;
-  pillLabel.textContent = label;
-  pillSub.textContent = sub;
+  pillLabel.textContent = t(labelKey);
+  pillSub.textContent = t(subKey);
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -121,7 +218,7 @@ async function typeText(text) {
 
 function showFinalFrame() {
   spoken.classList.add("is-hidden");
-  setPill("done", "Done", "Pasted into Slack");
+  setPill("done", "demo.done", "demo.pastedSlack");
   placeholder.hidden = true;
   reply.hidden = false;
   replyText.textContent = RESULT;
@@ -133,17 +230,17 @@ async function runDemo() {
     typed.textContent = "";
     placeholder.hidden = false;
     spoken.classList.remove("is-hidden");
-    setPill("listening", "Listening", "Hold ⌥ to talk");
+    setPill("listening", "demo.listening", "demo.hold");
     await sleep(2600);
 
     spoken.classList.add("is-hidden");
-    setPill("transcribing", "Transcribing", "Whisper · on-device");
+    setPill("transcribing", "demo.transcribing", "demo.onDevice");
     await sleep(1300);
 
-    setPill("translating", "Translating", "Ukrainian → English");
+    setPill("translating", "demo.translating", "demo.direction");
     await sleep(1300);
 
-    setPill("done", "Done", "Pasted");
+    setPill("done", "demo.done", "demo.pasted");
     await typeText(RESULT);
     await sleep(700);
 
@@ -155,6 +252,9 @@ async function runDemo() {
     await sleep(3200);
   }
 }
+
+applyLanguage(lang);
+loadRelease();
 
 if (reducedMotion) {
   showFinalFrame();

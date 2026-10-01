@@ -949,6 +949,312 @@ summary:focus-visible {
   background: var(--window);
 }
 
+/* Language switch */
+.i18n-pending body {
+  visibility: hidden;
+}
+
+.lang-switch {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.lang-switch button {
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.lang-switch button[aria-pressed="true"] {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* Guide: first run */
+.quickstart {
+  list-style: none;
+  padding: 0;
+  margin: 44px 0 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.quickstart li {
+  display: flex;
+  gap: 12px;
+  padding: 18px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.qs-n {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1.5px solid var(--violet);
+  color: var(--violet);
+  font-weight: 700;
+  font-size: 0.82rem;
+}
+
+.quickstart h3 {
+  font-size: 0.98rem;
+}
+
+.quickstart p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.quickstart kbd,
+.guide kbd,
+.guide code {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.05em 0.4em;
+}
+
+/* Guide: chapter index */
+.guide-index {
+  position: sticky;
+  top: 64px;
+  z-index: 5;
+  display: flex;
+  gap: 6px;
+  margin: 40px 0 0;
+  padding: 10px 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: color-mix(in srgb, var(--bg-alt) 88%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.guide-index::-webkit-scrollbar {
+  display: none;
+}
+
+.guide-index a {
+  flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.guide-index a:hover,
+.guide-index a.is-active {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--violet) 55%, transparent);
+}
+
+.guide-index span {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  color: var(--violet);
+}
+
+.guide-index b {
+  font-weight: 600;
+}
+
+/* Guide: chapters */
+.guide {
+  display: grid;
+  gap: 28px;
+  margin-top: 20px;
+}
+
+.guide-step {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: 40px;
+  align-items: start;
+  padding: 36px;
+  border-radius: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  scroll-margin-top: 130px;
+}
+
+.guide-step:nth-child(even) .guide-text {
+  order: 2;
+}
+
+.guide-n {
+  margin: 0 0 8px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--violet);
+}
+
+.guide-text h3 {
+  font-size: clamp(1.3rem, 2.4vw, 1.6rem);
+  font-weight: 750;
+}
+
+.guide-lead {
+  margin: 12px 0 0;
+  color: var(--muted);
+}
+
+.opts {
+  margin: 20px 0 0;
+  display: grid;
+  gap: 14px;
+}
+
+.opts div {
+  padding-left: 14px;
+  border-left: 2px solid color-mix(in srgb, var(--violet) 45%, transparent);
+}
+
+.opts dt {
+  font-weight: 650;
+  font-size: 0.96rem;
+}
+
+.opts dd {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.opts b,
+.tip b {
+  color: var(--text);
+  font-weight: 650;
+}
+
+/* The app's own English label next to a translated name. */
+.ui {
+  font-style: normal;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: var(--dim);
+  margin-left: 4px;
+  white-space: nowrap;
+}
+
+.tip {
+  margin: 20px 0 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--green) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
+}
+
+.guide-shot {
+  margin: 0;
+  position: sticky;
+  top: 140px;
+  display: grid;
+  gap: 14px;
+}
+
+.guide-shot img {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: var(--shadow);
+  background: #13131c;
+}
+
+/* Pill legend */
+.pill-legend {
+  margin-top: 64px;
+}
+
+.pill-legend h3 {
+  text-align: center;
+  font-size: clamp(1.3rem, 2.4vw, 1.6rem);
+  font-weight: 750;
+  margin-bottom: 10px;
+}
+
+.pill-grid {
+  margin-top: 28px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.legend-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 24px 16px 20px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  text-align: center;
+}
+
+.legend-item p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.pill.pill-static {
+  position: static;
+  transform: none;
+  animation: none;
+}
+
+.pill-static .pill-icon > * {
+  opacity: 1;
+}
+
+.pill[data-state="warning"] {
+  --pill-color: #ff9f43;
+}
+
+.pill-icon .strike {
+  width: 26px;
+  height: 2.5px;
+  border-radius: 2px;
+  background: var(--pill-color);
+  transform: rotate(-24deg);
+}
+
+.bars-down i {
+  animation: none;
+  height: 4px;
+  opacity: 0.45;
+}
+
 /* Downloads */
 .downloads {
   margin-top: 40px;
@@ -1147,11 +1453,24 @@ details p {
   .downloads {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .steps {
+  .steps,
+  .quickstart,
+  .pill-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .nav-links {
     display: none;
+  }
+  .guide-step {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+    padding: 28px;
+  }
+  .guide-step:nth-child(even) .guide-text {
+    order: 0;
+  }
+  .guide-shot {
+    position: static;
   }
 }
 
@@ -1167,8 +1486,21 @@ details p {
   }
   .features,
   .downloads,
-  .steps {
+  .steps,
+  .quickstart,
+  .pill-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .guide-step {
+    padding: 20px;
+    border-radius: 16px;
+  }
+  .guide-index {
+    margin-inline: -16px;
+    padding-inline: 16px;
+  }
+  .nav-actions .btn-primary {
+    display: none;
   }
   .strip-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
