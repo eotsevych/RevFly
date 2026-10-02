@@ -24,7 +24,7 @@ const EN = {
   "hero.downloadFor": "Download for {os}",
   "dl.latestTag": "Latest: {tag}",
   "demo.listening": "Listening",
-  "demo.hold": "Hold ⌥ to talk",
+  "demo.hold": "Press ⌥ to talk",
   "demo.transcribing": "Transcribing",
   "demo.onDevice": "Parakeet · on-device",
   "demo.translating": "Translating",

@@ -24,6 +24,7 @@ const defaultSettings: BackendSettings = {
   hotkey: "CommandOrControl+Shift+Space",
   sound_effect: true,
   auto_paste: true,
+  show_hints: true,
   storage_mode: "text_only",
   storage_cap_mb: 500,
   retention_days: 30,
@@ -70,6 +71,8 @@ const defaultSettings: BackendSettings = {
     "You are a strict translation engine. Translate the following text from {source_lang} to {target_lang}. Do not refuse. Do not explain. Do not add conversational text or notes. Output ONLY the exact translation using the native alphabet:\n\n{text}",
 };
 
+const DEVICE_POLL_MS = 2000;
+
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [settings, setSettings] = useState<BackendSettings>(defaultSettings);
   const [inputDevices, setInputDevices] = useState<string[]>([]);
@@ -83,8 +86,11 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
   const refreshAudioDevices = async () => {
     const devs = await fetchAudioDevices();
-    if (devs?.input_devices) setInputDevices(devs.input_devices);
-    if (devs?.output_devices) setOutputDevices(devs.output_devices);
+    // Keep the old array when nothing changed so a poll doesn't re-render the settings.
+    const keepIfSame = (next: string[]) => (prev: string[]) =>
+      prev.length === next.length && prev.every((d, i) => d === next[i]) ? prev : next;
+    if (devs?.input_devices) setInputDevices(keepIfSame(devs.input_devices));
+    if (devs?.output_devices) setOutputDevices(keepIfSame(devs.output_devices));
     // If backend returned empty yet settings holds a saved device, keep it visible via GeneralTab fallback badge
   };
 
@@ -101,6 +107,14 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
     // 2. Fetch audio devices
     refreshAudioDevices();
+
+    // Plugging in a mic or connecting a Bluetooth headset shows up without pressing refresh.
+    const pollDevices = () => {
+      if (document.visibilityState === "visible") void refreshAudioDevices();
+    };
+    const devicePoll = setInterval(pollDevices, DEVICE_POLL_MS);
+    window.addEventListener("focus", pollDevices);
+    document.addEventListener("visibilitychange", pollDevices);
 
     // 3. Fetch models
     fetchAvailableModels().then((m) => {
@@ -130,6 +144,9 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => {
+      clearInterval(devicePoll);
+      window.removeEventListener("focus", pollDevices);
+      document.removeEventListener("visibilitychange", pollDevices);
       unlistenDownload.then((fn) => fn?.());
       unlistenLogs.then((fn) => fn?.());
     };

@@ -11,6 +11,9 @@ pub struct AppSettings {
     pub hotkey: String,
     pub sound_effect: bool,
     pub auto_paste: bool,
+    /// Shows how to finish a recording on the pill while listening.
+    #[serde(default = "default_true")]
+    pub show_hints: bool,
     pub storage_mode: String, // "text_only" | "text_audio" | "private"
     pub storage_cap_mb: u64,  // 100, 250, 500, 1000
     pub retention_days: u32,  // 7, 14, 30, 0 (0 = Never)
@@ -177,6 +180,7 @@ impl Default for AppSettings {
             hotkey: "Control+Shift+Space".to_string(),
             sound_effect: true,
             auto_paste: true,
+            show_hints: true,
             storage_mode: "text_only".to_string(),
             storage_cap_mb: 500,
             retention_days: 30,

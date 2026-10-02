@@ -6,7 +6,7 @@
     <title>RevFly · Private voice dictation &amp; translation</title>
     <meta
       name="description"
-      content="Hold a hotkey, speak, and RevFly types it into any app. Speech is transcribed on your computer, translated only when needed, and cleaned up automatically. Free and open source for macOS, Windows and Linux."
+      content="Press a hotkey, speak, and RevFly types it into any app. Speech is transcribed on your computer, translated only when needed, and cleaned up automatically. Free and open source for macOS, Windows and Linux."
     />
     <meta property="og:title" content="RevFly · Private voice dictation & translation" />
     <meta
@@ -76,7 +76,7 @@
             <p class="eyebrow" data-i18n="hero.eyebrow">Free &amp; open source · macOS · Windows · Linux</p>
             <h1 data-i18n="hero.title">Speak in any language.<br /><span class="grad">Paste clean text anywhere.</span></h1>
             <p class="lead" data-i18n="hero.lead">
-              Hold a hotkey and talk. RevFly transcribes on your own computer, translates only when you need
+              Press a hotkey and talk. RevFly transcribes on your own computer, translates only when you need
               it, tidies up the text, and pastes it straight into the app you're typing in.
             </p>
             <div class="hero-ctas">
@@ -140,7 +140,7 @@
               </div>
               <div class="pill-text">
                 <span class="pill-label" id="pill-label">Listening</span>
-                <span class="pill-sub" id="pill-sub">Hold ⌥ to talk</span>
+                <span class="pill-sub" id="pill-sub">Press ⌥ to talk</span>
               </div>
             </div>
           </div>
@@ -165,8 +165,8 @@
           <ol class="steps">
             <li>
               <span class="step-n">1</span>
-              <h3 data-i18n="how.s1">Hold your hotkey</h3>
-              <p data-i18n="how.s1t">Right&nbsp;⌥ on a Mac, or any combo like Ctrl+Shift+Space. Release to finish, or tap once to toggle.</p>
+              <h3 data-i18n="how.s1">Press your hotkey</h3>
+              <p data-i18n="how.s1t">Right&nbsp;⌥ on a Mac, or any combo like Ctrl+Shift+Space. Press once to start and again to finish.</p>
             </li>
             <li>
               <span class="step-n">2</span>
@@ -234,8 +234,8 @@
             <li>
               <span class="qs-n">4</span>
               <div>
-                <h3 data-i18n="qs.s4">Hold the hotkey and talk</h3>
-                <p data-i18n="qs.s4t">Release to finish. The text appears wherever your cursor is. Press <kbd>Esc</kbd> to cancel.</p>
+                <h3 data-i18n="qs.s4">Press the hotkey and talk</h3>
+                <p data-i18n="qs.s4t">Press it again to finish. The text appears wherever your cursor is. Press <kbd>Esc</kbd> to cancel.</p>
               </div>
             </li>
           </ol>
@@ -292,7 +292,7 @@
                 <dl class="opts">
                   <div>
                     <dt data-i18n="g2.o1">Launch hotkey</dt>
-                    <dd data-i18n="g2.o1t">Starts and finishes a recording. When you finish, RevFly transcribes, translates if needed, and pastes. On a Mac, <b>Right ⌥</b> works best: you almost never press it on its own, so it doesn't clash with other shortcuts. Hold it to talk, or tap once to start and again to stop.</dd>
+                    <dd data-i18n="g2.o1t">Starts and finishes a recording. When you finish, RevFly transcribes, translates if needed, and pastes. On a Mac, <b>Right ⌥</b> works best: you almost never press it on its own, so it doesn't clash with other shortcuts. Press it once to start and again to stop.</dd>
                   </div>
                   <div>
                     <dt data-i18n="g2.o2">Microphone input</dt>
@@ -536,14 +536,21 @@
                   <div class="pill-icon"><span class="bars"><i></i><i></i><i></i><i></i><i></i></span></div>
                   <div class="pill-text"><span class="pill-label" data-i18n="pill.listening">Listening</span><span class="pill-sub">Auto → English</span></div>
                 </div>
-                <p data-i18n="pill.listeningT">Bars move with your voice. Release the hotkey to finish, or press Esc to cancel.</p>
+                <p data-i18n="pill.listeningT">Bars move with your voice. Press the hotkey again to finish, or Esc to cancel.</p>
               </div>
               <div class="legend-item">
                 <div class="pill pill-static" data-state="transcribing">
                   <div class="pill-icon"><span class="ring"></span></div>
-                  <div class="pill-text"><span class="pill-label" data-i18n="pill.working">Transcribing</span><span class="pill-sub" data-i18n="pill.workingSub">then translating</span></div>
+                  <div class="pill-text"><span class="pill-label" data-i18n="pill.working">Transcribing</span><span class="pill-sub" data-i18n="pill.workingSub">Parakeet · on-device</span></div>
                 </div>
-                <p data-i18n="pill.workingT">Recognition and translation in progress. It usually takes under a second.</p>
+                <p data-i18n="pill.workingT">Speech becomes text locally. Usually well under a second.</p>
+              </div>
+              <div class="legend-item">
+                <div class="pill pill-static" data-state="translating">
+                  <div class="pill-icon"><span class="ring"></span></div>
+                  <div class="pill-text"><span class="pill-label" data-i18n="pill.translating">Translating</span><span class="pill-sub">Auto → English</span></div>
+                </div>
+                <p data-i18n="pill.translatingT">Only runs when the recognized language isn't already your target. Skipped instantly otherwise.</p>
               </div>
               <div class="legend-item">
                 <div class="pill pill-static" data-state="done">
@@ -570,58 +577,55 @@
           <p class="kicker" data-i18n="feat.kicker">Features</p>
           <h2 data-i18n="feat.title">Everything you need to talk instead of type</h2>
           <div class="features">
-            <article class="card">
-              <div class="card-icon">⌨️</div>
-              <h3 data-i18n="feat.c1">Global hotkey &amp; hold-to-talk</h3>
+            <article class="card feature-card">
+              <figure class="feature-shot">
+                <img src="assets/guide/input.webp" width="1428" height="1074" loading="lazy" data-i18n-attr="alt:g2.alt" alt="Input section: launch hotkey, microphone input with Test Mic, audio output, noise reduction and idle timeout" />
+              </figure>
+              <h3 data-i18n="feat.f1">Hotkey &amp; voice pill</h3>
+              <p class="feature-lead" data-i18n="feat.f1Lead">One keypress starts and stops a recording, however you prefer it. A tiny pill floats over every app, even full-screen ones, so you always know what RevFly is doing.</p>
               <ul>
-                <li data-i18n="feat.c1a">Single modifier keys on macOS: Right ⌥ or Right ⌃</li>
-                <li data-i18n="feat.c1b">Any key combo on Windows and Linux</li>
-                <li data-i18n="feat.c1c">Hold-to-talk or tap-to-toggle</li>
-                <li data-i18n="feat.c1d"><kbd>Esc</kbd> cancels recording or translation instantly</li>
-                <li data-i18n="feat.c1e">Subtle chimes on start and finish</li>
+                <li data-i18n="feat.f1a">Any single key on macOS (Right ⌥ or ⌃), any combo on Windows and Linux</li>
+                <li data-i18n="feat.f1b">Press once to start and again to stop</li>
+                <li data-i18n="feat.f1c"><kbd>Esc</kbd> cancels instantly; chimes mark start and finish</li>
               </ul>
             </article>
 
-            <article class="card">
-              <div class="card-icon">🧠</div>
-              <h3 data-i18n="feat.c2">On-device speech recognition</h3>
+            <article class="card feature-card">
+              <figure class="feature-shot">
+                <img src="assets/guide/model.webp" width="1428" height="1074" loading="lazy" data-i18n-attr="alt:g3.alt" alt="Model section: Parakeet TDT selected, hardware acceleration Auto, spoken language Auto-detect, excluded languages, models folder" />
+              </figure>
+              <h3 data-i18n="feat.f2">On-device recognition</h3>
+              <p class="feature-lead" data-i18n="feat.f2Lead">Silero VAD trims silence, then Parakeet or Whisper turn speech into text, right on your computer. Nothing is sent anywhere to transcribe.</p>
               <ul>
-                <li data-i18n="feat.c2a">Parakeet TDT 0.6B by default: near-instant, 25 languages</li>
-                <li data-i18n="feat.c2b">Whisper models (Medium, Small, Base) via whisper.cpp, multilingual and offline</li>
-                <li data-i18n="feat.c2c">Import your own Whisper models</li>
-                <li data-i18n="feat.c2d">Models unload after idle time to free up RAM</li>
+                <li data-i18n="feat.f2a">Parakeet TDT 0.6B by default: near-instant, 25 languages</li>
+                <li data-i18n="feat.f2b">Whisper (Medium, Small, Base), or your own imported model, fully offline</li>
+                <li data-i18n="feat.f2c">Models unload after idle time to free up RAM</li>
               </ul>
             </article>
 
-            <article class="card">
-              <div class="card-icon">〰️</div>
-              <h3 data-i18n="feat.c3">Voice activity detection</h3>
+            <article class="card feature-card">
+              <figure class="feature-shot">
+                <img src="assets/guide/translation.webp" width="1428" height="1074" loading="lazy" data-i18n-attr="alt:g6.alt" alt="Translations tab: translation mode and LLM presets for Gemini, Ollama, LM Studio and OpenAI" />
+              </figure>
+              <h3 data-i18n="feat.f3">Translation, only when needed</h3>
+              <p class="feature-lead" data-i18n="feat.f3Lead">Speak any language, get text in another. Already in your target language? Translation is skipped instantly, with no network call at all.</p>
               <ul>
-                <li data-i18n="feat.c3a">Silero VAD runs locally on ONNX Runtime</li>
-                <li data-i18n="feat.c3b">Strips silence and long pauses before recognition</li>
-                <li data-i18n="feat.c3c">400 ms safety margins keep whispers and soft consonants</li>
-                <li data-i18n="feat.c3d">Tunable chunking for long dictation</li>
+                <li data-i18n="feat.f3a">Google Gemini for fast, fluent cloud translation</li>
+                <li data-i18n="feat.f3b">Fully local with Ollama or LM Studio, or any OpenAI-compatible endpoint</li>
+                <li data-i18n="feat.f3c">Your own prompt template, and languages you exclude from translation</li>
               </ul>
             </article>
 
-            <article class="card">
-              <div class="card-icon">🌍</div>
-              <h3 data-i18n="feat.c4">Smart AI translation</h3>
+            <article class="card feature-card">
+              <figure class="feature-shot">
+                <img src="assets/guide/cleanup.webp" width="1428" height="1074" loading="lazy" data-i18n-attr="alt:g5.alt" alt="Post-Processing and Formatting section: filler words, numbers to digits, stutters, self-corrections and more" />
+              </figure>
+              <h3 data-i18n="feat.f4">Clean-up &amp; confidentiality</h3>
+              <p class="feature-lead" data-i18n="feat.f4Lead">Spoken language is messy. RevFly tidies it into clean text, and masks anything sensitive before it ever reaches a cloud API.</p>
               <ul>
-                <li data-i18n="feat.c4a">Google Gemini for fast, fluent translation</li>
-                <li data-i18n="feat.c4b">Local LLMs through Ollama or LM Studio</li>
-                <li data-i18n="feat.c4c">Any OpenAI-compatible endpoint with your own prompt template</li>
-                <li data-i18n="feat.c4d">Instant skip for your target language and any languages you exclude</li>
-              </ul>
-            </article>
-
-            <article class="card">
-              <div class="card-icon">✨</div>
-              <h3 data-i18n="feat.c5">Automatic clean-up</h3>
-              <ul>
-                <li data-i18n="feat.c5a">Removes "um", "uh", stutters and repeated words</li>
-                <li data-i18n="feat.c5b">Formats numbers, currency, dates, times and URLs</li>
-                <li data-i18n="feat.c5c">Fixes spoken corrections for you</li>
+                <li data-i18n="feat.f4a">Removes "um", "uh", stutters and repeats; formats numbers, dates and URLs</li>
+                <li data-i18n="feat.f4b">Masks names, project codenames, emails, phone and card numbers</li>
+                <li data-i18n="feat.f4c">Choose the replacement, like <code>[CONFIDENTIAL]</code> or <code>***</code></li>
               </ul>
               <div class="before-after">
                 <p data-i18n="feat.c5said"><span>Said</span>"um so I think, sorry, I know it costs like a hundred dollars"</p>
@@ -629,45 +633,16 @@
               </div>
             </article>
 
-            <article class="card">
-              <div class="card-icon">🛡️</div>
-              <h3 data-i18n="feat.c6">Confidentiality guard</h3>
+            <article class="card feature-card feature-card-wide">
+              <figure class="feature-shot">
+                <img src="assets/guide/storage.webp" width="1428" height="1074" loading="lazy" data-i18n-attr="alt:g7.alt" alt="Storage tab: save format, storage cap, auto-purge and usage" />
+              </figure>
+              <h3 data-i18n="feat.f5">History, storage &amp; control</h3>
+              <p class="feature-lead" data-i18n="feat.f5Lead">Your history, your rules. The rest of the app stays out of your way, from the tray down to a workbench for testing settings against real recordings.</p>
               <ul>
-                <li data-i18n="feat.c6a">Masks names and project codenames before text reaches a cloud API</li>
-                <li data-i18n="feat.c6b">Detects emails, phone numbers and card numbers</li>
-                <li data-i18n="feat.c6c">Your choice of replacement, like <code>[CONFIDENTIAL]</code> or <code>***</code></li>
-              </ul>
-            </article>
-
-            <article class="card">
-              <div class="card-icon">💊</div>
-              <h3 data-i18n="feat.c7">Floating voice pill</h3>
-              <ul>
-                <li data-i18n="feat.c7a">Tiny always-on-top indicator, even over full-screen apps</li>
-                <li data-i18n="feat.c7b">Live equalizer while listening, then transcribing, translating and done</li>
-                <li data-i18n="feat.c7c">Shows the language direction, like <code>Auto → English</code></li>
-                <li data-i18n="feat.c7d">Warns you and reconnects if the microphone drops out</li>
-              </ul>
-            </article>
-
-            <article class="card">
-              <div class="card-icon">🗂️</div>
-              <h3 data-i18n="feat.c8">History you control</h3>
-              <ul>
-                <li data-i18n="feat.c8a">Text only (default), text + audio, or don't save anything</li>
-                <li data-i18n="feat.c8b">Automatic 500 MB cap and 30-day retention</li>
-                <li data-i18n="feat.c8c">Replay recordings and inspect every pipeline stage in Logs</li>
-              </ul>
-            </article>
-
-            <article class="card">
-              <div class="card-icon">⬆️</div>
-              <h3 data-i18n="feat.c9">Menu bar &amp; auto-updates</h3>
-              <ul>
-                <li data-i18n="feat.c9a">Switch microphone, output and translation mode from the tray</li>
-                <li data-i18n="feat.c9b">One-click updates with a notification when a new version is out</li>
-                <li data-i18n="feat.c9c">Light, dark and system themes</li>
-                <li data-i18n="feat.c9d">Audio Labs to test and compare recognition settings</li>
+                <li data-i18n="feat.f5a">Text only (default), text + audio, or nothing saved — 500 MB cap, 30-day retention</li>
+                <li data-i18n="feat.f5b">Switch mic, output and translation mode from the tray; light, dark and system themes</li>
+                <li data-i18n="feat.f5c">Audio Labs: re-run any past recording through different models and settings</li>
               </ul>
             </article>
           </div>

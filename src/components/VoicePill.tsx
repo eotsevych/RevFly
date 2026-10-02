@@ -14,6 +14,7 @@ import {
 } from "@/lib/tauri";
 import { tok, type AccentColor, type Theme } from "@/lib/tokens";
 import { useResolvedTheme } from "@/lib/theme";
+import { formatDisplay } from "@/lib/hotkey";
 import { StateIndicator } from "./pill/Indicators";
 
 const STATE_META: Record<
@@ -164,8 +165,13 @@ export function VoicePill() {
     targetLang.toLowerCase() === "none";
 
   const meta = STATE_META[state.state];
+  const finishHint =
+    state.state === "listening" && settings?.show_hints !== false && settings?.hotkey
+      ? `Press ${formatDisplay(settings.hotkey).replace(/ \(.*\)/, "")} to finish`
+      : null;
   const dynamicSublabel =
     state.subtitle ||
+    finishHint ||
     (state.state === "listening"
       ? isNoTranslation
         ? "Voice to Text"

@@ -394,8 +394,8 @@
 }
 
 .transcribe-dot {
-  width: 8px;
-  height: 8px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.7);
   animation: dot-pulse 1.2s ease-in-out infinite;

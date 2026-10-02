@@ -591,15 +591,22 @@ export default function GeneralTab({ t }: { t: Tokens }) {
             accent={t.accent}
           />
         </Row>
+        <Row label="Auto-paste" hint="Paste translation automatically into frontmost window" t={t}>
+          <Toggle
+            value={settings.auto_paste}
+            onChange={(v) => updateSettings({ auto_paste: v })}
+            accent={t.accent}
+          />
+        </Row>
         <Row
-          label="Auto-paste"
-          hint="Paste translation automatically into frontmost window"
+          label="Show hints"
+          hint="Show how to finish a recording on the pill. Turn off once you know the hotkey"
           t={t}
           last
         >
           <Toggle
-            value={settings.auto_paste}
-            onChange={(v) => updateSettings({ auto_paste: v })}
+            value={settings.show_hints ?? true}
+            onChange={(v) => updateSettings({ show_hints: v })}
             accent={t.accent}
           />
         </Row>

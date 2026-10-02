@@ -135,14 +135,14 @@ export function SoundWave({ levels }: { levels?: AudioLevels | undefined }) {
 export function TranscribingIndicator({ t }: { t: Tokens }) {
   return (
     <div
-      className="relative flex items-center gap-2 overflow-hidden rounded-full px-3.5 py-1.5"
+      className="relative flex items-center overflow-hidden rounded-full px-2 py-1.5"
       style={{ background: t.transcribeBg, border: `1px solid ${t.transcribeBr}` }}
     >
       <div
         className="scan-line absolute inset-0"
         style={{ background: `linear-gradient(90deg, transparent, ${t.scanShimmer}, transparent)` }}
       />
-      <div className="flex gap-[8px]">
+      <div className="flex gap-[4px]">
         {[0, 1, 2].map((i) => (
           <div key={i} className="transcribe-dot" style={{ background: "#00d4ff" }} />
         ))}

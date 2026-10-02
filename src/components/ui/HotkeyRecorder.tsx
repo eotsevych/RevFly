@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Tokens } from "../../lib/tokens";
+import { formatDisplay } from "@/lib/hotkey";
 
 interface HotkeyRecorderProps {
   value: string;
@@ -10,23 +11,6 @@ interface HotkeyRecorderProps {
 // Single-modifier hotkeys (e.g. Right Option) rely on the macOS event tap; other platforms only support key combos.
 const IS_MAC = typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
 const COMBO_PRESET = "CommandOrControl+Shift+Space";
-
-function formatDisplay(raw: string): string {
-  if (!raw) return "";
-  if (raw === "RightOption" || raw === "AltRight") return "Right ⌥ (Option)";
-  if (raw === "LeftOption" || raw === "AltLeft") return "Left ⌥ (Option)";
-  if (raw === "RightControl" || raw === "ControlRight") return "Right ⌃ (Control)";
-  if (raw === "LeftControl" || raw === "ControlLeft") return "Left ⌃ (Control)";
-  if (raw === "RightCommand" || raw === "MetaRight") return "Right ⌘ (Command)";
-  if (raw === "LeftCommand" || raw === "MetaLeft") return "Left ⌘ (Command)";
-  if (raw === "RightShift" || raw === "ShiftRight") return "Right ⇧ (Shift)";
-  if (raw === "LeftShift" || raw === "ShiftLeft") return "Left ⇧ (Shift)";
-  return raw
-    .replace(/CommandOrControl/gi, IS_MAC ? "⌘" : "Ctrl")
-    .replace(/Control/gi, "Ctrl")
-    .replace(/Command/gi, "⌘")
-    .replace(/\+/g, " + ");
-}
 
 export default function HotkeyRecorder({ value, onChange, t }: HotkeyRecorderProps) {
   const [recording, setRecording] = useState(false);

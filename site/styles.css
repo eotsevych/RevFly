@@ -819,8 +819,8 @@ summary:focus-visible {
 .features {
   margin-top: 44px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
 }
 
 .card {
@@ -830,16 +830,30 @@ summary:focus-visible {
   padding: 24px;
 }
 
-.card-icon {
-  width: 42px;
-  height: 42px;
-  display: grid;
-  place-items: center;
-  border-radius: 11px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  font-size: 1.25rem;
-  margin-bottom: 16px;
+.feature-card {
+  padding: 0 24px 26px;
+  overflow: hidden;
+}
+
+.feature-card-wide {
+  grid-column: 1 / -1;
+}
+
+.feature-shot {
+  margin: 0 -24px 20px;
+}
+
+.feature-shot img {
+  display: block;
+  width: 100%;
+  border-bottom: 1px solid var(--border);
+  background: #13131c;
+}
+
+.feature-lead {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
 }
 
 .card ul {
@@ -1205,7 +1219,7 @@ summary:focus-visible {
 .pill-grid {
   margin-top: 28px;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 14px;
 }
 
@@ -1454,8 +1468,7 @@ details p {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .steps,
-  .quickstart,
-  .pill-grid {
+  .quickstart {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .nav-links {
@@ -1487,8 +1500,7 @@ details p {
   .features,
   .downloads,
   .steps,
-  .quickstart,
-  .pill-grid {
+  .quickstart {
     grid-template-columns: minmax(0, 1fr);
   }
   .guide-step {

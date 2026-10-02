@@ -13,6 +13,7 @@ export interface BackendSettings {
   hotkey: string;
   sound_effect: boolean;
   auto_paste: boolean;
+  show_hints?: boolean;
   storage_mode: string;
   storage_cap_mb: number;
   retention_days: number;

@@ -25,11 +25,10 @@ No cloud audio upload. No browser required. Just tap your hotkey and speak.
 
 ## Key Features
 
-### 1. Instant Global Hotkey & Hold-to-Talk
+### 1. Instant Global Hotkey
 - **Single-Tap Modifier Keys**: Use `Right Option` (⌥) or `Right Control` (⌃) directly on macOS.
 - **Key Combos Everywhere**: Use any shortcut such as `Ctrl+Shift+Space` on Windows and Linux.
-- **Hold-to-Talk Gesture**: Hold the key to speak, release to stop and paste.
-- **Toggle Mode**: Tap once to begin recording, tap again to finish.
+- **Press to Start, Press to Finish**: Press the hotkey once to begin recording, press it again to stop and paste. The pill shows a reminder while you record; turn it off in **Settings** → **General** → **Show hints**.
 - **Global Cancel**: Tap `Escape` at any time to instantly stop recording or cancel translation.
 - **Micro-Sounds**: Subtly chimes on recording start and completion.
 
@@ -65,8 +64,8 @@ No cloud audio upload. No browser required. Just tap your hotkey and speak.
 ### 8. Floating Animated Voice Pill
 - **Always-on-Top Minimal HUD**: Small floating indicator that stays above other windows with transparent glass design.
 - **4 Visual States**:
-  - **Listening**: Real-time equalizer bars reacting to your microphone audio volume.
-  - **Transcribing**: Spinning ring while Whisper or Parakeet runs locally in RAM.
+  - **Listening**: Real-time equalizer bars reacting to your microphone audio volume, with a reminder of which key finishes the recording.
+  - **Transcribing**: Three pulsing dots while Whisper or Parakeet runs locally in RAM.
   - **Translating**: Pulsing violet glow displaying language direction (`Auto → English`).
   - **Done**: Quick emerald green checkmark as text pastes.
 - **Draggable**: Drag the pill anywhere on your screen.
