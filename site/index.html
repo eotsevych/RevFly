@@ -48,19 +48,30 @@
           <span>RevFly</span>
         </a>
         <nav class="nav-links" data-i18n-attr="aria-label:nav.main" aria-label="Main">
-          <a href="#how" data-i18n="nav.how">How it works</a>
-          <a href="#guide" data-i18n="nav.guide">Guide</a>
           <a href="#features" data-i18n="nav.features">Features</a>
+          <a href="#how" data-i18n="nav.how">How it works</a>
+          <a href="#pill" data-i18n="nav.pill">Voice pill</a>
           <a href="#privacy" data-i18n="nav.privacy">Privacy</a>
+          <a href="#guide" data-i18n="nav.guide">Guide</a>
           <a href="#faq" data-i18n="nav.faq">FAQ</a>
         </nav>
         <div class="nav-actions">
-          <div class="lang-switch" role="group" data-i18n-attr="aria-label:nav.language" aria-label="Language">
+          <div
+            class="lang-switch"
+            role="group"
+            data-i18n-attr="aria-label:nav.language"
+            aria-label="Language"
+          >
             <button type="button" data-lang="en" aria-pressed="true">EN</button>
             <button type="button" data-lang="uk" aria-pressed="false">УК</button>
           </div>
           <a class="btn btn-ghost btn-sm" href="https://github.com/eotsevych/RevFly" rel="noopener">
-            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+              />
+            </svg>
             <span>GitHub</span>
           </a>
           <a class="btn btn-primary btn-sm" href="#download" data-i18n="nav.download">Download</a>
@@ -73,28 +84,61 @@
       <section class="hero">
         <div class="wrap hero-grid">
           <div class="hero-copy">
-            <p class="eyebrow" data-i18n="hero.eyebrow">Free &amp; open source · macOS · Windows · Linux</p>
-            <h1 data-i18n="hero.title">Speak in any language.<br /><span class="grad">Paste clean text anywhere.</span></h1>
+            <p class="eyebrow" data-i18n="hero.eyebrow">
+              Free &amp; open source · macOS · Windows · Linux
+            </p>
+            <h1 data-i18n="hero.title">
+              Speak in any language.<br /><span class="grad">Paste clean text anywhere.</span>
+            </h1>
             <p class="lead" data-i18n="hero.lead">
-              Press a hotkey and talk. RevFly transcribes on your own computer, translates only when you need
-              it, tidies up the text, and pastes it straight into the app you're typing in.
+              Press a hotkey and talk. RevFly transcribes on your own computer, translates only when
+              you need it, tidies up the text, and pastes it straight into the app you're typing in.
             </p>
             <div class="hero-ctas">
               <a class="btn btn-primary btn-lg" id="hero-download" href="#download">
                 <span id="hero-download-label" data-i18n="hero.download">Download RevFly</span>
               </a>
-              <a class="btn btn-ghost btn-lg" href="#guide" data-i18n="hero.guide">Read the guide</a>
+              <a class="btn btn-ghost btn-lg" href="#guide" data-i18n="hero.guide"
+                >Read the guide</a
+              >
             </div>
-            <div class="install" role="group" data-i18n-attr="aria-label:hero.installGroup" aria-label="Install from the terminal (macOS)">
+            <div
+              class="install"
+              role="group"
+              data-i18n-attr="aria-label:hero.installGroup"
+              aria-label="Install from the terminal (macOS)"
+            >
               <div class="install-tabs" role="tablist">
-                <button role="tab" aria-selected="true" data-cmd="curl" data-i18n="hero.tabTerminal">Terminal</button>
+                <button
+                  role="tab"
+                  aria-selected="true"
+                  data-cmd="curl"
+                  data-i18n="hero.tabTerminal"
+                >
+                  Terminal
+                </button>
                 <button role="tab" aria-selected="false" data-cmd="brew">Homebrew</button>
               </div>
               <div class="install-cmd">
-                <code id="install-code">curl -fsSL https://raw.githubusercontent.com/eotsevych/RevFly/main/scripts/install_mac.sh | bash</code>
-                <button class="copy" type="button" data-copy-target="install-code" data-i18n="ui.copy" data-i18n-attr="aria-label:ui.copyCommand" aria-label="Copy command">Copy</button>
+                <code id="install-code"
+                  >curl -fsSL
+                  https://raw.githubusercontent.com/eotsevych/RevFly/main/scripts/install_mac.sh |
+                  bash</code
+                >
+                <button
+                  class="copy"
+                  type="button"
+                  data-copy-target="install-code"
+                  data-i18n="ui.copy"
+                  data-i18n-attr="aria-label:ui.copyCommand"
+                  aria-label="Copy command"
+                >
+                  Copy
+                </button>
               </div>
-              <p class="install-note" data-i18n="hero.installNote">macOS one-liner: installs to Applications with no security prompt.</p>
+              <p class="install-note" data-i18n="hero.installNote">
+                macOS one-liner: installs to Applications with no security prompt.
+              </p>
             </div>
           </div>
 
@@ -150,15 +194,73 @@
       <!-- Proof strip -->
       <section class="strip" data-i18n-attr="aria-label:strip.label" aria-label="Highlights">
         <div class="wrap strip-grid">
-          <div><strong data-i18n="strip.s1">0 bytes</strong><span data-i18n="strip.s1t">of audio uploaded</span></div>
-          <div><strong data-i18n="strip.s2">On-device</strong><span data-i18n="strip.s2t">speech recognition, offline</span></div>
-          <div><strong data-i18n="strip.s3">Any app</strong><span data-i18n="strip.s3t">Slack, Docs, VS Code, Terminal…</span></div>
+          <div>
+            <strong data-i18n="strip.s1">0 bytes</strong
+            ><span data-i18n="strip.s1t">of audio uploaded</span>
+          </div>
+          <div>
+            <strong data-i18n="strip.s2">On-device</strong
+            ><span data-i18n="strip.s2t">speech recognition, offline</span>
+          </div>
+          <div>
+            <strong data-i18n="strip.s3">Any app</strong
+            ><span data-i18n="strip.s3t">Slack, Docs, VS Code, Terminal…</span>
+          </div>
           <div><strong>MIT</strong><span data-i18n="strip.s4t">free and open source</span></div>
         </div>
       </section>
 
+      <!-- Features -->
+      <section class="section" id="features">
+        <div class="wrap">
+          <p class="kicker" data-i18n="feat.kicker">Features</p>
+          <h2 data-i18n="feat.title">Everything you need to talk instead of type</h2>
+          <div class="features">
+            <article class="card">
+              <h3 data-i18n="feat.f1">Hotkey &amp; voice pill</h3>
+              <p data-i18n="feat.f1Lead">
+                Press once to start, again to stop, on macOS, Windows or Linux. A tiny pill floats
+                above every app, with <kbd>Esc</kbd> to cancel instantly.
+              </p>
+            </article>
+
+            <article class="card">
+              <h3 data-i18n="feat.f2">On-device recognition</h3>
+              <p data-i18n="feat.f2Lead">
+                Parakeet or Whisper turn speech into text locally, after Silero VAD trims the
+                silence. Nothing leaves your computer to transcribe.
+              </p>
+            </article>
+
+            <article class="card">
+              <h3 data-i18n="feat.f3">Translation, only when needed</h3>
+              <p data-i18n="feat.f3Lead">
+                Speak any language, get text in another, skipped instantly when it's already your
+                target. Gemini, Ollama, LM Studio, or any OpenAI-compatible endpoint.
+              </p>
+            </article>
+
+            <article class="card">
+              <h3 data-i18n="feat.f4">Clean-up &amp; confidentiality</h3>
+              <p data-i18n="feat.f4Lead">
+                Strips filler words and fixes corrections, formats numbers and dates, and masks
+                names, emails and card numbers before anything reaches a cloud API.
+              </p>
+            </article>
+
+            <article class="card">
+              <h3 data-i18n="feat.f5">History, storage &amp; control</h3>
+              <p data-i18n="feat.f5Lead">
+                Keep text only, text + audio, or nothing at all. Switch mic, theme and translation
+                mode from the tray, and re-run any recording in Audio Labs.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
       <!-- How it works -->
-      <section class="section" id="how">
+      <section class="section section-alt" id="how">
         <div class="wrap">
           <p class="kicker" data-i18n="how.kicker">How it works</p>
           <h2 data-i18n="how.title">From voice to finished text in one keypress</h2>
@@ -166,46 +268,192 @@
             <li>
               <span class="step-n">1</span>
               <h3 data-i18n="how.s1">Press your hotkey</h3>
-              <p data-i18n="how.s1t">Right&nbsp;⌥ on a Mac, or any combo like Ctrl+Shift+Space. Press once to start and again to finish.</p>
+              <p data-i18n="how.s1t">
+                Right&nbsp;⌥ on a Mac, or any combo like Ctrl+Shift+Space. Press once to start and
+                again to finish.
+              </p>
             </li>
             <li>
               <span class="step-n">2</span>
               <h3 data-i18n="how.s2">Transcribed on-device</h3>
-              <p data-i18n="how.s2t">Silence is trimmed by Silero VAD, then Parakeet or Whisper turns speech into text locally, in memory.</p>
+              <p data-i18n="how.s2t">
+                Silence is trimmed by Silero VAD, then Parakeet or Whisper turns speech into text
+                locally, in memory.
+              </p>
             </li>
             <li>
               <span class="step-n">3</span>
               <h3 data-i18n="how.s3">Translated only if needed</h3>
-              <p data-i18n="how.s3t">Already in your target language? Translation is skipped instantly with no network call at all.</p>
+              <p data-i18n="how.s3t">
+                Already in your target language? Translation is skipped instantly with no network
+                call at all.
+              </p>
             </li>
             <li>
               <span class="step-n">4</span>
               <h3 data-i18n="how.s4">Pasted where you type</h3>
-              <p data-i18n="how.s4t">Clean, formatted text lands at your cursor with a simulated ⌘V / Ctrl+V, in any application.</p>
+              <p data-i18n="how.s4t">
+                Clean, formatted text lands at your cursor with a simulated ⌘V / Ctrl+V, in any
+                application.
+              </p>
             </li>
           </ol>
 
-          <div class="pipeline" role="img" data-i18n-attr="aria-label:how.pipelineLabel" aria-label="Pipeline: microphone, voice activity detection, local speech recognition, language check, confidentiality masking, AI translation, auto-paste. If the speech is already in the target language, it skips straight to auto-paste.">
-            <div class="node"><span data-i18n="how.n1">Microphone</span><small data-i18n="how.n1t">16 kHz · RAM only</small></div>
+          <div
+            class="pipeline"
+            role="img"
+            data-i18n-attr="aria-label:how.pipelineLabel"
+            aria-label="Pipeline: microphone, voice activity detection, local speech recognition, language check, confidentiality masking, AI translation, auto-paste. If the speech is already in the target language, it skips straight to auto-paste."
+          >
+            <div class="node">
+              <span data-i18n="how.n1">Microphone</span
+              ><small data-i18n="how.n1t">16 kHz · RAM only</small>
+            </div>
             <div class="node">Silero VAD<small data-i18n="how.n2t">trim silence</small></div>
-            <div class="node"><span data-i18n="how.n3">Speech-to-text</span><small>Parakeet · Whisper</small></div>
-            <div class="node node-branch"><span data-i18n="how.n4">Language check</span><small data-i18n="how.n4t">skip if already target</small></div>
-            <div class="node"><span data-i18n="how.n5">Masking</span><small data-i18n="how.n5t">hide secrets</small></div>
-            <div class="node"><span data-i18n="how.n6">Translation</span><small data-i18n="how.n6t">Gemini · local LLM</small></div>
-            <div class="node node-end"><span data-i18n="how.n7">Auto-paste</span><small data-i18n="how.n7t">+ local history</small></div>
+            <div class="node">
+              <span data-i18n="how.n3">Speech-to-text</span><small>Parakeet · Whisper</small>
+            </div>
+            <div class="node node-branch">
+              <span data-i18n="how.n4">Language check</span
+              ><small data-i18n="how.n4t">skip if already target</small>
+            </div>
+            <div class="node">
+              <span data-i18n="how.n5">Masking</span><small data-i18n="how.n5t">hide secrets</small>
+            </div>
+            <div class="node">
+              <span data-i18n="how.n6">Translation</span
+              ><small data-i18n="how.n6t">Gemini · local LLM</small>
+            </div>
+            <div class="node node-end">
+              <span data-i18n="how.n7">Auto-paste</span
+              ><small data-i18n="how.n7t">+ local history</small>
+            </div>
           </div>
-          <p class="pipeline-note" data-i18n="how.note"><span class="skip-badge">Instant skip</span> Same-language speech jumps from the language check straight to auto-paste.</p>
+          <p class="pipeline-note" data-i18n="how.note">
+            <span class="skip-badge">Instant skip</span> Same-language speech jumps from the
+            language check straight to auto-paste.
+          </p>
+        </div>
+      </section>
+
+      <!-- Reading the voice pill -->
+      <section class="section" id="pill">
+        <div class="wrap">
+          <p class="kicker" data-i18n="pill.kicker">Voice pill</p>
+          <h2 data-i18n="pill.title">Reading the voice pill</h2>
+          <p class="lead-sm center" data-i18n="pill.lead">
+            A small pill floats above your apps while RevFly works. It tells you what's happening at
+            a glance.
+          </p>
+          <div class="pill-grid">
+            <div class="legend-item">
+              <div class="pill pill-static" data-state="listening">
+                <div class="pill-icon">
+                  <span class="bars"><i></i><i></i><i></i><i></i><i></i></span>
+                </div>
+                <div class="pill-text">
+                  <span class="pill-label" data-i18n="pill.listening">Listening</span
+                  ><span class="pill-sub">Auto → English</span>
+                </div>
+              </div>
+              <p data-i18n="pill.listeningT">
+                Bars move with your voice. Press the hotkey again to finish, or Esc to cancel.
+              </p>
+            </div>
+            <div class="legend-item">
+              <div class="pill pill-static" data-state="transcribing">
+                <div class="pill-icon"><span class="ring"></span></div>
+                <div class="pill-text">
+                  <span class="pill-label" data-i18n="pill.working">Transcribing</span
+                  ><span class="pill-sub" data-i18n="pill.workingSub">Parakeet · on-device</span>
+                </div>
+              </div>
+              <p data-i18n="pill.workingT">
+                Speech becomes text locally. Usually well under a second.
+              </p>
+            </div>
+            <div class="legend-item">
+              <div class="pill pill-static" data-state="translating">
+                <div class="pill-icon"><span class="ring"></span></div>
+                <div class="pill-text">
+                  <span class="pill-label" data-i18n="pill.translating">Translating</span
+                  ><span class="pill-sub">Auto → English</span>
+                </div>
+              </div>
+              <p data-i18n="pill.translatingT">
+                Only runs when the recognized language isn't already your target. Skipped instantly
+                otherwise.
+              </p>
+            </div>
+            <div class="legend-item">
+              <div class="pill pill-static" data-state="done">
+                <div class="pill-icon"><span class="check">✓</span></div>
+                <div class="pill-text">
+                  <span class="pill-label" data-i18n="pill.done">Done</span
+                  ><span class="pill-sub" data-i18n="pill.doneSub">Pasted</span>
+                </div>
+              </div>
+              <p data-i18n="pill.doneT">The text is at your cursor and in your history.</p>
+            </div>
+            <div class="legend-item">
+              <div class="pill pill-static" data-state="warning">
+                <div class="pill-icon">
+                  <span class="bars bars-down"><i></i><i></i><i></i><i></i><i></i></span
+                  ><span class="strike"></span>
+                </div>
+                <div class="pill-text">
+                  <span class="pill-label" data-i18n="pill.mic">Reconnecting Mic…</span
+                  ><span class="pill-sub" data-i18n="pill.micSub">what you said is kept</span>
+                </div>
+              </div>
+              <p data-i18n="pill.micT">
+                The mic stopped sending sound. RevFly reopens it, or switches to the system mic.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Privacy -->
+      <section class="section section-alt" id="privacy">
+        <div class="wrap privacy-grid">
+          <div>
+            <p class="kicker" data-i18n="priv.kicker">Privacy by design</p>
+            <h2 data-i18n="priv.title">Your voice stays on your computer</h2>
+            <p class="lead-sm" data-i18n="priv.lead">
+              Audio is recorded into memory and recognized locally. Nothing is uploaded. Only text
+              is ever sent out, and only when you turn on a cloud translation provider. Use a local
+              LLM and nothing leaves your machine at all.
+            </p>
+          </div>
+          <div class="modes">
+            <div class="mode">
+              <h3 data-i18n="priv.m1">Transcript only <span class="tag">Default</span></h3>
+              <p data-i18n="priv.m1t">Keeps transcripts in a local database. No audio is stored.</p>
+            </div>
+            <div class="mode">
+              <h3 data-i18n="priv.m2">Audio + Transcript</h3>
+              <p data-i18n="priv.m2t">
+                Also keeps the recordings, so you can replay them or transcribe them again.
+              </p>
+            </div>
+            <div class="mode">
+              <h3 data-i18n="priv.m3">Don't save</h3>
+              <p data-i18n="priv.m3t">Everything stays in RAM. Nothing is written to disk.</p>
+            </div>
+          </div>
         </div>
       </section>
 
       <!-- Guide -->
-      <section class="section section-alt" id="guide">
+      <section class="section" id="guide">
         <div class="wrap">
           <p class="kicker" data-i18n="guide.kicker">Guide</p>
           <h2 data-i18n="guide.title">Set up RevFly in five minutes</h2>
           <p class="lead-sm center" data-i18n="guide.lead">
-            Open Settings from the RevFly icon in your menu bar or system tray. Every setting has a sensible
-            default, so this guide walks through what each one does and when you might want to change it.
+            Open Settings from the RevFly icon in your menu bar or system tray. Every setting has a
+            sensible default, so this guide walks through what each one does and when you might want
+            to change it.
           </p>
 
           <!-- First run -->
@@ -214,34 +462,50 @@
               <span class="qs-n">1</span>
               <div>
                 <h3 data-i18n="qs.s1">Install and open</h3>
-                <p data-i18n="qs.s1t">RevFly lives in the menu bar (macOS) or system tray (Windows, Linux). There's no main window to keep open.</p>
+                <p data-i18n="qs.s1t">
+                  RevFly lives in the menu bar (macOS) or system tray (Windows, Linux). There's no
+                  main window to keep open.
+                </p>
               </div>
             </li>
             <li>
               <span class="qs-n">2</span>
               <div>
                 <h3 data-i18n="qs.s2">Allow permissions</h3>
-                <p data-i18n="qs.s2t">On a Mac, grant Accessibility for the hotkey and auto-paste. The microphone prompt appears on your first recording.</p>
+                <p data-i18n="qs.s2t">
+                  On a Mac, grant Accessibility for the hotkey and auto-paste. The microphone prompt
+                  appears on your first recording.
+                </p>
               </div>
             </li>
             <li>
               <span class="qs-n">3</span>
               <div>
                 <h3 data-i18n="qs.s3">Wait for the model</h3>
-                <p data-i18n="qs.s3t">The Parakeet speech model (670 MB) downloads on first launch. Progress shows in the tray menu.</p>
+                <p data-i18n="qs.s3t">
+                  The Parakeet speech model (670 MB) downloads on first launch. Progress shows in
+                  the tray menu.
+                </p>
               </div>
             </li>
             <li>
               <span class="qs-n">4</span>
               <div>
                 <h3 data-i18n="qs.s4">Press the hotkey and talk</h3>
-                <p data-i18n="qs.s4t">Press it again to finish. The text appears wherever your cursor is. Press <kbd>Esc</kbd> to cancel.</p>
+                <p data-i18n="qs.s4t">
+                  Press it again to finish. The text appears wherever your cursor is. Press
+                  <kbd>Esc</kbd> to cancel.
+                </p>
               </div>
             </li>
           </ol>
 
           <!-- Chapter index -->
-          <nav class="guide-index" data-i18n-attr="aria-label:guide.indexLabel" aria-label="Guide chapters">
+          <nav
+            class="guide-index"
+            data-i18n-attr="aria-label:guide.indexLabel"
+            aria-label="Guide chapters"
+          >
             <a href="#g-permissions"><span>01</span><b data-i18n="g1.short">Permissions</b></a>
             <a href="#g-input"><span>02</span><b data-i18n="g2.short">Hotkey &amp; mic</b></a>
             <a href="#g-model"><span>03</span><b data-i18n="g3.short">Speech model</b></a>
@@ -260,26 +524,43 @@
                 <p class="guide-n">01 · <span data-i18n="tab.general">General</span></p>
                 <h3 data-i18n="g1.title">System permissions</h3>
                 <p class="guide-lead" data-i18n="g1.lead">
-                  RevFly needs to hear your hotkey in any app and to paste text where you type. On macOS both
-                  depend on the Accessibility permission.
+                  RevFly needs to hear your hotkey in any app and to paste text where you type. On
+                  macOS both depend on the Accessibility permission.
                 </p>
                 <dl class="opts">
                   <div>
                     <dt data-i18n="g1.o1">Accessibility</dt>
-                    <dd data-i18n="g1.o1t">Click <b>Sync</b>. macOS opens Privacy &amp; Security → Accessibility; switch RevFly on and the badge turns <b>Granted</b>. Without it, the hotkey and auto-paste won't work.</dd>
+                    <dd data-i18n="g1.o1t">
+                      Click <b>Sync</b>. macOS opens Privacy &amp; Security → Accessibility; switch
+                      RevFly on and the badge turns <b>Granted</b>. Without it, the hotkey and
+                      auto-paste won't work.
+                    </dd>
                   </div>
                   <div>
                     <dt data-i18n="g1.o2">Microphone</dt>
-                    <dd data-i18n="g1.o2t">Asked once, the first time you record. You can change it later in your system's privacy settings.</dd>
+                    <dd data-i18n="g1.o2t">
+                      Asked once, the first time you record. You can change it later in your
+                      system's privacy settings.
+                    </dd>
                   </div>
                   <div>
                     <dt data-i18n="g1.o3">Updates</dt>
-                    <dd data-i18n="g1.o3t">Shows your version. RevFly checks for new releases and installs them in one click.</dd>
+                    <dd data-i18n="g1.o3t">
+                      Shows your version. RevFly checks for new releases and installs them in one
+                      click.
+                    </dd>
                   </div>
                 </dl>
               </div>
               <figure class="guide-shot">
-                <img src="assets/guide/permissions.webp" width="1428" height="1074" loading="lazy" data-i18n-attr="alt:g1.alt" alt="RevFly Settings, General tab: System Permissions with Accessibility granted, and Updates" />
+                <img
+                  src="assets/guide/permissions.webp"
+                  width="1428"
+                  height="1074"
+                  loading="lazy"
+                  data-i18n-attr="alt:g1.alt"
+                  alt="RevFly Settings, General tab: System Permissions with Accessibility granted, and Updates"
+                />
               </figure>
             </article>
 
@@ -288,32 +569,59 @@
               <div class="guide-text">
                 <p class="guide-n">02 · <span data-i18n="tab.general">General</span></p>
                 <h3 data-i18n="g2.title">Hotkey, microphone and memory</h3>
-                <p class="guide-lead" data-i18n="g2.lead">The Input section controls how you start a recording and what RevFly listens with.</p>
+                <p class="guide-lead" data-i18n="g2.lead">
+                  The Input section controls how you start a recording and what RevFly listens with.
+                </p>
                 <dl class="opts">
                   <div>
                     <dt data-i18n="g2.o1">Launch hotkey</dt>
-                    <dd data-i18n="g2.o1t">Starts and finishes a recording. When you finish, RevFly transcribes, translates if needed, and pastes. On a Mac, <b>Right ⌥</b> works best: you almost never press it on its own, so it doesn't clash with other shortcuts. Press it once to start and again to stop.</dd>
+                    <dd data-i18n="g2.o1t">
+                      Starts and finishes a recording. When you finish, RevFly transcribes,
+                      translates if needed, and pastes. On a Mac, <b>Right ⌥</b> works best: you
+                      almost never press it on its own, so it doesn't clash with other shortcuts.
+                      Press it once to start and again to stop.
+                    </dd>
                   </div>
                   <div>
                     <dt data-i18n="g2.o2">Microphone input</dt>
-                    <dd data-i18n="g2.o2t">Pick the device to record from. <b>Test Mic</b> plays it back so you can check the sound is clear and free of noise. If the mic drops out mid-recording, RevFly reconnects, or switches to the system mic if it was unplugged.</dd>
+                    <dd data-i18n="g2.o2t">
+                      Pick the device to record from. <b>Test Mic</b> plays it back so you can check
+                      the sound is clear and free of noise. If the mic drops out mid-recording,
+                      RevFly reconnects, or switches to the system mic if it was unplugged.
+                    </dd>
                   </div>
                   <div>
                     <dt data-i18n="g2.o3">Audio output</dt>
-                    <dd data-i18n="g2.o3t">The speaker for the start and finish chimes and for playing back recordings.</dd>
+                    <dd data-i18n="g2.o3t">
+                      The speaker for the start and finish chimes and for playing back recordings.
+                    </dd>
                   </div>
                   <div>
                     <dt data-i18n="g2.o4">Noise reduction</dt>
-                    <dd data-i18n="g2.o4t">Filters background noise (fans, traffic, keyboard) before recognition. Off, Light, Balanced or Strong. Try Light in a noisy room.</dd>
+                    <dd data-i18n="g2.o4t">
+                      Filters background noise (fans, traffic, keyboard) before recognition. Off,
+                      Light, Balanced or Strong. Try Light in a noisy room.
+                    </dd>
                   </div>
                   <div>
                     <dt data-i18n="g2.o5">Idle timeout</dt>
-                    <dd data-i18n="g2.o5t">How long the speech model stays in memory after you finish (30 s by default). After that it's unloaded, so RevFly uses almost no RAM while you're not dictating. It loads again automatically the next time you record.</dd>
+                    <dd data-i18n="g2.o5t">
+                      How long the speech model stays in memory after you finish (30 s by default).
+                      After that it's unloaded, so RevFly uses almost no RAM while you're not
+                      dictating. It loads again automatically the next time you record.
+                    </dd>
                   </div>
                 </dl>
               </div>
               <figure class="guide-shot">
-                <img src="assets/guide/input.webp" width="1428" height="1074" loading="lazy" data-i18n-attr="alt:g2.alt" alt="Input section: launch hotkey, microphone input with Test Mic, audio output, noise reduction and idle timeout" />
+                <img
+                  src="assets/guide/input.webp"
+                  width="1428"
+                  height="1074"
+                  loading="lazy"
+                  data-i18n-attr="alt:g2.alt"
+                  alt="Input section: launch hotkey, microphone input with Test Mic, audio output, noise reduction and idle timeout"
+                />
               </figure>
             </article>
 
@@ -322,32 +630,59 @@
               <div class="guide-text">
                 <p class="guide-n">03 · <span data-i18n="tab.general">General</span></p>
                 <h3 data-i18n="g3.title">Speech model and languages</h3>
-                <p class="guide-lead" data-i18n="g3.lead">Recognition runs entirely on your computer. Pick the engine and tell it which languages to expect.</p>
+                <p class="guide-lead" data-i18n="g3.lead">
+                  Recognition runs entirely on your computer. Pick the engine and tell it which
+                  languages to expect.
+                </p>
                 <dl class="opts">
                   <div>
                     <dt data-i18n="g3.o1">Transcription model</dt>
-                    <dd data-i18n="g3.o1t"><b>Parakeet TDT 0.6B</b> is the default. It downloads on first launch and is very fast, with 25 languages. Whisper Base, Small and Medium download in one click; Medium is the most accurate.</dd>
+                    <dd data-i18n="g3.o1t">
+                      <b>Parakeet TDT 0.6B</b> is the default. It downloads on first launch and is
+                      very fast, with 25 languages. Whisper Base, Small and Medium download in one
+                      click; Medium is the most accurate.
+                    </dd>
                   </div>
                   <div>
                     <dt data-i18n="g3.o2">Hardware acceleration</dt>
-                    <dd data-i18n="g3.o2t"><b>Auto</b> uses your GPU or Neural Engine when there is one, which makes recognition faster and lighter. Without one, RevFly runs on the CPU alone.</dd>
+                    <dd data-i18n="g3.o2t">
+                      <b>Auto</b> uses your GPU or Neural Engine when there is one, which makes
+                      recognition faster and lighter. Without one, RevFly runs on the CPU alone.
+                    </dd>
                   </div>
                   <div>
                     <dt data-i18n="g3.o3">Spoken language</dt>
-                    <dd data-i18n="g3.o3t">Auto-detect by default. If you usually speak one language, select it: the model stops guessing, and results are more reliable.</dd>
+                    <dd data-i18n="g3.o3t">
+                      Auto-detect by default. If you usually speak one language, select it: the
+                      model stops guessing, and results are more reliable.
+                    </dd>
                   </div>
                   <div>
                     <dt data-i18n="g3.o4">Excluded languages</dt>
-                    <dd data-i18n="g3.o4t">Languages you don't speak but that sound close to yours, for example Russian or Polish for a Ukrainian speaker. If one is detected by mistake, the speech is recognized again in your language.</dd>
+                    <dd data-i18n="g3.o4t">
+                      Languages you don't speak but that sound close to yours, for example Russian
+                      or Polish for a Ukrainian speaker. If one is detected by mistake, the speech
+                      is recognized again in your language.
+                    </dd>
                   </div>
                   <div>
                     <dt data-i18n="g3.o5">Models folder &amp; import</dt>
-                    <dd data-i18n="g3.o5t">Open the folder where models are stored, import your own Whisper <code>.bin</code> file, or download one from a link.</dd>
+                    <dd data-i18n="g3.o5t">
+                      Open the folder where models are stored, import your own Whisper
+                      <code>.bin</code> file, or download one from a link.
+                    </dd>
                   </div>
                 </dl>
               </div>
               <figure class="guide-shot">
-                <img src="assets/guide/model.webp" width="1428" height="1074" loading="lazy" data-i18n-attr="alt:g3.alt" alt="Model section: Parakeet TDT selected, hardware acceleration Auto, spoken language Auto-detect, excluded languages, models folder" />
+                <img
+                  src="assets/guide/model.webp"
+                  width="1428"
+                  height="1074"
+                  loading="lazy"
+                  data-i18n-attr="alt:g3.alt"
+                  alt="Model section: Parakeet TDT selected, hardware acceleration Auto, spoken language Auto-detect, excluded languages, models folder"
+                />
               </figure>
             </article>
 
@@ -357,26 +692,43 @@
                 <p class="guide-n">04 · <span data-i18n="tab.general">General</span></p>
                 <h3 data-i18n="g4.title">Long recordings: chunking</h3>
                 <p class="guide-lead" data-i18n="g4.lead">
-                  Not every model can take a long conversation in one go. Parakeet, for example, handles about
-                  4 minutes 50 seconds at a time. Chunking splits the recording at natural pauses so nothing is lost.
+                  Not every model can take a long conversation in one go. Parakeet, for example,
+                  handles about 4 minutes 50 seconds at a time. Chunking splits the recording at
+                  natural pauses so nothing is lost.
                 </p>
                 <dl class="opts">
                   <div>
                     <dt data-i18n="g4.o1">Audio chunking</dt>
-                    <dd data-i18n="g4.o1t">Turn it on for long dictation. It's also faster: the parts you've already said are transcribed while you keep talking, so the text is ready almost as soon as you stop.</dd>
+                    <dd data-i18n="g4.o1t">
+                      Turn it on for long dictation. It's also faster: the parts you've already said
+                      are transcribed while you keep talking, so the text is ready almost as soon as
+                      you stop.
+                    </dd>
                   </div>
                   <div>
                     <dt data-i18n="g4.o2">Pause detection trigger</dt>
-                    <dd data-i18n="g4.o2t">How long a pause has to be to cut a chunk cleanly (500 ms by default).</dd>
+                    <dd data-i18n="g4.o2t">
+                      How long a pause has to be to cut a chunk cleanly (500 ms by default).
+                    </dd>
                   </div>
                   <div>
                     <dt data-i18n="g4.o3">Safety cut limit &amp; overlap</dt>
-                    <dd data-i18n="g4.o3t">If you talk without pausing, a chunk is cut after this many seconds. The overlap repeats a short slice so no word is cut in half.</dd>
+                    <dd data-i18n="g4.o3t">
+                      If you talk without pausing, a chunk is cut after this many seconds. The
+                      overlap repeats a short slice so no word is cut in half.
+                    </dd>
                   </div>
                 </dl>
               </div>
               <figure class="guide-shot">
-                <img src="assets/guide/chunking.webp" width="1428" height="1074" loading="lazy" data-i18n-attr="alt:g4.alt" alt="Audio Chunking and VAD section: chunking on, pause detection trigger, safety cut limit and overlap" />
+                <img
+                  src="assets/guide/chunking.webp"
+                  width="1428"
+                  height="1074"
+                  loading="lazy"
+                  data-i18n-attr="alt:g4.alt"
+                  alt="Audio Chunking and VAD section: chunking on, pause detection trigger, safety cut limit and overlap"
+                />
               </figure>
             </article>
 
@@ -386,17 +738,22 @@
                 <p class="guide-n">05 · <span data-i18n="tab.general">General</span></p>
                 <h3 data-i18n="g5.title">Post-processing &amp; formatting</h3>
                 <p class="guide-lead" data-i18n="g5.lead">
-                  Speech is messy. Normalization turns what you said into clean written text that reads well
-                  and that AI tools understand.
+                  Speech is messy. Normalization turns what you said into clean written text that
+                  reads well and that AI tools understand.
                 </p>
                 <dl class="opts">
                   <div>
                     <dt data-i18n="g5.o1">Fillers &amp; stutters</dt>
-                    <dd data-i18n="g5.o1t">Removes "um", "uh", and repeated words like "I I want".</dd>
+                    <dd data-i18n="g5.o1t">
+                      Removes "um", "uh", and repeated words like "I I want".
+                    </dd>
                   </div>
                   <div>
                     <dt data-i18n="g5.o2">Numbers &amp; values</dt>
-                    <dd data-i18n="g5.o2t">"Twenty four" becomes 24; currency, dates and percentages get a consistent format.</dd>
+                    <dd data-i18n="g5.o2t">
+                      "Twenty four" becomes 24; currency, dates and percentages get a consistent
+                      format.
+                    </dd>
                   </div>
                   <div>
                     <dt data-i18n="g5.o3">Self-corrections</dt>
@@ -404,12 +761,22 @@
                   </div>
                   <div>
                     <dt data-i18n="g5.o4">Confidential masking</dt>
-                    <dd data-i18n="g5.o4t">Further down, list names and codenames to hide. Emails, phone and card numbers are masked before text is translated or pasted.</dd>
+                    <dd data-i18n="g5.o4t">
+                      Further down, list names and codenames to hide. Emails, phone and card numbers
+                      are masked before text is translated or pasted.
+                    </dd>
                   </div>
                 </dl>
               </div>
               <figure class="guide-shot">
-                <img src="assets/guide/cleanup.webp" width="1428" height="1074" loading="lazy" data-i18n-attr="alt:g5.alt" alt="Post-Processing and Formatting section: filler words, numbers to digits, stutters, self-corrections and more" />
+                <img
+                  src="assets/guide/cleanup.webp"
+                  width="1428"
+                  height="1074"
+                  loading="lazy"
+                  data-i18n-attr="alt:g5.alt"
+                  alt="Post-Processing and Formatting section: filler words, numbers to digits, stutters, self-corrections and more"
+                />
               </figure>
             </article>
 
@@ -419,31 +786,62 @@
                 <p class="guide-n">06 · <span data-i18n="tab.translations">Translations</span></p>
                 <h3 data-i18n="g6.title">Translation</h3>
                 <p class="guide-lead" data-i18n="g6.lead">
-                  Speak your native language, or any language, and get the text in another one. Pick the
-                  target language; speech that's already in it is pasted without translating.
+                  Speak your native language, or any language, and get the text in another one. Pick
+                  the target language; speech that's already in it is pasted without translating.
                 </p>
                 <dl class="opts">
                   <div>
                     <dt data-i18n="g6.o1">LLM, local or cloud</dt>
-                    <dd data-i18n="g6.o1t">Presets for Gemini, OpenAI, Ollama and LM Studio. A <a href="https://aistudio.google.com/apikey" rel="noopener" target="_blank">free Gemini API key</a> includes a number of free requests every day, and <code>gemini-3.6-flash</code> translates quickly and well. Ollama and LM Studio run on your computer, offline and without a key.</dd>
+                    <dd data-i18n="g6.o1t">
+                      Presets for Gemini, OpenAI, Ollama and LM Studio. A
+                      <a href="https://aistudio.google.com/apikey" rel="noopener" target="_blank"
+                        >free Gemini API key</a
+                      >
+                      includes a number of free requests every day, and
+                      <code>gemini-3.6-flash</code> translates quickly and well. Ollama and LM
+                      Studio run on your computer, offline and without a key.
+                    </dd>
                   </div>
                   <div>
                     <dt data-i18n="g6.o2">Prompt template</dt>
-                    <dd data-i18n="g6.o2t">Tells the LLM what to do with your text. Besides translating, you can ask it to fix grammar or polish your phrasing.</dd>
+                    <dd data-i18n="g6.o2t">
+                      Tells the LLM what to do with your text. Besides translating, you can ask it
+                      to fix grammar or polish your phrasing.
+                    </dd>
                   </div>
                   <div>
                     <dt data-i18n="g6.o3">Custom API</dt>
-                    <dd data-i18n="g6.o3t">Any REST translation service. Several have free tiers, such as Google Cloud Translation.</dd>
+                    <dd data-i18n="g6.o3t">
+                      Any REST translation service. Several have free tiers, such as Google Cloud
+                      Translation.
+                    </dd>
                   </div>
                   <div>
                     <dt data-i18n="g6.o4">If it fails</dt>
-                    <dd data-i18n="g6.o4t">The pill shows the reason and a <b>Retry translation</b> button. The tray menu has <b>Retry Last Translation</b> too, so you never have to say it again.</dd>
+                    <dd data-i18n="g6.o4t">
+                      The pill shows the reason and a <b>Retry translation</b> button. The tray menu
+                      has <b>Retry Last Translation</b> too, so you never have to say it again.
+                    </dd>
                   </div>
                 </dl>
               </div>
               <figure class="guide-shot guide-shot-stack">
-                <img src="assets/guide/translation.webp" width="1428" height="1074" loading="lazy" data-i18n-attr="alt:g6.alt" alt="Translations tab: translation mode and LLM presets for Gemini, Ollama, LM Studio and OpenAI" />
-                <img src="assets/guide/prompt.webp" width="1428" height="1074" loading="lazy" data-i18n-attr="alt:g6.alt2" alt="Prompt template presets and custom prompt editor" />
+                <img
+                  src="assets/guide/translation.webp"
+                  width="1428"
+                  height="1074"
+                  loading="lazy"
+                  data-i18n-attr="alt:g6.alt"
+                  alt="Translations tab: translation mode and LLM presets for Gemini, Ollama, LM Studio and OpenAI"
+                />
+                <img
+                  src="assets/guide/prompt.webp"
+                  width="1428"
+                  height="1074"
+                  loading="lazy"
+                  data-i18n-attr="alt:g6.alt2"
+                  alt="Prompt template presets and custom prompt editor"
+                />
               </figure>
             </article>
 
@@ -452,25 +850,43 @@
               <div class="guide-text">
                 <p class="guide-n">07 · <span data-i18n="tab.storage">Storage</span></p>
                 <h3 data-i18n="g7.title">History and storage</h3>
-                <p class="guide-lead" data-i18n="g7.lead">Choose what RevFly keeps on your disk. Everything stays local.</p>
+                <p class="guide-lead" data-i18n="g7.lead">
+                  Choose what RevFly keeps on your disk. Everything stays local.
+                </p>
                 <dl class="opts">
                   <div>
                     <dt data-i18n="g7.o1">Save format</dt>
-                    <dd data-i18n="g7.o1t"><b>Audio + Transcript</b>, <b>Transcript only</b>, or <b>Don't save</b> (nothing is written to disk).</dd>
+                    <dd data-i18n="g7.o1t">
+                      <b>Audio + Transcript</b>, <b>Transcript only</b>, or
+                      <b>Don't save</b> (nothing is written to disk).
+                    </dd>
                   </div>
                   <div>
                     <dt data-i18n="g7.o2">Storage cap &amp; auto-purge</dt>
-                    <dd data-i18n="g7.o2t">When the cap is reached, the oldest recordings are deleted first. Auto-purge removes anything older than the period you pick, or never.</dd>
+                    <dd data-i18n="g7.o2t">
+                      When the cap is reached, the oldest recordings are deleted first. Auto-purge
+                      removes anything older than the period you pick, or never.
+                    </dd>
                   </div>
                   <div>
                     <dt data-i18n="g7.o3">Open folder</dt>
                     <dd data-i18n="g7.o3t">See your recordings as ordinary audio files.</dd>
                   </div>
                 </dl>
-                <p class="tip" data-i18n="g7.tip"><b>Tip:</b> keep audio on. A saved recording can be transcribed again later, as the next two sections show.</p>
+                <p class="tip" data-i18n="g7.tip">
+                  <b>Tip:</b> keep audio on. A saved recording can be transcribed again later, as
+                  the next two sections show.
+                </p>
               </div>
               <figure class="guide-shot">
-                <img src="assets/guide/storage.webp" width="1428" height="1074" loading="lazy" data-i18n-attr="alt:g7.alt" alt="Storage tab: save format, storage cap, auto-purge and usage" />
+                <img
+                  src="assets/guide/storage.webp"
+                  width="1428"
+                  height="1074"
+                  loading="lazy"
+                  data-i18n-attr="alt:g7.alt"
+                  alt="Storage tab: save format, storage cap, auto-purge and usage"
+                />
               </figure>
             </article>
 
@@ -479,24 +895,40 @@
               <div class="guide-text">
                 <p class="guide-n">08 · <span data-i18n="tab.logs">Logs</span></p>
                 <h3 data-i18n="g8.title">Logs: see every step</h3>
-                <p class="guide-lead" data-i18n="g8.lead">Each recording gets a timeline of what happened to it and how long each step took.</p>
+                <p class="guide-lead" data-i18n="g8.lead">
+                  Each recording gets a timeline of what happened to it and how long each step took.
+                </p>
                 <dl class="opts">
                   <div>
                     <dt data-i18n="g8.o1">Speed</dt>
-                    <dd data-i18n="g8.o1t">Silence trimming, recognition, translation and paste times, plus how many times faster than real time the model ran.</dd>
+                    <dd data-i18n="g8.o1t">
+                      Silence trimming, recognition, translation and paste times, plus how many
+                      times faster than real time the model ran.
+                    </dd>
                   </div>
                   <div>
                     <dt data-i18n="g8.o2">Text at each stage</dt>
-                    <dd data-i18n="g8.o2t">The detected language, the raw transcript, and the final text that was pasted.</dd>
+                    <dd data-i18n="g8.o2t">
+                      The detected language, the raw transcript, and the final text that was pasted.
+                    </dd>
                   </div>
                   <div>
                     <dt data-i18n="g8.o3">Second try</dt>
-                    <dd data-i18n="g8.o3t">Play the recording back, or open it in Audio Labs to transcribe it again.</dd>
+                    <dd data-i18n="g8.o3t">
+                      Play the recording back, or open it in Audio Labs to transcribe it again.
+                    </dd>
                   </div>
                 </dl>
               </div>
               <figure class="guide-shot">
-                <img src="assets/guide/logs.webp" width="1428" height="1074" loading="lazy" data-i18n-attr="alt:g8.alt" alt="Logs tab: recent recordings with timings, detected language and text" />
+                <img
+                  src="assets/guide/logs.webp"
+                  width="1428"
+                  height="1074"
+                  loading="lazy"
+                  data-i18n-attr="alt:g8.alt"
+                  alt="Logs tab: recent recordings with timings, detected language and text"
+                />
               </figure>
             </article>
 
@@ -506,240 +938,189 @@
                 <p class="guide-n">09 · <span data-i18n="tab.labs">Audio Labs</span></p>
                 <h3 data-i18n="g9.title">Audio Labs: test and re-run</h3>
                 <p class="guide-lead" data-i18n="g9.lead">
-                  A workbench for your real recordings. Pick a previous recording or drop in any audio file,
-                  then run it through different settings.
+                  A workbench for your real recordings. Pick a previous recording or drop in any
+                  audio file, then run it through different settings.
                 </p>
                 <dl class="opts">
                   <div>
                     <dt data-i18n="g9.o1">Compare settings</dt>
-                    <dd data-i18n="g9.o1t">Try other models, languages, noise reduction and clean-up options, and compare the raw and cleaned text and the speed.</dd>
+                    <dd data-i18n="g9.o1t">
+                      Try other models, languages, noise reduction and clean-up options, and compare
+                      the raw and cleaned text and the speed.
+                    </dd>
                   </div>
                   <div>
                     <dt data-i18n="g9.o2">Recover a recording</dt>
-                    <dd data-i18n="g9.o2t">Something went wrong, like the wrong language or a failed translation? Your recording is still there. Transcribe it again instead of repeating yourself.</dd>
+                    <dd data-i18n="g9.o2t">
+                      Something went wrong, like the wrong language or a failed translation? Your
+                      recording is still there. Transcribe it again instead of repeating yourself.
+                    </dd>
                   </div>
                 </dl>
               </div>
               <figure class="guide-shot">
-                <img src="assets/guide/labs.webp" width="1428" height="1074" loading="lazy" data-i18n-attr="alt:g9.alt" alt="Audio Labs tab: source recording and experiment settings" />
+                <img
+                  src="assets/guide/labs.webp"
+                  width="1428"
+                  height="1074"
+                  loading="lazy"
+                  data-i18n-attr="alt:g9.alt"
+                  alt="Audio Labs tab: source recording and experiment settings"
+                />
               </figure>
             </article>
-          </div>
-
-          <!-- Pill legend -->
-          <div class="pill-legend">
-            <h3 data-i18n="pill.title">Reading the voice pill</h3>
-            <p class="lead-sm center" data-i18n="pill.lead">A small pill floats above your apps while RevFly works. It tells you what's happening at a glance.</p>
-            <div class="pill-grid">
-              <div class="legend-item">
-                <div class="pill pill-static" data-state="listening">
-                  <div class="pill-icon"><span class="bars"><i></i><i></i><i></i><i></i><i></i></span></div>
-                  <div class="pill-text"><span class="pill-label" data-i18n="pill.listening">Listening</span><span class="pill-sub">Auto → English</span></div>
-                </div>
-                <p data-i18n="pill.listeningT">Bars move with your voice. Press the hotkey again to finish, or Esc to cancel.</p>
-              </div>
-              <div class="legend-item">
-                <div class="pill pill-static" data-state="transcribing">
-                  <div class="pill-icon"><span class="ring"></span></div>
-                  <div class="pill-text"><span class="pill-label" data-i18n="pill.working">Transcribing</span><span class="pill-sub" data-i18n="pill.workingSub">Parakeet · on-device</span></div>
-                </div>
-                <p data-i18n="pill.workingT">Speech becomes text locally. Usually well under a second.</p>
-              </div>
-              <div class="legend-item">
-                <div class="pill pill-static" data-state="translating">
-                  <div class="pill-icon"><span class="ring"></span></div>
-                  <div class="pill-text"><span class="pill-label" data-i18n="pill.translating">Translating</span><span class="pill-sub">Auto → English</span></div>
-                </div>
-                <p data-i18n="pill.translatingT">Only runs when the recognized language isn't already your target. Skipped instantly otherwise.</p>
-              </div>
-              <div class="legend-item">
-                <div class="pill pill-static" data-state="done">
-                  <div class="pill-icon"><span class="check">✓</span></div>
-                  <div class="pill-text"><span class="pill-label" data-i18n="pill.done">Done</span><span class="pill-sub" data-i18n="pill.doneSub">Pasted</span></div>
-                </div>
-                <p data-i18n="pill.doneT">The text is at your cursor and in your history.</p>
-              </div>
-              <div class="legend-item">
-                <div class="pill pill-static" data-state="warning">
-                  <div class="pill-icon"><span class="bars bars-down"><i></i><i></i><i></i><i></i><i></i></span><span class="strike"></span></div>
-                  <div class="pill-text"><span class="pill-label" data-i18n="pill.mic">Reconnecting Mic…</span><span class="pill-sub" data-i18n="pill.micSub">what you said is kept</span></div>
-                </div>
-                <p data-i18n="pill.micT">The mic stopped sending sound. RevFly reopens it, or switches to the system mic.</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Features -->
-      <section class="section" id="features">
-        <div class="wrap">
-          <p class="kicker" data-i18n="feat.kicker">Features</p>
-          <h2 data-i18n="feat.title">Everything you need to talk instead of type</h2>
-          <div class="features">
-            <article class="card feature-card">
-              <figure class="feature-shot">
-                <img src="assets/guide/input.webp" width="1428" height="1074" loading="lazy" data-i18n-attr="alt:g2.alt" alt="Input section: launch hotkey, microphone input with Test Mic, audio output, noise reduction and idle timeout" />
-              </figure>
-              <h3 data-i18n="feat.f1">Hotkey &amp; voice pill</h3>
-              <p class="feature-lead" data-i18n="feat.f1Lead">One keypress starts and stops a recording, however you prefer it. A tiny pill floats over every app, even full-screen ones, so you always know what RevFly is doing.</p>
-              <ul>
-                <li data-i18n="feat.f1a">Any single key on macOS (Right ⌥ or ⌃), any combo on Windows and Linux</li>
-                <li data-i18n="feat.f1b">Press once to start and again to stop</li>
-                <li data-i18n="feat.f1c"><kbd>Esc</kbd> cancels instantly; chimes mark start and finish</li>
-              </ul>
-            </article>
-
-            <article class="card feature-card">
-              <figure class="feature-shot">
-                <img src="assets/guide/model.webp" width="1428" height="1074" loading="lazy" data-i18n-attr="alt:g3.alt" alt="Model section: Parakeet TDT selected, hardware acceleration Auto, spoken language Auto-detect, excluded languages, models folder" />
-              </figure>
-              <h3 data-i18n="feat.f2">On-device recognition</h3>
-              <p class="feature-lead" data-i18n="feat.f2Lead">Silero VAD trims silence, then Parakeet or Whisper turn speech into text, right on your computer. Nothing is sent anywhere to transcribe.</p>
-              <ul>
-                <li data-i18n="feat.f2a">Parakeet TDT 0.6B by default: near-instant, 25 languages</li>
-                <li data-i18n="feat.f2b">Whisper (Medium, Small, Base), or your own imported model, fully offline</li>
-                <li data-i18n="feat.f2c">Models unload after idle time to free up RAM</li>
-              </ul>
-            </article>
-
-            <article class="card feature-card">
-              <figure class="feature-shot">
-                <img src="assets/guide/translation.webp" width="1428" height="1074" loading="lazy" data-i18n-attr="alt:g6.alt" alt="Translations tab: translation mode and LLM presets for Gemini, Ollama, LM Studio and OpenAI" />
-              </figure>
-              <h3 data-i18n="feat.f3">Translation, only when needed</h3>
-              <p class="feature-lead" data-i18n="feat.f3Lead">Speak any language, get text in another. Already in your target language? Translation is skipped instantly, with no network call at all.</p>
-              <ul>
-                <li data-i18n="feat.f3a">Google Gemini for fast, fluent cloud translation</li>
-                <li data-i18n="feat.f3b">Fully local with Ollama or LM Studio, or any OpenAI-compatible endpoint</li>
-                <li data-i18n="feat.f3c">Your own prompt template, and languages you exclude from translation</li>
-              </ul>
-            </article>
-
-            <article class="card feature-card">
-              <figure class="feature-shot">
-                <img src="assets/guide/cleanup.webp" width="1428" height="1074" loading="lazy" data-i18n-attr="alt:g5.alt" alt="Post-Processing and Formatting section: filler words, numbers to digits, stutters, self-corrections and more" />
-              </figure>
-              <h3 data-i18n="feat.f4">Clean-up &amp; confidentiality</h3>
-              <p class="feature-lead" data-i18n="feat.f4Lead">Spoken language is messy. RevFly tidies it into clean text, and masks anything sensitive before it ever reaches a cloud API.</p>
-              <ul>
-                <li data-i18n="feat.f4a">Removes "um", "uh", stutters and repeats; formats numbers, dates and URLs</li>
-                <li data-i18n="feat.f4b">Masks names, project codenames, emails, phone and card numbers</li>
-                <li data-i18n="feat.f4c">Choose the replacement, like <code>[CONFIDENTIAL]</code> or <code>***</code></li>
-              </ul>
-              <div class="before-after">
-                <p data-i18n="feat.c5said"><span>Said</span>"um so I think, sorry, I know it costs like a hundred dollars"</p>
-                <p data-i18n="feat.c5pasted"><span>Pasted</span>I know it costs $100.</p>
-              </div>
-            </article>
-
-            <article class="card feature-card feature-card-wide">
-              <figure class="feature-shot">
-                <img src="assets/guide/storage.webp" width="1428" height="1074" loading="lazy" data-i18n-attr="alt:g7.alt" alt="Storage tab: save format, storage cap, auto-purge and usage" />
-              </figure>
-              <h3 data-i18n="feat.f5">History, storage &amp; control</h3>
-              <p class="feature-lead" data-i18n="feat.f5Lead">Your history, your rules. The rest of the app stays out of your way, from the tray down to a workbench for testing settings against real recordings.</p>
-              <ul>
-                <li data-i18n="feat.f5a">Text only (default), text + audio, or nothing saved — 500 MB cap, 30-day retention</li>
-                <li data-i18n="feat.f5b">Switch mic, output and translation mode from the tray; light, dark and system themes</li>
-                <li data-i18n="feat.f5c">Audio Labs: re-run any past recording through different models and settings</li>
-              </ul>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <!-- Privacy -->
-      <section class="section section-alt" id="privacy">
-        <div class="wrap privacy-grid">
-          <div>
-            <p class="kicker" data-i18n="priv.kicker">Privacy by design</p>
-            <h2 data-i18n="priv.title">Your voice stays on your computer</h2>
-            <p class="lead-sm" data-i18n="priv.lead">
-              Audio is recorded into memory and recognized locally. Nothing is uploaded. Only text is ever
-              sent out, and only when you turn on a cloud translation provider. Use a local LLM and nothing
-              leaves your machine at all.
-            </p>
-          </div>
-          <div class="modes">
-            <div class="mode">
-              <h3 data-i18n="priv.m1">Transcript only <span class="tag">Default</span></h3>
-              <p data-i18n="priv.m1t">Keeps transcripts in a local database. No audio is stored.</p>
-            </div>
-            <div class="mode">
-              <h3 data-i18n="priv.m2">Audio + Transcript</h3>
-              <p data-i18n="priv.m2t">Also keeps the recordings, so you can replay them or transcribe them again.</p>
-            </div>
-            <div class="mode">
-              <h3 data-i18n="priv.m3">Don't save</h3>
-              <p data-i18n="priv.m3t">Everything stays in RAM. Nothing is written to disk.</p>
-            </div>
           </div>
         </div>
       </section>
 
       <!-- Download -->
-      <section class="section" id="download">
+      <section class="section section-alt" id="download">
         <div class="wrap">
           <p class="kicker" data-i18n="dl.kicker">Download</p>
           <h2 data-i18n="dl.title">Free for macOS, Windows and Linux</h2>
           <p class="lead-sm center">
             <span id="release-version" data-i18n="dl.latest">Latest release</span> ·
-            <a href="https://github.com/eotsevych/RevFly/releases" rel="noopener" data-i18n="dl.all">All releases</a> ·
-            <a href="https://github.com/eotsevych/RevFly/blob/main/INSTALL.md" rel="noopener" data-i18n="dl.guide">Install guide</a>
+            <a href="https://github.com/eotsevych/RevFly/releases" rel="noopener" data-i18n="dl.all"
+              >All releases</a
+            >
+            ·
+            <a
+              href="https://github.com/eotsevych/RevFly/blob/main/INSTALL.md"
+              rel="noopener"
+              data-i18n="dl.guide"
+              >Install guide</a
+            >
           </p>
           <div class="downloads">
             <article class="dl" data-os="mac">
               <h3>macOS</h3>
               <p class="dl-req" data-i18n="dl.macReq">macOS 11+ · Apple Silicon &amp; Intel</p>
-              <a class="btn btn-primary" data-asset="mac-dmg" href="https://github.com/eotsevych/RevFly/releases/latest" data-i18n="dl.macBtn">Download .dmg</a>
+              <a
+                class="btn btn-primary"
+                data-asset="mac-dmg"
+                href="https://github.com/eotsevych/RevFly/releases/latest"
+                data-i18n="dl.macBtn"
+                >Download .dmg</a
+              >
               <p class="dl-alt" data-i18n="dl.macAlt">Or with no security prompt:</p>
-              <div class="mini-cmd"><code id="cmd-brew">brew install --cask eotsevych/tap/revfly</code><button class="copy" type="button" data-copy-target="cmd-brew" data-i18n="ui.copy" data-i18n-attr="aria-label:ui.copyBrew" aria-label="Copy Homebrew command">Copy</button></div>
+              <div class="mini-cmd">
+                <code id="cmd-brew">brew install --cask eotsevych/tap/revfly</code
+                ><button
+                  class="copy"
+                  type="button"
+                  data-copy-target="cmd-brew"
+                  data-i18n="ui.copy"
+                  data-i18n-attr="aria-label:ui.copyBrew"
+                  aria-label="Copy Homebrew command"
+                >
+                  Copy
+                </button>
+              </div>
             </article>
             <article class="dl" data-os="windows">
               <h3>Windows</h3>
               <p class="dl-req" data-i18n="dl.winReq">Windows 10 &amp; 11 · 64-bit</p>
-              <a class="btn btn-primary" data-asset="win-exe" href="https://github.com/eotsevych/RevFly/releases/latest" data-i18n="dl.winBtn">Download installer (.exe)</a>
-              <p class="dl-alt"><span data-i18n="dl.winAlt">Also available:</span> <a data-asset="win-msi" href="https://github.com/eotsevych/RevFly/releases/latest" data-i18n="dl.msi">.msi package</a></p>
+              <a
+                class="btn btn-primary"
+                data-asset="win-exe"
+                href="https://github.com/eotsevych/RevFly/releases/latest"
+                data-i18n="dl.winBtn"
+                >Download installer (.exe)</a
+              >
+              <p class="dl-alt">
+                <span data-i18n="dl.winAlt">Also available:</span>
+                <a
+                  data-asset="win-msi"
+                  href="https://github.com/eotsevych/RevFly/releases/latest"
+                  data-i18n="dl.msi"
+                  >.msi package</a
+                >
+              </p>
             </article>
             <article class="dl" data-os="linux">
               <h3>Linux</h3>
               <p class="dl-req">Ubuntu 24.04+, Debian 13+, Fedora 40+</p>
-              <a class="btn btn-primary" data-asset="linux-appimage" href="https://github.com/eotsevych/RevFly/releases/latest" data-i18n="dl.linuxBtn">Download AppImage</a>
-              <p class="dl-alt"><span data-i18n="dl.linuxAlt">Also:</span> <a data-asset="linux-deb" href="https://github.com/eotsevych/RevFly/releases/latest">.deb</a> · <a data-asset="linux-rpm" href="https://github.com/eotsevych/RevFly/releases/latest">.rpm</a></p>
+              <a
+                class="btn btn-primary"
+                data-asset="linux-appimage"
+                href="https://github.com/eotsevych/RevFly/releases/latest"
+                data-i18n="dl.linuxBtn"
+                >Download AppImage</a
+              >
+              <p class="dl-alt">
+                <span data-i18n="dl.linuxAlt">Also:</span>
+                <a data-asset="linux-deb" href="https://github.com/eotsevych/RevFly/releases/latest"
+                  >.deb</a
+                >
+                ·
+                <a data-asset="linux-rpm" href="https://github.com/eotsevych/RevFly/releases/latest"
+                  >.rpm</a
+                >
+              </p>
             </article>
           </div>
         </div>
       </section>
 
       <!-- FAQ -->
-      <section class="section section-alt" id="faq">
+      <section class="section" id="faq">
         <div class="wrap narrow">
           <p class="kicker">FAQ</p>
           <h2 data-i18n="faq.title">Questions</h2>
           <details>
             <summary data-i18n="faq.q1">Is RevFly really free?</summary>
-            <p data-i18n="faq.a1">Yes. It's open source under the MIT license, with no account, subscription or usage limits. Cloud translation with Gemini uses your own API key; local models cost nothing.</p>
+            <p data-i18n="faq.a1">
+              Yes. It's open source under the MIT license, with no account, subscription or usage
+              limits. Cloud translation with Gemini uses your own API key; local models cost
+              nothing.
+            </p>
           </details>
           <details>
             <summary data-i18n="faq.q2">Does my audio ever leave my computer?</summary>
-            <p data-i18n="faq.a2">No. Recording and speech recognition happen locally. If you enable cloud translation, only the recognized text is sent, after the confidentiality guard has masked anything sensitive. With a local LLM, nothing leaves your machine.</p>
+            <p data-i18n="faq.a2">
+              No. Recording and speech recognition happen locally. If you enable cloud translation,
+              only the recognized text is sent, after the confidentiality guard has masked anything
+              sensitive. With a local LLM, nothing leaves your machine.
+            </p>
           </details>
           <details>
             <summary data-i18n="faq.q3">Which languages does it understand?</summary>
-            <p data-i18n="faq.a3">Parakeet recognizes 25 European languages, including English and Ukrainian; Whisper models recognize dozens more, offline. Translation works between any languages your chosen provider supports, and speech that's already in your target language is pasted as-is.</p>
+            <p data-i18n="faq.a3">
+              Parakeet recognizes 25 European languages, including English and Ukrainian; Whisper
+              models recognize dozens more, offline. Translation works between any languages your
+              chosen provider supports, and speech that's already in your target language is pasted
+              as-is.
+            </p>
           </details>
           <details>
             <summary data-i18n="faq.q4">The pill says my microphone stopped. What now?</summary>
-            <p data-i18n="faq.a4">Bluetooth headsets sometimes drop their microphone link mid-recording. RevFly notices within a second or two, reopens the mic and keeps what you already said. If the mic was unplugged, it switches to the system mic. If it keeps happening, pick another mic in Settings → General → Microphone input.</p>
+            <p data-i18n="faq.a4">
+              Bluetooth headsets sometimes drop their microphone link mid-recording. RevFly notices
+              within a second or two, reopens the mic and keeps what you already said. If the mic
+              was unplugged, it switches to the system mic. If it keeps happening, pick another mic
+              in Settings → General → Microphone input.
+            </p>
           </details>
           <details>
             <summary data-i18n="faq.q5">Why does my computer warn me when I open it?</summary>
-            <p data-i18n="faq.a5">RevFly isn't signed with a paid Apple or Microsoft certificate yet, so macOS and Windows show a one-time warning for downloads from a browser. The Terminal one-liner and Homebrew avoid it on Mac; the <a href="https://github.com/eotsevych/RevFly/blob/main/INSTALL.md" rel="noopener">install guide</a> shows how to allow it otherwise. Updates install from inside the app without the warning.</p>
+            <p data-i18n="faq.a5">
+              RevFly isn't signed with a paid Apple or Microsoft certificate yet, so macOS and
+              Windows show a one-time warning for downloads from a browser. The Terminal one-liner
+              and Homebrew avoid it on Mac; the
+              <a href="https://github.com/eotsevych/RevFly/blob/main/INSTALL.md" rel="noopener"
+                >install guide</a
+              >
+              shows how to allow it otherwise. Updates install from inside the app without the
+              warning.
+            </p>
           </details>
           <details>
             <summary data-i18n="faq.q6">Which apps does it work with?</summary>
-            <p data-i18n="faq.a6">Any app with a text cursor: Slack, Telegram, WhatsApp, VS Code, Google Docs, Chrome, Terminal and more. RevFly pastes with the normal ⌘V / Ctrl+V shortcut. On Linux, an X11 session works best.</p>
+            <p data-i18n="faq.a6">
+              Any app with a text cursor: Slack, Telegram, WhatsApp, VS Code, Google Docs, Chrome,
+              Terminal and more. RevFly pastes with the normal ⌘V / Ctrl+V shortcut. On Linux, an
+              X11 session works best.
+            </p>
           </details>
         </div>
       </section>
@@ -754,9 +1135,24 @@
         <p data-i18n="footer.tag">MIT License · Made for people who'd rather talk than type.</p>
         <nav data-i18n-attr="aria-label:footer.label" aria-label="Footer">
           <a href="https://github.com/eotsevych/RevFly" rel="noopener">GitHub</a>
-          <a href="https://github.com/eotsevych/RevFly/blob/main/INSTALL.md" rel="noopener" data-i18n="dl.guide">Install guide</a>
-          <a href="https://github.com/eotsevych/RevFly/releases" rel="noopener" data-i18n="footer.releases">Releases</a>
-          <a href="https://github.com/eotsevych/RevFly/issues" rel="noopener" data-i18n="footer.issue">Report an issue</a>
+          <a
+            href="https://github.com/eotsevych/RevFly/blob/main/INSTALL.md"
+            rel="noopener"
+            data-i18n="dl.guide"
+            >Install guide</a
+          >
+          <a
+            href="https://github.com/eotsevych/RevFly/releases"
+            rel="noopener"
+            data-i18n="footer.releases"
+            >Releases</a
+          >
+          <a
+            href="https://github.com/eotsevych/RevFly/issues"
+            rel="noopener"
+            data-i18n="footer.issue"
+            >Report an issue</a
+          >
         </nav>
       </div>
     </footer>

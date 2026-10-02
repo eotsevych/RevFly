@@ -58,7 +58,12 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
   font-size: 16px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
@@ -819,8 +824,8 @@ summary:focus-visible {
 .features {
   margin-top: 44px;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
 }
 
 .card {
@@ -830,84 +835,10 @@ summary:focus-visible {
   padding: 24px;
 }
 
-.feature-card {
-  padding: 0 24px 26px;
-  overflow: hidden;
-}
-
-.feature-card-wide {
-  grid-column: 1 / -1;
-}
-
-.feature-shot {
-  margin: 0 -24px 20px;
-}
-
-.feature-shot img {
-  display: block;
-  width: 100%;
-  border-bottom: 1px solid var(--border);
-  background: #13131c;
-}
-
-.feature-lead {
+.card p {
   margin: 8px 0 0;
   color: var(--muted);
-  font-size: 0.95rem;
-}
-
-.card ul {
-  margin: 12px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.card li {
-  position: relative;
-  padding-left: 18px;
-  color: var(--muted);
   font-size: 0.92rem;
-  margin-top: 7px;
-}
-
-.card li::before {
-  content: "";
-  position: absolute;
-  left: 2px;
-  top: 0.62em;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--grad);
-}
-
-.before-after {
-  margin-top: 16px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  overflow: hidden;
-  font-size: 0.86rem;
-}
-
-.before-after p {
-  margin: 0;
-  padding: 9px 12px;
-  color: var(--muted);
-}
-
-.before-after p + p {
-  border-top: 1px solid var(--border);
-  color: var(--text);
-  background: color-mix(in srgb, var(--green) 8%, transparent);
-}
-
-.before-after span {
-  display: block;
-  font-family: "JetBrains Mono", monospace;
-  font-size: 0.68rem;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--dim);
 }
 
 /* Privacy */
@@ -1205,17 +1136,6 @@ summary:focus-visible {
 }
 
 /* Pill legend */
-.pill-legend {
-  margin-top: 64px;
-}
-
-.pill-legend h3 {
-  text-align: center;
-  font-size: clamp(1.3rem, 2.4vw, 1.6rem);
-  font-weight: 750;
-  margin-bottom: 10px;
-}
-
 .pill-grid {
   margin-top: 28px;
   display: grid;
