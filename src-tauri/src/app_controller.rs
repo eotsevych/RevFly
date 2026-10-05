@@ -257,10 +257,6 @@ pub(crate) fn apply_pill_window_behavior(win: &tauri::WebviewWindow, order_front
             std::mem::transmute(objc_msgSend as *const ());
         let send_isize: extern "C" fn(*mut c_void, *const c_void, isize) =
             std::mem::transmute(objc_msgSend as *const ());
-        let get_usize: extern "C" fn(*mut c_void, *const c_void) -> usize =
-            std::mem::transmute(objc_msgSend as *const ());
-        let get_isize: extern "C" fn(*mut c_void, *const c_void) -> isize =
-            std::mem::transmute(objc_msgSend as *const ());
 
         if let Ok(ns_win) = win.ns_window() {
             let ptr = ns_win as *mut c_void;
@@ -278,17 +274,6 @@ pub(crate) fn apply_pill_window_behavior(win: &tauri::WebviewWindow, order_front
                 // fullscreen_pill.rs).
                 crate::fullscreen_pill::adopt(win);
             }
-
-            // Diagnostic: confirm the values actually stuck (debugging reports of the pill not
-            // showing over another app's full-screen Space). Remove once that's root-caused.
-            let actual_behavior = get_usize(ptr, sel_registerName(b"collectionBehavior\0".as_ptr()));
-            let actual_level = get_isize(ptr, sel_registerName(b"level\0".as_ptr()));
-            log::info!(
-                "Pill window behavior: collectionBehavior={:#x} (wanted {:#x}), level={} (wanted 1000)",
-                actual_behavior,
-                behavior,
-                actual_level
-            );
         } else {
             log::warn!("Pill window: ns_window() failed, could not apply full-screen collection behavior");
         }
