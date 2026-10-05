@@ -62,6 +62,16 @@ pub fn play_sound(sound: AppSound) {
     });
 }
 
+/// Plays an earcon and blocks until it finishes. Use this before opening the microphone: on some
+/// combo USB/Bluetooth headsets, opening a playback stream and a capture stream on the same device
+/// at nearly the same instant makes the device stall for up to a second, which leaks the chime into
+/// the start of the recording. Playing it to completion first avoids that race.
+pub fn play_sound_blocking(sound: AppSound) {
+    if let Err(e) = play_earcon(earcon(sound)) {
+        log::warn!("Failed to play {:?} sound: {}", sound, e);
+    }
+}
+
 fn play_earcon(clip: &'static Earcon) -> Result<(), String> {
     if clip.samples.is_empty() {
         return Ok(());

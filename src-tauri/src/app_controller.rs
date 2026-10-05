@@ -38,6 +38,7 @@ impl AssistantPhase {
 fn hide_main_window(app_handle: &AppHandle) {
     let app = app_handle.clone();
     let _ = app_handle.run_on_main_thread(move || {
+        crate::fullscreen_pill::release();
         if let Some(win) = app.get_webview_window("main") {
             let _ = win.hide();
         }
@@ -256,7 +257,10 @@ pub(crate) fn apply_pill_window_behavior(win: &tauri::WebviewWindow, order_front
             std::mem::transmute(objc_msgSend as *const ());
         let send_isize: extern "C" fn(*mut c_void, *const c_void, isize) =
             std::mem::transmute(objc_msgSend as *const ());
-        let send: extern "C" fn(*mut c_void, *const c_void) = std::mem::transmute(objc_msgSend as *const ());
+        let get_usize: extern "C" fn(*mut c_void, *const c_void) -> usize =
+            std::mem::transmute(objc_msgSend as *const ());
+        let get_isize: extern "C" fn(*mut c_void, *const c_void) -> isize =
+            std::mem::transmute(objc_msgSend as *const ());
 
         if let Ok(ns_win) = win.ns_window() {
             let ptr = ns_win as *mut c_void;
@@ -269,9 +273,24 @@ pub(crate) fn apply_pill_window_behavior(win: &tauri::WebviewWindow, order_front
             send_isize(ptr, sel_registerName(b"setLevel:\0".as_ptr()), 1000);
 
             if order_front {
-                // Shows on the active Space immediately without activating RevFly
-                send(ptr, sel_registerName(b"orderFrontRegardless\0".as_ptr()));
+                // A native full-screen app's Space never composites this window no matter the
+                // collection behavior above, so the pill is shown from an NSPanel instead (see
+                // fullscreen_pill.rs).
+                crate::fullscreen_pill::adopt(win);
             }
+
+            // Diagnostic: confirm the values actually stuck (debugging reports of the pill not
+            // showing over another app's full-screen Space). Remove once that's root-caused.
+            let actual_behavior = get_usize(ptr, sel_registerName(b"collectionBehavior\0".as_ptr()));
+            let actual_level = get_isize(ptr, sel_registerName(b"level\0".as_ptr()));
+            log::info!(
+                "Pill window behavior: collectionBehavior={:#x} (wanted {:#x}), level={} (wanted 1000)",
+                actual_behavior,
+                behavior,
+                actual_level
+            );
+        } else {
+            log::warn!("Pill window: ns_window() failed, could not apply full-screen collection behavior");
         }
     }
 }
@@ -508,6 +527,7 @@ fn set_pill_window_size(app_handle: &AppHandle, (width, height): (f64, f64)) {
     let _ = app_handle.run_on_main_thread(move || {
         if let Some(win) = app.get_webview_window("main") {
             let _ = win.set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }));
+            crate::fullscreen_pill::sync_frame();
         }
     });
 }
@@ -1250,9 +1270,12 @@ impl AppController {
         // 2. Immediately show the pill window on screen
         show_main_window(&self.app_handle, &settings);
 
-        // 3. Play earcon sound in background thread if enabled
+        // 3. Play the earcon and wait for it to finish before opening the microphone. Some combo
+        // USB/Bluetooth headsets stall for up to a second when playback and capture are opened on
+        // the device at nearly the same instant, which otherwise leaks the chime into the start of
+        // the recording (see sound::play_sound_blocking).
         if settings.sound_effect {
-            crate::sound::play_sound(crate::sound::AppSound::StartRecording);
+            crate::sound::play_sound_blocking(crate::sound::AppSound::StartRecording);
         }
 
         // 4. Start recording on the dedicated audio thread

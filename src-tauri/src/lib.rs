@@ -18,13 +18,14 @@ pub mod vad;
 pub mod parakeet;
 pub mod lab;
 pub mod denoise;
+pub mod fullscreen_pill;
 pub mod leveler;
 pub mod model_download;
 pub mod sound;
 pub mod vitals;
 
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Listener, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 use app_controller::AppController;
@@ -232,6 +233,9 @@ fn save_window_position(state: State<'_, AppState>, x: i32, y: i32) -> Result<()
 
 #[tauri::command]
 fn start_dragging_window(window: tauri::WebviewWindow) -> Result<(), String> {
+    if fullscreen_pill::start_dragging() {
+        return Ok(());
+    }
     window.start_dragging().map_err(|e| e.to_string())
 }
 
@@ -401,6 +405,18 @@ pub fn run() {
 
                 let _ = win.set_shadow(false);
                 app_controller::apply_pill_window_behavior(&win, false);
+            }
+
+            // Return the pill to its own window once it goes idle, if it was moved into the
+            // full-screen panel (see fullscreen_pill.rs).
+            {
+                let app_handle = app.handle().clone();
+                app.listen("assistant-state-changed", move |event| {
+                    if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event.payload()) {
+                        let state = payload.get("state").and_then(|v| v.as_str()).unwrap_or("idle");
+                        fullscreen_pill::on_state_changed(&app_handle, state);
+                    }
+                });
             }
 
             let key_listener = global_key_listener::start_global_key_listener(
