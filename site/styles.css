@@ -665,10 +665,59 @@ summary:focus-visible {
   font-size: 1.05rem;
 }
 
+/* Started with the translate hotkey: teal until it's done */
+.pill[data-run="translate"]:not([data-state="done"]) {
+  --pill-color: #14b8a6;
+}
+
+/* The hero pill keeps one width through every stage, like the app's */
+#demo-pill {
+  width: 330px;
+  max-width: calc(100% - 16px);
+}
+
 .pill-text {
   display: flex;
   flex-direction: column;
   line-height: 1.2;
+  min-width: 0;
+}
+
+.pill-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.pill-badge {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 16px;
+  padding: 0 5px;
+  border-radius: 5px;
+  color: #14b8a6;
+  background: rgba(20, 184, 166, 0.12);
+  border: 1px solid rgba(20, 184, 166, 0.33);
+}
+
+.pill[data-state="done"] .pill-badge {
+  display: none;
+}
+
+.pill-action {
+  margin-left: auto;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.pill-action[hidden] {
+  display: none;
 }
 
 .pill-label {
@@ -680,6 +729,8 @@ summary:focus-visible {
   font-size: 0.76rem;
   color: rgba(255, 255, 255, 0.6);
   font-family: "JetBrains Mono", monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Strip */
@@ -1139,7 +1190,7 @@ summary:focus-visible {
 .pill-grid {
   margin-top: 28px;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
   gap: 14px;
 }
 
@@ -1165,6 +1216,11 @@ summary:focus-visible {
   position: static;
   transform: none;
   animation: none;
+  max-width: 100%;
+}
+
+.pill-static + .pill-static {
+  margin-top: 4px;
 }
 
 .pill-static .pill-icon > * {

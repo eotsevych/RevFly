@@ -24,14 +24,14 @@ const EN = {
   "hero.downloadFor": "Download for {os}",
   "dl.latestTag": "Latest: {tag}",
   "demo.listening": "Listening",
-  "demo.hold": "Press ⌥ to talk",
+  "demo.toEnglish": "Translating to English",
   "demo.transcribing": "Transcribing",
   "demo.onDevice": "Parakeet · on-device",
   "demo.translating": "Translating",
   "demo.direction": "Ukrainian → English",
-  "demo.done": "Done",
-  "demo.pasted": "Pasted",
-  "demo.pastedSlack": "Pasted into Slack",
+  "demo.translated": "Translated",
+  "demo.pastedIn": "Pasted in English",
+  "demo.original": "Paste original",
 };
 
 let lang = document.documentElement.dataset.lang === "uk" ? "uk" : "en";
@@ -188,6 +188,7 @@ document.querySelectorAll("[data-asset]").forEach((link) => (link.href = RELEASE
 const pill = document.getElementById("demo-pill");
 const pillLabel = document.getElementById("pill-label");
 const pillSub = document.getElementById("pill-sub");
+const pillAction = document.getElementById("pill-action");
 const spoken = document.getElementById("demo-spoken");
 const typed = document.getElementById("demo-typed");
 const placeholder = document.getElementById("demo-placeholder");
@@ -203,6 +204,9 @@ function setPill(state, labelKey, subKey) {
   pill.dataset.state = state;
   pillLabel.textContent = t(labelKey);
   pillSub.textContent = t(subKey);
+  // After a translation the app offers the words as spoken.
+  pillAction.hidden = state !== "done";
+  pillAction.textContent = t("demo.original");
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -217,7 +221,7 @@ async function typeText(text) {
 
 function showFinalFrame() {
   spoken.classList.add("is-hidden");
-  setPill("done", "demo.done", "demo.pastedSlack");
+  setPill("done", "demo.translated", "demo.pastedIn");
   placeholder.hidden = true;
   reply.hidden = false;
   replyText.textContent = RESULT;
@@ -229,7 +233,7 @@ async function runDemo() {
     typed.textContent = "";
     placeholder.hidden = false;
     spoken.classList.remove("is-hidden");
-    setPill("listening", "demo.listening", "demo.hold");
+    setPill("listening", "demo.listening", "demo.toEnglish");
     await sleep(2600);
 
     spoken.classList.add("is-hidden");
@@ -239,7 +243,7 @@ async function runDemo() {
     setPill("translating", "demo.translating", "demo.direction");
     await sleep(1300);
 
-    setPill("done", "demo.done", "demo.pasted");
+    setPill("done", "demo.translated", "demo.pastedIn");
     await typeText(RESULT);
     await sleep(700);
 

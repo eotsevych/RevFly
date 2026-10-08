@@ -176,16 +176,20 @@
               <span id="demo-spoken-text">«Можемо показати демо в четвер о третій, гаразд?»</span>
             </div>
 
-            <div class="pill" id="demo-pill" data-state="listening">
+            <div class="pill" id="demo-pill" data-state="listening" data-run="translate">
               <div class="pill-icon">
                 <span class="bars"><i></i><i></i><i></i><i></i><i></i></span>
                 <span class="ring"></span>
                 <span class="check">✓</span>
               </div>
               <div class="pill-text">
-                <span class="pill-label" id="pill-label">Listening</span>
-                <span class="pill-sub" id="pill-sub">Press ⌥ to talk</span>
+                <span class="pill-title"
+                  ><span class="pill-label" id="pill-label">Listening</span
+                  ><span class="pill-badge" id="pill-badge">EN</span></span
+                >
+                <span class="pill-sub" id="pill-sub">Translating to English</span>
               </div>
+              <span class="pill-action" id="pill-action" hidden>Paste original</span>
             </div>
           </div>
         </div>
@@ -354,11 +358,31 @@
                 </div>
                 <div class="pill-text">
                   <span class="pill-label" data-i18n="pill.listening">Listening</span
-                  ><span class="pill-sub">Auto → English</span>
+                  ><span class="pill-sub" data-i18n="pill.listeningSub">In your language</span>
                 </div>
               </div>
               <p data-i18n="pill.listeningT">
-                Bars move with your voice. Press the hotkey again to finish, or Esc to cancel.
+                Bars move with your voice. The launch hotkey keeps what you say in your language.
+                Press it again to finish, or Esc to cancel.
+              </p>
+            </div>
+            <div class="legend-item">
+              <div class="pill pill-static" data-state="listening" data-run="translate">
+                <div class="pill-icon">
+                  <span class="bars"><i></i><i></i><i></i><i></i><i></i></span>
+                </div>
+                <div class="pill-text">
+                  <span class="pill-title"
+                    ><span class="pill-label" data-i18n="pill.listening">Listening</span
+                    ><span class="pill-badge">EN</span></span
+                  ><span class="pill-sub" data-i18n="pill.translateSub"
+                    >Translating to English</span
+                  >
+                </div>
+              </div>
+              <p data-i18n="pill.translateT">
+                Started with the translate hotkey: teal, with the target language, until it's done.
+                Automatic translation shows an outlined <b>AUTO→EN</b> badge instead.
               </p>
             </div>
             <div class="legend-item">
@@ -374,16 +398,16 @@
               </p>
             </div>
             <div class="legend-item">
-              <div class="pill pill-static" data-state="translating">
+              <div class="pill pill-static" data-state="translating" data-run="translate">
                 <div class="pill-icon"><span class="ring"></span></div>
                 <div class="pill-text">
                   <span class="pill-label" data-i18n="pill.translating">Translating</span
-                  ><span class="pill-sub">Auto → English</span>
+                  ><span class="pill-sub" data-i18n="pill.translatingSub">Ukrainian → English</span>
                 </div>
               </div>
               <p data-i18n="pill.translatingT">
-                Only runs when the recognized language isn't already your target. Skipped instantly
-                otherwise.
+                Only when you asked for it: with the translate hotkey, or with Automatic when you
+                speak another language.
               </p>
             </div>
             <div class="legend-item">
@@ -394,7 +418,18 @@
                   ><span class="pill-sub" data-i18n="pill.doneSub">Pasted</span>
                 </div>
               </div>
-              <p data-i18n="pill.doneT">The text is at your cursor and in your history.</p>
+              <div class="pill pill-static" data-state="done">
+                <div class="pill-icon"><span class="check">✓</span></div>
+                <div class="pill-text">
+                  <span class="pill-label" data-i18n="pill.translated">Translated</span
+                  ><span class="pill-sub" data-i18n="pill.translatedSub">Pasted in English</span>
+                </div>
+                <span class="pill-action" data-i18n="pill.original">Paste original</span>
+              </div>
+              <p data-i18n="pill.doneT">
+                The text is at your cursor and in your history. After a translation, Paste original
+                also pastes what you actually said, for a few seconds.
+              </p>
             </div>
             <div class="legend-item">
               <div class="pill pill-static" data-state="warning">
