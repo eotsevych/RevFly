@@ -36,6 +36,9 @@ const IDLE_OPTIONS = [
 
 const DEFAULT_IDLE_SEC = 30;
 
+/** Hotkeys and pasting need the Accessibility permission only on macOS. */
+const IS_MAC = typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
+
 function formatIdle(sec: number): string {
   if (sec < 60) return `${sec} s`;
   const min = sec / 60;
@@ -302,102 +305,104 @@ export default function GeneralTab({ t }: { t: Tokens }) {
 
   return (
     <div>
-      {/* ── System Permissions Section ── */}
-      <Section title="System Permissions" t={t}>
-        <Row
-          label="Accessibility sync"
-          hint="Check or grant macOS accessibility permission for hotkeys and auto-paste"
-          t={t}
-          last
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span
-              style={{
-                fontSize: 11,
-                fontFamily: "JetBrains Mono, monospace",
-                padding: "4px 8px",
-                borderRadius: 6,
-                fontWeight: 600,
-                background:
-                  isAccessibilityGranted === true
-                    ? `${t.successColor}18`
-                    : isAccessibilityGranted === false
-                      ? `${t.warnColor}18`
-                      : t.surface,
-                color:
-                  isAccessibilityGranted === true
-                    ? t.successColor
-                    : isAccessibilityGranted === false
-                      ? t.warnColor
-                      : t.textDim,
-                border: `1px solid ${
-                  isAccessibilityGranted === true
-                    ? `${t.successColor}33`
-                    : isAccessibilityGranted === false
-                      ? `${t.warnColor}33`
-                      : t.border
-                }`,
-              }}
-            >
-              {isAccessibilityGranted === null
-                ? "Checking…"
-                : isAccessibilityGranted
-                  ? "✓ Granted"
-                  : "⚠ Not Granted"}
-            </span>
+      {/* ── System Permissions Section (macOS only: Accessibility permission) ── */}
+      {IS_MAC && (
+        <Section title="System Permissions" t={t}>
+          <Row
+            label="Accessibility sync"
+            hint="Check or grant macOS accessibility permission for hotkeys and auto-paste"
+            t={t}
+            last
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontFamily: "JetBrains Mono, monospace",
+                  padding: "4px 8px",
+                  borderRadius: 6,
+                  fontWeight: 600,
+                  background:
+                    isAccessibilityGranted === true
+                      ? `${t.successColor}18`
+                      : isAccessibilityGranted === false
+                        ? `${t.warnColor}18`
+                        : t.surface,
+                  color:
+                    isAccessibilityGranted === true
+                      ? t.successColor
+                      : isAccessibilityGranted === false
+                        ? t.warnColor
+                        : t.textDim,
+                  border: `1px solid ${
+                    isAccessibilityGranted === true
+                      ? `${t.successColor}33`
+                      : isAccessibilityGranted === false
+                        ? `${t.warnColor}33`
+                        : t.border
+                  }`,
+                }}
+              >
+                {isAccessibilityGranted === null
+                  ? "Checking…"
+                  : isAccessibilityGranted
+                    ? "✓ Granted"
+                    : "⚠ Not Granted"}
+              </span>
 
-            {isAccessibilityGranted === false && (
+              {isAccessibilityGranted === false && (
+                <button
+                  type="button"
+                  onClick={() => requestAccessibility()}
+                  style={{
+                    padding: "5px 10px",
+                    borderRadius: 6,
+                    border: `1px solid ${t.warnColor}`,
+                    background: `${t.warnColor}20`,
+                    color: t.warnColor,
+                    fontSize: 11,
+                    cursor: "pointer",
+                    fontWeight: 500,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Grant Access
+                </button>
+              )}
+
               <button
                 type="button"
-                onClick={() => requestAccessibility()}
+                onClick={syncAccessibility}
+                title="Sync accessibility status"
+                disabled={isCheckingAccessibility}
                 style={{
                   padding: "5px 10px",
                   borderRadius: 6,
-                  border: `1px solid ${t.warnColor}`,
-                  background: `${t.warnColor}20`,
-                  color: t.warnColor,
+                  border: `1px solid ${t.border}`,
+                  background: t.surface,
+                  color: t.textMuted,
                   fontSize: 11,
                   cursor: "pointer",
-                  fontWeight: 500,
-                  whiteSpace: "nowrap",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
                 }}
               >
-                Grant Access
+                <span
+                  style={{
+                    display: "inline-block",
+                    transform: isCheckingAccessibility ? "rotate(180deg)" : "none",
+                    transition: "transform 0.4s",
+                  }}
+                >
+                  ↻
+                </span>
+                <span>Sync</span>
               </button>
-            )}
-
-            <button
-              type="button"
-              onClick={syncAccessibility}
-              title="Sync accessibility status"
-              disabled={isCheckingAccessibility}
-              style={{
-                padding: "5px 10px",
-                borderRadius: 6,
-                border: `1px solid ${t.border}`,
-                background: t.surface,
-                color: t.textMuted,
-                fontSize: 11,
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: 4,
-              }}
-            >
-              <span
-                style={{
-                  display: "inline-block",
-                  transform: isCheckingAccessibility ? "rotate(180deg)" : "none",
-                  transition: "transform 0.4s",
-                }}
-              >
-                ↻
-              </span>
-              <span>Sync</span>
-            </button>
-          </div>
-        </Row>
-      </Section>
+            </div>
+          </Row>
+        </Section>
+      )}
 
       <UpdatesSection t={t} />
 
