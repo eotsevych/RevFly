@@ -1,6 +1,6 @@
 # Plan: Separate translation hotkey and retry in Audio Lab
 
-Status: proposed (2026-10-05)
+Status: part 1 (translation hotkey) implemented 2026-10-05; parts 2–3 proposed
 
 ## Background: what "Retry Last Translation" does today
 
@@ -100,4 +100,9 @@ experiments on saved recordings but has no translation step and no link to faile
 
 - Should the translate hotkey let the user pick the target language per press (e.g. hold Shift)?
   Not for now.
-- Windows/Linux: confirm the global-shortcut fallback can register two modifier-only keys.
+- ~~Windows/Linux: confirm the global-shortcut fallback can register two modifier-only keys.~~
+  Checked: Windows and Linux don't support modifier-only hotkeys at all (the listener there is a
+  stub, and the recorder only offers modifier keys on Mac). Both hotkeys are key combos registered
+  with tauri-plugin-global-shortcut, which handles several at once.
+- `skip_languages` is stored but never read by the pipeline. Translation depends only on the
+  detected, source and target languages, so the translate hotkey reuses that logic unchanged.

@@ -9,6 +9,13 @@ pub struct AppSettings {
     pub target_lang: String,
     pub skip_languages: String,
     pub hotkey: String,
+    /// Second hotkey that records and always translates to `target_lang`. Empty = off.
+    #[serde(default)]
+    pub translate_hotkey: String,
+    /// Whether the main hotkey still translates automatically once `translate_hotkey` is set.
+    /// Ignored while `translate_hotkey` is empty (the main hotkey then always translates as before).
+    #[serde(default = "default_true")]
+    pub auto_translate: bool,
     pub sound_effect: bool,
     pub auto_paste: bool,
     /// Shows how to finish a recording on the pill while listening.
@@ -26,6 +33,10 @@ pub struct AppSettings {
     pub theme: String, // "system" | "light" | "dark"
     #[serde(default = "default_idle_unload_sec")]
     pub model_idle_unload_sec: u64, // 0 = never, 30..3600 seconds
+    /// When the speech model is loaded for a recording: "on_start" (while you talk, so it's ready
+    /// the moment you stop) or "on_stop" (after you stop, alongside VAD; saves RAM while recording).
+    #[serde(default = "default_model_load_mode")]
+    pub model_load_mode: String,
     #[serde(default)]
     pub window_x: Option<i32>,
     #[serde(default)]
@@ -167,6 +178,10 @@ fn default_idle_unload_sec() -> u64 {
     30
 }
 
+fn default_model_load_mode() -> String {
+    "on_start".to_string()
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -178,6 +193,8 @@ impl Default for AppSettings {
             hotkey: "RightOption".to_string(),
             #[cfg(not(target_os = "macos"))]
             hotkey: "Control+Shift+Space".to_string(),
+            translate_hotkey: String::new(),
+            auto_translate: true,
             sound_effect: true,
             auto_paste: true,
             show_hints: true,
@@ -189,6 +206,7 @@ impl Default for AppSettings {
             output_device: None,
             theme: "system".to_string(),
             model_idle_unload_sec: default_idle_unload_sec(),
+            model_load_mode: default_model_load_mode(),
             window_x: None,
             window_y: None,
             text_normalization: true,

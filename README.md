@@ -29,6 +29,7 @@ No cloud audio upload. No browser required. Just tap your hotkey and speak.
 - **Single-Tap Modifier Keys**: Use `Right Option` (⌥) or `Right Control` (⌃) directly on macOS.
 - **Key Combos Everywhere**: Use any shortcut such as `Ctrl+Shift+Space` on Windows and Linux.
 - **Press to Start, Press to Finish**: Press the hotkey once to begin recording, press it again to stop and paste. The pill shows a reminder while you record; turn it off in **Settings** → **General** → **Show hints**.
+- **Separate Translate Hotkey**: Optionally set a second hotkey in **Settings** → **General** → **Translate hotkey**. It records and translates to your target language, while the launch hotkey only transcribes (or keeps translating too, if you turn **Launch hotkey also translates** on).
 - **Global Cancel**: Tap `Escape` at any time to instantly stop recording or cancel translation.
 - **Micro-Sounds**: Subtly chimes on recording start and completion.
 

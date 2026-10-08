@@ -5,6 +5,7 @@ pub mod custom_models;
 pub mod global_key_listener;
 pub mod history;
 pub mod paste;
+pub mod perf;
 pub mod pipeline_logger;
 pub mod settings;
 pub mod text_normalizer;
@@ -28,7 +29,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Listener, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
-use app_controller::AppController;
+use app_controller::{AppController, RecordingMode};
 use history::HistoryRecord;
 use settings::AppSettings;
 
@@ -71,21 +72,56 @@ fn save_settings(
     let old_settings = state.controller.get_settings();
     state.controller.save_settings(new_settings.clone())?;
 
-    // Update global hotkey if changed
-    if old_settings.hotkey != new_settings.hotkey {
-        state.key_listener.update_hotkey(&new_settings.hotkey);
-        let _ = app_handle.global_shortcut().unregister_all();
-        if let Ok(shortcut) = new_settings.hotkey.parse::<Shortcut>() {
-            let _ = app_handle.global_shortcut().register(shortcut);
-        }
-        if global_key_listener::hotkey_str_to_modifier_keycode(&new_settings.hotkey).is_some() {
-            if !global_key_listener::is_accessibility_trusted() {
-                global_key_listener::request_accessibility_prompt();
-            }
-        }
+    // Update global hotkeys if changed
+    if old_settings.hotkey != new_settings.hotkey || old_settings.translate_hotkey != new_settings.translate_hotkey {
+        state.key_listener.update_hotkeys(&new_settings.hotkey, &new_settings.translate_hotkey);
+        register_global_shortcuts(&app_handle, &new_settings);
+        prompt_accessibility_for_modifier_hotkeys(&new_settings);
     }
 
     Ok(())
+}
+
+/// (Re)registers the key-combo hotkeys (e.g. `Control+Shift+Space`) with the global-shortcut
+/// plugin. Modifier-only hotkeys (e.g. `RightOption`) don't parse as shortcuts; on macOS the event
+/// tap in global_key_listener.rs handles those.
+pub(crate) fn register_global_shortcuts(app_handle: &AppHandle, settings: &AppSettings) {
+    let gs = app_handle.global_shortcut();
+    let _ = gs.unregister_all();
+    let main = settings.hotkey.parse::<Shortcut>().ok();
+    if let Some(shortcut) = main {
+        if let Err(e) = gs.register(shortcut) {
+            log::warn!("Could not register hotkey {}: {}", settings.hotkey, e);
+        }
+    }
+    if let Ok(shortcut) = settings.translate_hotkey.parse::<Shortcut>() {
+        if Some(shortcut) == main {
+            log::warn!("Translate hotkey is the same as the main hotkey; ignoring it");
+        } else if let Err(e) = gs.register(shortcut) {
+            log::warn!("Could not register translate hotkey {}: {}", settings.translate_hotkey, e);
+        }
+    }
+}
+
+/// Which recording a pressed key-combo shortcut starts: the translate one if it matches
+/// `translate_hotkey`, otherwise the main one.
+fn shortcut_mode(shortcut: &Shortcut, settings: &AppSettings) -> RecordingMode {
+    let is_translate = settings.translate_hotkey.parse::<Shortcut>().map(|t| &t == shortcut).unwrap_or(false);
+    let is_main = settings.hotkey.parse::<Shortcut>().map(|m| &m == shortcut).unwrap_or(false);
+    if is_translate && !is_main {
+        RecordingMode::Translate
+    } else {
+        RecordingMode::Main
+    }
+}
+
+fn prompt_accessibility_for_modifier_hotkeys(settings: &AppSettings) {
+    let uses_modifier = [&settings.hotkey, &settings.translate_hotkey]
+        .iter()
+        .any(|h| global_key_listener::hotkey_str_to_modifier_keycode(h).is_some());
+    if uses_modifier && !global_key_listener::is_accessibility_trusted() {
+        global_key_listener::request_accessibility_prompt();
+    }
 }
 
 #[tauri::command]
@@ -349,12 +385,17 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
+                .with_handler(|app, shortcut, event| {
                     if event.state() == ShortcutState::Pressed {
                         if let Some(state) = app.try_state::<AppState>() {
                             let controller = Arc::clone(&state.controller);
+                            let mode = shortcut_mode(shortcut, &controller.get_settings());
+                            let trigger = match mode {
+                                RecordingMode::Main => "keyboard shortcut",
+                                RecordingMode::Translate => "translate keyboard shortcut",
+                            };
                             tauri::async_runtime::spawn(async move {
-                                let _ = controller.toggle_recording("keyboard shortcut");
+                                let _ = controller.toggle_recording_as(trigger, mode);
                             });
                         }
                     }
@@ -366,6 +407,7 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             sound::preload();
+            perf::init();
 
             let hw = cpu_features::detect_hardware_profile();
             log::info!("Hardware profile detected: {}", hw.summary);
@@ -422,24 +464,18 @@ pub fn run() {
             let key_listener = global_key_listener::start_global_key_listener(
                 Arc::clone(&controller),
                 &hotkey_str,
+                &settings.translate_hotkey,
                 app.handle().clone(),
             );
 
-            if global_key_listener::hotkey_str_to_modifier_keycode(&hotkey_str).is_some() {
-                if !global_key_listener::is_accessibility_trusted() {
-                    global_key_listener::request_accessibility_prompt();
-                }
-            }
+            prompt_accessibility_for_modifier_hotkeys(&settings);
 
             app.manage(AppState {
                 controller,
                 key_listener,
             });
 
-            // Register global shortcut
-            if let Ok(shortcut) = hotkey_str.parse::<Shortcut>() {
-                let _ = app.global_shortcut().register(shortcut);
-            }
+            register_global_shortcuts(app.handle(), &settings);
 
             Ok(())
         })

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use sysinfo::System;
+use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemVitals {
@@ -14,6 +14,17 @@ pub struct SystemVitals {
     pub free_memory_mb: u64,
     pub available_memory_mb: u64,
     pub process_rss_mb: u64,
+}
+
+/// This process's resident memory in MB, refreshing only this process (cheap enough to call
+/// around a model load).
+pub fn process_rss_mb() -> u64 {
+    let Ok(pid) = sysinfo::get_current_pid() else {
+        return 0;
+    };
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), false, ProcessRefreshKind::nothing().with_memory());
+    sys.process(pid).map(|p| p.memory() / (1024 * 1024)).unwrap_or(0)
 }
 
 impl SystemVitals {

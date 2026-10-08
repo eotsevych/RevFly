@@ -18,6 +18,15 @@ pub fn hotkey_str_to_modifier_keycode(s: &str) -> Option<u16> {
     }
 }
 
+/// Modifier keycodes for the main and translate hotkeys (0 = not a modifier-only key). The
+/// translate hotkey is dropped when it's the same key as the main one.
+#[allow(dead_code)]
+fn modifier_keycodes(hotkey: &str, translate_hotkey: &str) -> (u16, u16) {
+    let main = hotkey_str_to_modifier_keycode(hotkey).unwrap_or(0);
+    let translate = hotkey_str_to_modifier_keycode(translate_hotkey).unwrap_or(0);
+    (main, if translate == main { 0 } else { translate })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -34,12 +43,20 @@ mod tests {
         assert_eq!(hotkey_str_to_modifier_keycode("LeftControl"), Some(59));
         assert_eq!(hotkey_str_to_modifier_keycode("CommandOrControl+Shift+Space"), None);
     }
+
+    #[test]
+    fn test_modifier_keycodes() {
+        assert_eq!(modifier_keycodes("RightOption", "RightControl"), (61, 62));
+        assert_eq!(modifier_keycodes("RightOption", ""), (61, 0));
+        assert_eq!(modifier_keycodes("RightOption", "AltRight"), (61, 0));
+        assert_eq!(modifier_keycodes("Control+Shift+Space", "RightCommand"), (0, 54));
+    }
 }
 
 #[cfg(target_os = "macos")]
 pub mod macos {
     use super::*;
-    use crate::app_controller::AppController;
+    use crate::app_controller::{AppController, RecordingMode};
     use std::ffi::c_void;
     use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
     use std::sync::{Arc, Mutex};
@@ -175,6 +192,9 @@ pub mod macos {
     struct KeyListenerState {
         controller: Arc<AppController>,
         target_keycode: Arc<AtomicU16>,
+        translate_keycode: Arc<AtomicU16>,
+        /// The hotkey currently held down (0 = none), so only its release ends hold-to-talk.
+        down_keycode: AtomicU16,
         tap_port: Mutex<Option<CFMachPortRef>>,
         last_down_time: Mutex<Option<Instant>>,
         is_key_down: AtomicBool,
@@ -185,7 +205,7 @@ pub mod macos {
     unsafe impl Sync for KeyListenerState {}
 
     impl KeyListenerState {
-        fn handle_modifier_down(&self) {
+        fn handle_modifier_down(&self, keycode: u16, mode: RecordingMode) {
             let was_down = self.is_key_down.swap(true, Ordering::SeqCst);
             if was_down {
                 // If the key was held for longer than 2 seconds, it was stuck by sleep or a missed release event.
@@ -202,18 +222,28 @@ pub mod macos {
                 let mut down_time = self.last_down_time.lock().unwrap();
                 *down_time = Some(Instant::now());
             }
+            self.down_keycode.store(keycode, Ordering::SeqCst);
 
+            let trigger = match mode {
+                RecordingMode::Main => "hotkey press",
+                RecordingMode::Translate => "translate hotkey press",
+            };
             let controller = Arc::clone(&self.controller);
             tauri::async_runtime::spawn(async move {
-                let _ = controller.toggle_recording("hotkey press");
+                let _ = controller.toggle_recording_as(trigger, mode);
             });
         }
 
-        fn handle_modifier_up(&self) {
+        fn handle_modifier_up(&self, keycode: u16) {
+            // Releasing the other hotkey while one is held doesn't end anything.
+            if self.down_keycode.load(Ordering::SeqCst) != keycode {
+                return;
+            }
             let was_down = self.is_key_down.swap(false, Ordering::SeqCst);
             if !was_down {
                 return;
             }
+            self.down_keycode.store(0, Ordering::SeqCst);
 
             let elapsed = {
                 let mut down_time = self.last_down_time.lock().unwrap();
@@ -269,7 +299,15 @@ pub mod macos {
             }
         } else if event_type == kCGEventFlagsChanged {
             let target = state.target_keycode.load(Ordering::SeqCst);
-            if target != 0 && keycode == target {
+            let translate = state.translate_keycode.load(Ordering::SeqCst);
+            let mode = if target != 0 && keycode == target {
+                Some(RecordingMode::Main)
+            } else if translate != 0 && keycode == translate {
+                Some(RecordingMode::Translate)
+            } else {
+                None
+            };
+            if let Some(mode) = mode {
                 let flags = CGEventGetFlags(event);
                 let is_down = match keycode {
                     61 | 58 => (flags & kCGEventFlagMaskAlternate) != 0,
@@ -282,9 +320,9 @@ pub mod macos {
                 log::info!("Global modifier keycode {} changed: is_down={}", keycode, is_down);
 
                 if is_down {
-                    state.handle_modifier_down();
+                    state.handle_modifier_down(keycode, mode);
                 } else {
-                    state.handle_modifier_up();
+                    state.handle_modifier_up(keycode);
                 }
             }
         }
@@ -294,32 +332,37 @@ pub mod macos {
 
     pub struct GlobalKeyListenerHandle {
         pub target_keycode: Arc<AtomicU16>,
+        pub translate_keycode: Arc<AtomicU16>,
     }
 
     impl GlobalKeyListenerHandle {
-        pub fn update_hotkey(&self, hotkey_str: &str) {
-            let code = hotkey_str_to_modifier_keycode(hotkey_str).unwrap_or(0);
+        pub fn update_hotkeys(&self, hotkey_str: &str, translate_hotkey_str: &str) {
+            let (code, translate_code) = modifier_keycodes(hotkey_str, translate_hotkey_str);
             self.target_keycode.store(code, Ordering::SeqCst);
-            log::info!("Updated global modifier keycode target to {}", code);
+            self.translate_keycode.store(translate_code, Ordering::SeqCst);
+            log::info!("Updated global modifier keycodes: main {}, translate {}", code, translate_code);
         }
     }
 
     pub fn start_global_key_listener(
         controller: Arc<AppController>,
         initial_hotkey: &str,
+        initial_translate_hotkey: &str,
         app_handle: tauri::AppHandle,
     ) -> Arc<GlobalKeyListenerHandle> {
-        use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
-
-        let target_code = hotkey_str_to_modifier_keycode(initial_hotkey).unwrap_or(0);
+        let (target_code, translate_code) = modifier_keycodes(initial_hotkey, initial_translate_hotkey);
         let target_keycode = Arc::new(AtomicU16::new(target_code));
+        let translate_keycode = Arc::new(AtomicU16::new(translate_code));
         let handle = Arc::new(GlobalKeyListenerHandle {
             target_keycode: Arc::clone(&target_keycode),
+            translate_keycode: Arc::clone(&translate_keycode),
         });
 
         let state = Arc::new(KeyListenerState {
             controller,
             target_keycode: Arc::clone(&target_keycode),
+            translate_keycode: Arc::clone(&translate_keycode),
+            down_keycode: AtomicU16::new(0),
             tap_port: Mutex::new(None),
             last_down_time: Mutex::new(None),
             is_key_down: AtomicBool::new(false),
@@ -434,17 +477,14 @@ pub mod macos {
                         );
                         // Reset key down state
                         state_watchdog.is_key_down.store(false, Ordering::SeqCst);
+                        state_watchdog.down_keycode.store(0, Ordering::SeqCst);
                         if let Ok(mut dt) = state_watchdog.last_down_time.lock() {
                             *dt = None;
                         }
 
-                        // Re-register global shortcut for Carbon (tauri plugin)
+                        // Re-register global shortcuts for Carbon (tauri plugin)
                         let settings = state_watchdog.controller.get_settings();
-                        let hotkey_str = settings.hotkey.clone();
-                        if let Ok(shortcut) = hotkey_str.parse::<Shortcut>() {
-                            let _ = app_handle.global_shortcut().unregister_all();
-                            let _ = app_handle.global_shortcut().register(shortcut);
-                        }
+                        crate::register_global_shortcuts(&app_handle, &settings);
                     }
 
                     // Check CGEventTap validity and state
@@ -490,17 +530,20 @@ pub mod non_macos {
 
     pub fn request_accessibility_prompt() {}
 
+    /// Windows and Linux have no modifier-only hotkeys; both hotkeys are key combos registered
+    /// through tauri-plugin-global-shortcut (see `register_global_shortcuts`).
     pub struct GlobalKeyListenerHandle {
         pub target_keycode: Arc<AtomicU16>,
     }
 
     impl GlobalKeyListenerHandle {
-        pub fn update_hotkey(&self, _hotkey_str: &str) {}
+        pub fn update_hotkeys(&self, _hotkey_str: &str, _translate_hotkey_str: &str) {}
     }
 
     pub fn start_global_key_listener(
         _controller: Arc<AppController>,
         _initial_hotkey: &str,
+        _initial_translate_hotkey: &str,
         _app_handle: tauri::AppHandle,
     ) -> Arc<GlobalKeyListenerHandle> {
         Arc::new(GlobalKeyListenerHandle {

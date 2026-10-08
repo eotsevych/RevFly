@@ -11,6 +11,10 @@ export interface BackendSettings {
   target_lang: string;
   skip_languages: string;
   hotkey: string;
+  /** Second hotkey that records and always translates. Empty = off. */
+  translate_hotkey?: string;
+  /** Whether the main hotkey still translates once a translate hotkey is set. */
+  auto_translate?: boolean;
   sound_effect: boolean;
   auto_paste: boolean;
   show_hints?: boolean;
@@ -22,6 +26,8 @@ export interface BackendSettings {
   output_device?: string | null;
   theme?: string;
   model_idle_unload_sec?: number;
+  /** When the speech model loads for a recording: while talking (faster) or after (saves RAM). */
+  model_load_mode?: "on_start" | "on_stop";
   window_x?: number | null;
   window_y?: number | null;
   text_normalization?: boolean;
@@ -129,6 +135,9 @@ export interface AssistantStateEvent {
   warning?: boolean;
   /** While listening: the mic is being reopened, or reopening didn't bring sound back. */
   mic?: "reconnecting" | "down";
+  /** While listening, once a translate hotkey is set: which hotkey started the recording.
+   * "transcribe" = main hotkey, transcription only; "auto" = main hotkey, translates as before. */
+  mode?: "translate" | "transcribe" | "auto" | null;
 }
 
 export async function fetchSettings(): Promise<BackendSettings | null> {

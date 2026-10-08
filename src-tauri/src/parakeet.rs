@@ -185,11 +185,23 @@ impl ParakeetTranscriber {
             .to_str()
             .ok_or_else(|| "Bad model path".to_string())?;
 
+        let rss_before = crate::vitals::process_rss_mb();
+        let started = Instant::now();
         let parakeet = parakeet_rs::ParakeetTDT::from_pretrained(dir_str, None)
             .map_err(|e| format!("Failed to load Parakeet: {:?}", e))?;
 
         self.model = Some(parakeet);
         self.current_dir = dir_str.to_string();
+        crate::pipeline_logger::log_stage_event(
+            &get_data_dir(),
+            "MODEL_LOAD",
+            &format!(
+                "Loaded Parakeet TDT in {} ms; app memory {} → {} MB",
+                started.elapsed().as_millis(),
+                rss_before,
+                crate::vitals::process_rss_mb()
+            ),
+        );
         Ok(())
     }
 

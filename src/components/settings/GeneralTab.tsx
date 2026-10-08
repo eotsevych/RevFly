@@ -70,6 +70,11 @@ const SOURCE_LANGUAGES = [
   { value: "Russian", label: "Russian (русский)" },
 ];
 
+const MODEL_LOAD_OPTIONS: { value: "on_start" | "on_stop"; label: string }[] = [
+  { value: "on_start", label: "Faster" },
+  { value: "on_stop", label: "Save memory" },
+];
+
 export default function GeneralTab({ t }: { t: Tokens }) {
   const {
     settings,
@@ -83,6 +88,9 @@ export default function GeneralTab({ t }: { t: Tokens }) {
   } = useSettingsContext();
 
   const [isTestingMic, setIsTestingMic] = useState(false);
+  const [translateHotkeyConflict, setTranslateHotkeyConflict] = useState(false);
+  const translateHotkey = settings.translate_hotkey ?? "";
+  const autoTranslate = settings.auto_translate ?? true;
   const [micLevel, setMicLevel] = useState(0);
   const [micPeak, setMicPeak] = useState(0);
   const [noiseFloor, setNoiseFloor] = useState(0);
@@ -385,13 +393,70 @@ export default function GeneralTab({ t }: { t: Tokens }) {
 
       {/* ── Input Section ── */}
       <Section title="Input" t={t}>
-        <Row label="Launch hotkey" hint="Global shortcut to start recording" t={t}>
+        <Row
+          label="Launch hotkey"
+          hint={
+            translateHotkey && !autoTranslate
+              ? "Global shortcut to record and transcribe (no translation)"
+              : "Global shortcut to start recording"
+          }
+          t={t}
+        >
           <HotkeyRecorder
             value={settings.hotkey}
-            onChange={(v) => updateSettings({ hotkey: v })}
+            onChange={(v) => {
+              // A translate hotkey on the same key would never fire; turn it off.
+              updateSettings(
+                v && v === translateHotkey ? { hotkey: v, translate_hotkey: "" } : { hotkey: v },
+              );
+            }}
             t={t}
           />
         </Row>
+
+        <Row
+          label="Translate hotkey"
+          hint={
+            translateHotkeyConflict
+              ? "That's already the launch hotkey — pick a different key"
+              : `Records and translates to ${settings.target_lang || "the target language"}. Off by default`
+          }
+          t={t}
+        >
+          <HotkeyRecorder
+            value={translateHotkey}
+            clearable
+            onChange={(v) => {
+              if (v && v === settings.hotkey) {
+                setTranslateHotkeyConflict(true);
+                return;
+              }
+              setTranslateHotkeyConflict(false);
+              // First time a translate hotkey is set, split the keys: the launch hotkey becomes
+              // transcription-only. The toggle below turns auto-translation back on.
+              updateSettings(
+                !translateHotkey && v
+                  ? { translate_hotkey: v, auto_translate: false }
+                  : { translate_hotkey: v },
+              );
+            }}
+            t={t}
+          />
+        </Row>
+
+        {translateHotkey && (
+          <Row
+            label="Launch hotkey also translates"
+            hint="Off: the launch hotkey only transcribes"
+            t={t}
+          >
+            <Toggle
+              value={autoTranslate}
+              onChange={(v) => updateSettings({ auto_translate: v })}
+              accent={t.accent}
+            />
+          </Row>
+        )}
 
         <Row label="Microphone input" hint="Audio capture device" t={t}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -572,11 +637,29 @@ export default function GeneralTab({ t }: { t: Tokens }) {
           />
         </Row>
 
-        <Row label="Idle timeout" hint={idleTimeoutHint(idleSec)} t={t} last>
+        <Row label="Idle timeout" hint={idleTimeoutHint(idleSec)} t={t}>
           <Segmented
             options={idleOptionsFor(idleSec)}
             value={String(idleSec)}
             onChange={(v) => updateSettings({ model_idle_unload_sec: Number(v) })}
+            t={t}
+          />
+        </Row>
+
+        <Row
+          label="Load speech model"
+          hint={
+            (settings.model_load_mode ?? "on_start") === "on_stop"
+              ? "After you stop talking: saves memory while you record, adds about a second to each transcription"
+              : "As soon as you start talking, so it's ready the moment you stop"
+          }
+          t={t}
+          last
+        >
+          <Segmented
+            options={MODEL_LOAD_OPTIONS}
+            value={settings.model_load_mode ?? "on_start"}
+            onChange={(v) => updateSettings({ model_load_mode: v })}
             t={t}
           />
         </Row>

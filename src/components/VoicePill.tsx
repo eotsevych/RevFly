@@ -165,15 +165,21 @@ export function VoicePill() {
     targetLang.toLowerCase() === "none";
 
   const meta = STATE_META[state.state];
+  // Once a translate hotkey is set, the backend says which hotkey started this recording.
+  const isTranslateMode = state.mode === "translate";
+  const isTranscribeOnly = state.mode === "transcribe";
+  const startedWith = isTranslateMode ? settings?.translate_hotkey : settings?.hotkey;
+  const modeSuffix = isTranslateMode ? ` · → ${targetLang}` : "";
   const finishHint =
-    state.state === "listening" && settings?.show_hints !== false && settings?.hotkey
-      ? `Press ${formatDisplay(settings.hotkey).replace(/ \(.*\)/, "")} to finish`
+    state.state === "listening" && settings?.show_hints !== false && startedWith
+      ? `Press ${formatDisplay(startedWith).replace(/ \(.*\)/, "")} to finish${modeSuffix}`
       : null;
   const dynamicSublabel =
     state.subtitle ||
     finishHint ||
+    (state.state === "listening" && isTranslateMode ? `Translating to ${targetLang}` : null) ||
     (state.state === "listening"
-      ? isNoTranslation
+      ? isNoTranslation || isTranscribeOnly
         ? "Voice to Text"
         : meta.sublabel
       : state.state === "transcribing"

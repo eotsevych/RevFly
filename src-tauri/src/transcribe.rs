@@ -338,11 +338,25 @@ impl Transcriber {
         let mut cparams = WhisperContextParameters::default();
         cparams.use_gpu(Self::is_metal_supported());
 
+        let rss_before = crate::vitals::process_rss_mb();
+        let started = Instant::now();
         let ctx = WhisperContext::new_with_params(path_str, cparams)
             .map_err(|e| format!("Failed to load Whisper model: {:?}", e))?;
 
         self.context = Some(ctx);
         self.current_model = path_str.to_string();
+        let name = model_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        crate::pipeline_logger::log_stage_event(
+            &get_data_dir(),
+            "MODEL_LOAD",
+            &format!(
+                "Loaded Whisper {} in {} ms; app memory {} → {} MB",
+                name,
+                started.elapsed().as_millis(),
+                rss_before,
+                crate::vitals::process_rss_mb()
+            ),
+        );
         Ok(())
     }
 

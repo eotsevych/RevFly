@@ -6,13 +6,15 @@ interface HotkeyRecorderProps {
   value: string;
   onChange: (tauriHotkey: string) => void;
   t: Tokens;
+  /** Shows an "Off" button that clears the hotkey (for optional hotkeys). */
+  clearable?: boolean;
 }
 
 // Single-modifier hotkeys (e.g. Right Option) rely on the macOS event tap; other platforms only support key combos.
 const IS_MAC = typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
 const COMBO_PRESET = "CommandOrControl+Shift+Space";
 
-export default function HotkeyRecorder({ value, onChange, t }: HotkeyRecorderProps) {
+export default function HotkeyRecorder({ value, onChange, t, clearable }: HotkeyRecorderProps) {
   const [recording, setRecording] = useState(false);
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -68,7 +70,9 @@ export default function HotkeyRecorder({ value, onChange, t }: HotkeyRecorderPro
         onKeyDown={handleKeyDown}
         onClick={() => {
           setRecording(true);
-          onChange("");
+          // An optional hotkey keeps its value until a new key is pressed, so clicking away
+          // doesn't silently turn it off.
+          if (!clearable) onChange("");
         }}
         tabIndex={0}
         className={recording ? "recording-hotkey" : ""}
@@ -149,6 +153,27 @@ export default function HotkeyRecorder({ value, onChange, t }: HotkeyRecorderPro
         >
           {IS_MAC ? "⌘+⇧+Space" : "Ctrl+⇧+Space"}
         </button>
+        {clearable && (
+          <button
+            type="button"
+            onClick={() => {
+              setRecording(false);
+              onChange("");
+            }}
+            style={{
+              padding: "5px 9px",
+              borderRadius: 6,
+              background: !value ? `${t.accent}22` : t.surface,
+              border: `1px solid ${!value ? t.accent : t.border}`,
+              color: !value ? t.accent : t.textMuted,
+              fontSize: 11,
+              cursor: "pointer",
+              fontWeight: !value ? 600 : 400,
+            }}
+          >
+            Off
+          </button>
+        )}
       </div>
     </div>
   );

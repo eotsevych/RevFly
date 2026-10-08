@@ -403,6 +403,37 @@ pub fn report_mic_recovered(app_handle: &AppHandle, switched_to: Option<String>)
     }
 }
 
+/// Which hotkey started the recording, which decides whether it gets translated.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecordingMode {
+    /// The main hotkey (or the app/tray): translates automatically unless a translate hotkey is set
+    /// and `auto_translate` is off, in which case it only transcribes.
+    Main,
+    /// The translate hotkey: always translates to the target language (when it isn't already in it).
+    Translate,
+}
+
+impl RecordingMode {
+    /// True when this recording must not be translated.
+    fn transcribe_only(self, settings: &AppSettings) -> bool {
+        self == RecordingMode::Main && !settings.translate_hotkey.trim().is_empty() && !settings.auto_translate
+    }
+
+    /// The pill's `mode` while listening, so it can show the right finish key and target. None
+    /// while no translate hotkey is set (nothing to tell apart).
+    fn pill_mode(self, settings: &AppSettings) -> Option<&'static str> {
+        if settings.translate_hotkey.trim().is_empty() {
+            None
+        } else if self == RecordingMode::Translate {
+            Some("translate")
+        } else if self.transcribe_only(settings) {
+            Some("transcribe")
+        } else {
+            Some("auto")
+        }
+    }
+}
+
 /// When and how the current recording started.
 pub(crate) struct RecordingStart {
     at: Instant,
@@ -712,6 +743,8 @@ pub struct AppController {
     pending_retry: Arc<Mutex<Option<PendingRetry>>>,
     /// When and how the current recording started, for the start/stop log.
     recording_start: Arc<Mutex<Option<RecordingStart>>>,
+    /// Set when a recording starts; read when it's processed.
+    recording_mode: Arc<Mutex<RecordingMode>>,
 }
 
 impl AppController {
@@ -763,6 +796,7 @@ impl AppController {
                         t.elapsed().as_secs()
                     };
                     if elapsed >= idle_limit_sec {
+                        let rss_before = crate::vitals::process_rss_mb();
                         let mut tr_unloaded = false;
                         let mut pk_unloaded = false;
                         {
@@ -785,8 +819,11 @@ impl AppController {
                                 &data_dir_idle,
                                 "IDLE_CLEANUP",
                                 &format!(
-                                    "Freed speech model from RAM after {}s idle (limit: {}s)",
-                                    elapsed, idle_limit_sec
+                                    "Freed speech model from RAM after {}s idle (limit: {}s); app memory {} → {} MB",
+                                    elapsed,
+                                    idle_limit_sec,
+                                    rss_before,
+                                    crate::vitals::process_rss_mb()
                                 ),
                             );
                         }
@@ -808,6 +845,7 @@ impl AppController {
             session_id,
             pending_retry: Arc::new(Mutex::new(None)),
             recording_start: Arc::new(Mutex::new(None)),
+            recording_mode: Arc::new(Mutex::new(RecordingMode::Main)),
         })
     }
 
@@ -1085,9 +1123,10 @@ impl AppController {
         let subtitle = switched_to.map(|d| format!("Switched to \"{}\"", d));
         let long = subtitle.is_some();
         set_pill_window_size(&self.app_handle, if long { LONG_ERROR_WINDOW } else { PILL_WINDOW });
+        let mode = self.recording_mode.lock().unwrap().pill_mode(&self.get_settings());
         let _ = self.app_handle.emit(
             "assistant-state-changed",
-            serde_json::json!({ "state": "listening", "title": "Listening…", "subtitle": subtitle, "long": long }),
+            serde_json::json!({ "state": "listening", "title": "Listening…", "subtitle": subtitle, "long": long, "mode": mode }),
         );
     }
 
@@ -1214,10 +1253,19 @@ impl AppController {
     /// Starts or stops a recording. `trigger` says what asked for it (e.g. "hotkey press"); it goes
     /// into the start/stop log.
     pub fn toggle_recording(&self, trigger: &'static str) -> Result<(), String> {
+        self.toggle_recording_as(trigger, RecordingMode::Main)
+    }
+
+    /// Like `toggle_recording`; `mode` applies only when this starts a recording (either hotkey
+    /// finishes one, keeping the mode it started with).
+    pub fn toggle_recording_as(&self, trigger: &'static str, mode: RecordingMode) -> Result<(), String> {
         let cur_phase = { self.phase.lock().unwrap().clone() };
 
         match cur_phase {
-            AssistantPhase::Idle => self.start_listening(trigger),
+            AssistantPhase::Idle => {
+                *self.recording_mode.lock().unwrap() = mode;
+                self.start_listening(trigger)
+            }
             AssistantPhase::Listening => self.stop_listening_and_process(trigger),
             _ => {
                 // If currently processing or in Done state, ignore toggle or cancel
@@ -1227,6 +1275,7 @@ impl AppController {
     }
 
     fn start_listening(&self, trigger: &'static str) -> Result<(), String> {
+        let pressed = Instant::now();
         self.session_id.fetch_add(1, Ordering::SeqCst);
         {
             let mut phase = self.phase.lock().unwrap();
@@ -1241,6 +1290,7 @@ impl AppController {
         }
 
         let settings = self.get_settings();
+        let mode = *self.recording_mode.lock().unwrap();
 
         // 1. Immediately emit state so the pill UI displays "Listening..." without delay
         let _ = self.app_handle.emit(
@@ -1248,23 +1298,27 @@ impl AppController {
             serde_json::json!({
                 "state": "listening",
                 "title": "Listening…",
-                "subtitle": null
+                "subtitle": null,
+                "mode": mode.pill_mode(&settings)
             }),
         );
 
         // 2. Immediately show the pill window on screen
         show_main_window(&self.app_handle, &settings);
 
-        // 3. Play the earcon and wait for it to finish before opening the microphone. Some combo
-        // USB/Bluetooth headsets stall for up to a second when playback and capture are opened on
-        // the device at nearly the same instant, which otherwise leaks the chime into the start of
-        // the recording (see sound::play_sound_blocking).
-        if settings.sound_effect {
-            crate::sound::play_sound_blocking(crate::sound::AppSound::StartRecording);
+        // 3. Open the microphone first, so speech right after the key press is captured. (Playing
+        // the chime to completion first lost 1.5-2.5 s of speech on Bluetooth headsets.)
+        let mic_open_started = Instant::now();
+        let stream = self.recorder.start_recording(self.app_handle.clone(), settings.input_device.clone());
+        let mic_open_ms = mic_open_started.elapsed().as_millis();
+
+        // 4. Then the chime, without waiting for it. It starts after capture is already open, so
+        // playback and capture are never opened at the same instant (some combo USB/Bluetooth
+        // headsets stall when they are).
+        if stream.is_ok() && settings.sound_effect {
+            crate::sound::play_sound(crate::sound::AppSound::StartRecording);
         }
 
-        // 4. Start recording on the dedicated audio thread
-        let stream = self.recorder.start_recording(self.app_handle.clone(), settings.input_device.clone());
         if let Ok(info) = &stream {
             let fallback = info
                 .missing_device
@@ -1275,8 +1329,15 @@ impl AppController {
                 &get_data_dir(),
                 "REC_START",
                 &format!(
-                    "Recording started by {} on \"{}\" at {} Hz, {} ch{}",
-                    trigger, info.device, info.sample_rate, info.channels, fallback
+                    "Recording started by {} ({:?} mode) on \"{}\" at {} Hz, {} ch{}; microphone ready {} ms after the key press (opening it took {} ms)",
+                    trigger,
+                    mode,
+                    info.device,
+                    info.sample_rate,
+                    info.channels,
+                    fallback,
+                    pressed.elapsed().as_millis(),
+                    mic_open_ms
                 ),
             );
             *self.recording_start.lock().unwrap() = Some(RecordingStart { at: Instant::now(), trigger });
@@ -1296,11 +1357,22 @@ impl AppController {
             return Err(e);
         }
 
-        // 5. Pre-warm active model asynchronously while user is speaking (0 wait on finish!)
+        // 5. Pre-warm active model asynchronously while user is speaking (0 wait on finish!), unless
+        // the memory-saving mode defers it to when the recording stops.
+        if settings.model_load_mode != "on_stop" {
+            self.spawn_model_prewarm(&settings.model_name);
+        }
+
+        Ok(())
+    }
+
+    /// Loads the active speech model in the background (and unloads the other one). Transcription
+    /// waits on the same lock, so starting this early hides the load behind whatever runs first.
+    fn spawn_model_prewarm(&self, model_name: &str) {
         let app_handle_cl = self.app_handle.clone();
         let transcriber_cl = Arc::clone(&self.transcriber);
         let parakeet_cl = Arc::clone(&self.parakeet_transcriber);
-        let model_name = settings.model_name.clone();
+        let model_name = model_name.to_string();
 
         tauri::async_runtime::spawn(async move {
             let is_parakeet = model_name == "parakeet-tdt-0.6b-v3";
@@ -1328,8 +1400,6 @@ impl AppController {
                 }
             }
         });
-
-        Ok(())
     }
 
     fn stop_listening_and_process(&self, trigger: &'static str) -> Result<(), String> {
@@ -1349,6 +1419,11 @@ impl AppController {
         }
 
         let settings = self.get_settings();
+        // Memory-saving mode: load the model now, alongside leveling and VAD, instead of while
+        // the user was talking. A no-op if it's still loaded from a recent recording.
+        if settings.model_load_mode == "on_stop" {
+            self.spawn_model_prewarm(&settings.model_name);
+        }
         let target_norm = crate::translate::normalize_lang(&settings.target_lang);
         let transcribing_subtitle = if target_norm == "none" {
             "Voice to Text".to_string()
@@ -1372,7 +1447,13 @@ impl AppController {
             crate::sound::play_sound(crate::sound::AppSound::StopRecording);
         }
 
+        let recording_sec = self.recording_start.lock().unwrap().as_ref().map(|s| s.at.elapsed().as_secs_f32()).unwrap_or(0.0);
+        let stop_started = Instant::now();
         let captured = self.recorder.stop_recording(crate::denoise::strength_wet(&settings.noise_reduction));
+        let mut perf = crate::perf::PerfRun::start(stop_started.elapsed().as_millis() as u64);
+        perf.model = settings.model_name.clone();
+        perf.model_load_mode = settings.model_load_mode.clone();
+        perf.recording_sec = recording_sec;
         log_recording_stop(&self.recording_start, trigger, &captured.stats);
 
         let app_handle = self.app_handle.clone();
@@ -1385,12 +1466,14 @@ impl AppController {
         let session_id_arc = Arc::clone(&self.session_id);
         let pending_retry_arc = Arc::clone(&self.pending_retry);
         let session = self.session_id.load(Ordering::SeqCst);
+        let mode = *self.recording_mode.lock().unwrap();
 
         // Run processing in background thread using Tauri's async runtime
         tauri::async_runtime::spawn(async move {
             let is_cancelled = || session_id_arc.load(Ordering::SeqCst) != session;
             let data_dir = get_data_dir();
             if is_cancelled() {
+                perf.set_outcome("cancelled");
                 log_stage_event(&data_dir, "CANCELLED", "Aborted transcription: cancelled by user");
                 return;
             }
@@ -1404,9 +1487,12 @@ impl AppController {
             // Save full original audio (uncut) to latest_recording.wav for playback in UI
             let latest_wav = data_dir.join("latest_recording.wav");
             let _ = crate::history::write_wav_file(&latest_wav, &raw_samples, 16000);
+            perf.audio_sec = duration_sec;
+            perf.lap("audio_prep");
 
             if duration_sec < 0.2 {
                 log_stage_event(&data_dir, "AUDIO", "Audio buffer too short (<0.2s), aborting transcription.");
+                perf.set_outcome("too_short");
                 {
                     let mut p = phase_arc.lock().unwrap();
                     *p = AssistantPhase::Error;
@@ -1443,14 +1529,18 @@ impl AppController {
             // Save trimmed (VAD) audio to latest_vad_trimmed.wav for debugging
             let latest_vad_wav = data_dir.join("latest_vad_trimmed.wav");
             let _ = crate::history::write_wav_file(&latest_vad_wav, &vad_res.samples, 16000);
+            perf.speech_sec = vad_res.trimmed_duration_sec;
+            perf.lap("vad");
 
             if is_cancelled() {
+                perf.set_outcome("cancelled");
                 log_stage_event(&data_dir, "CANCELLED", "Aborted before model inference: cancelled by user");
                 return;
             }
 
             // Saved before inference so a failed transcription still keeps the whole recording.
             let session_audio = session_audio_filename(&data_dir, &settings.storage_mode, &captured);
+            perf.lap("save_audio");
 
             let is_parakeet = settings.model_name == "parakeet-tdt-0.6b-v3";
 
@@ -1470,6 +1560,7 @@ impl AppController {
                     Err(e) => {
                         let vitals = crate::vitals::SystemVitals::collect();
                         log_stage_event(&data_dir, "MODEL_ERROR", &format!("Failed to ensure Parakeet model: {}\n{}", e, vitals.format_report()));
+                        perf.set_outcome("failed");
                         keep_failed_recording(&history_arc, &pipeline_logger_arc, &app_handle, &captured, &settings, &vad_res, duration_sec, &data_dir, &session_audio, pipeline_start.elapsed().as_millis() as u64, &format!("Model download failed: {}", e));
                         log::error!("Failed to ensure Parakeet model: {}", e);
                         {
@@ -1500,6 +1591,7 @@ impl AppController {
                     }
                 };
 
+                perf.lap("model_ready");
                 let parakeet_clone = Arc::clone(&parakeet_arc);
                 let vad_samples = vad_res.samples.clone();
                 let model_dir_clone = model_dir.clone();
@@ -1522,11 +1614,13 @@ impl AppController {
                             format!("Parakeet TDT Output: \"{}\"", res.0)
                         };
                         log_stage_event(&data_dir, "PARAKEET_DONE", &format!("Parakeet inference took {} ms | text: \"{}\"", res.2, res.0));
+                        perf.lap("inference");
                         (res.0, res.1, res.2, res.3, raw_out, 1)
                     },
                     Ok(Ok(Err(e))) => {
                         let vitals = crate::vitals::SystemVitals::collect();
                         log_stage_event(&data_dir, "PARAKEET_ERROR", &format!("Parakeet transcription error: {}\n{}", e, vitals.format_report()));
+                        perf.set_outcome("failed");
                         keep_failed_recording(&history_arc, &pipeline_logger_arc, &app_handle, &captured, &settings, &vad_res, duration_sec, &data_dir, &session_audio, pipeline_start.elapsed().as_millis() as u64, &format!("Transcription failed: {}", e));
                         log::error!("Parakeet transcription error: {}", e);
                         {
@@ -1563,6 +1657,7 @@ impl AppController {
                         let vitals = crate::vitals::SystemVitals::collect();
                         let vitals_report = vitals.format_report();
                         log_stage_event(&data_dir, "TRANSCRIPTION_TIMEOUT", &format!("Parakeet timed out after {}s!\n{}", timeout.as_secs(), vitals_report));
+                        perf.set_outcome("failed");
                         keep_failed_recording(&history_arc, &pipeline_logger_arc, &app_handle, &captured, &settings, &vad_res, duration_sec, &data_dir, &session_audio, pipeline_start.elapsed().as_millis() as u64, &format!("Transcription timed out after {}s", timeout.as_secs()));
                         log::error!("Parakeet timed out after {}s!\n{}", timeout.as_secs(), vitals_report);
 
@@ -1610,6 +1705,7 @@ impl AppController {
                     Err(e) => {
                         let vitals = crate::vitals::SystemVitals::collect();
                         log_stage_event(&data_dir, "MODEL_ERROR", &format!("Failed to ensure model {}: {}\n{}", settings.model_name, e, vitals.format_report()));
+                        perf.set_outcome("failed");
                         keep_failed_recording(&history_arc, &pipeline_logger_arc, &app_handle, &captured, &settings, &vad_res, duration_sec, &data_dir, &session_audio, pipeline_start.elapsed().as_millis() as u64, &format!("Model download failed: {}", e));
                         log::error!("Failed to ensure Whisper model: {}", e);
                         {
@@ -1640,6 +1736,7 @@ impl AppController {
                     }
                 };
 
+                perf.lap("model_ready");
                 log_stage_event(&data_dir, "WHISPER_START", &format!("Starting transcription on {} samples ({:.2} s)...", vad_res.samples.len(), vad_res.trimmed_duration_sec));
                 let samples_clone = vad_res.samples.clone();
                 let model_path_clone = model_path.clone();
@@ -1659,6 +1756,7 @@ impl AppController {
                 match inference_res {
                     Ok(Ok(Ok(mut res))) => {
                         log_stage_event(&data_dir, "WHISPER_DONE", &format!("Inference took {} ms | detected_lang: \"{}\" | text: \"{}\"", res.inference_ms, res.detected_lang, res.text));
+                        perf.lap("inference");
 
                         // Automatic re-recognition check for excluded languages:
                         if !settings.excluded_languages.trim().is_empty()
@@ -1712,6 +1810,7 @@ impl AppController {
                     Ok(Ok(Err(e))) => {
                         let vitals = crate::vitals::SystemVitals::collect();
                         log_stage_event(&data_dir, "WHISPER_ERROR", &format!("Whisper transcription error: {}\n{}", e, vitals.format_report()));
+                        perf.set_outcome("failed");
                         keep_failed_recording(&history_arc, &pipeline_logger_arc, &app_handle, &captured, &settings, &vad_res, duration_sec, &data_dir, &session_audio, pipeline_start.elapsed().as_millis() as u64, &format!("Transcription failed: {}", e));
                         log::error!("Transcription error: {}", e);
                         {
@@ -1748,6 +1847,7 @@ impl AppController {
                         let vitals = crate::vitals::SystemVitals::collect();
                         let vitals_report = vitals.format_report();
                         log_stage_event(&data_dir, "TRANSCRIPTION_TIMEOUT", &format!("Transcription timed out after {}s!\n{}", timeout.as_secs(), vitals_report));
+                        perf.set_outcome("failed");
                         keep_failed_recording(&history_arc, &pipeline_logger_arc, &app_handle, &captured, &settings, &vad_res, duration_sec, &data_dir, &session_audio, pipeline_start.elapsed().as_millis() as u64, &format!("Transcription timed out after {}s", timeout.as_secs()));
                         log::error!("Transcription timed out after {}s!\n{}", timeout.as_secs(), vitals_report);
 
@@ -1833,6 +1933,7 @@ impl AppController {
                     whole_track: !settings.audio_chunking,
                     action_logs: actions,
                 };
+                perf.set_outcome("empty");
                 pipeline_logger_arc.add_log(empty_log.clone(), &data_dir);
                 let _ = app_handle.emit("transcription-diagnostic-log", &empty_log);
 
@@ -1875,6 +1976,7 @@ impl AppController {
             }
 
             if is_cancelled() {
+                perf.set_outcome("cancelled");
                 log_stage_event(&data_dir, "CANCELLED", "Aborted before language detection / translation: cancelled by user");
                 return;
             }
@@ -1962,6 +2064,10 @@ impl AppController {
             // Keep detected_lang as the canonical value for logs/history (what Whisper reported)
             // but use detected_effective for skip/translate decisions
             log_stage_event(&data_dir, "LANG_DETECT", &format!("Whisper='{}' text='{}' → effective='{}'", detected_lang, text_detected, detected_effective));
+            // Post-processing, the empty/silence checks and language detection.
+            perf.lap("post_process");
+            perf.inference_ms = Some(whisper_inference_ms as u64);
+            perf.threads = Some(thread_count as i32);
 
             let target_norm = crate::translate::normalize_lang(&settings.target_lang);
             let wants_english = target_norm == "english";
@@ -2000,6 +2106,8 @@ impl AppController {
             let source_norm = crate::translate::normalize_lang(&settings.source_lang);
             let (skip_translation, skip_reason) = if is_no_trans {
                 (true, "No translation mode (Voice-to-Text only)".to_string())
+            } else if mode.transcribe_only(&settings) {
+                (true, "Transcription-only hotkey".to_string())
             } else if skip_check {
                 if crate::translate::normalize_lang(&detected_effective) == target_norm {
                     (true, format!("Already in target language ({})", settings.target_lang))
@@ -2128,6 +2236,7 @@ impl AppController {
             };
 
             if is_cancelled() {
+                perf.set_outcome("cancelled");
                 log_stage_event(&data_dir, "CANCELLED", "Aborted before paste/done: cancelled by user");
                 return;
             }
@@ -2143,6 +2252,10 @@ impl AppController {
                 }
             }
 
+            perf.lap("translation");
+            perf.translation = (!skip_translation).then(|| route.label().to_string());
+            perf.text_chars = final_text.chars().count();
+
             // Step 7: Copy to clipboard and auto-paste if enabled
             let paste_start = Instant::now();
             if settings.auto_paste {
@@ -2152,6 +2265,7 @@ impl AppController {
             }
             let paste_ms = paste_start.elapsed().as_millis() as u64;
             log_stage_event(&data_dir, "PASTE", &format!("Auto-paste {} in {} ms", if settings.auto_paste { "dispatched" } else { "skipped" }, paste_ms));
+            perf.lap("paste");
 
             // A failed translation is announced after it's saved to history (the retry needs its id).
             if !translation_failed {
@@ -2187,6 +2301,7 @@ impl AppController {
                 .unwrap_or(0);
             let history_ms = db_start.elapsed().as_millis() as u64;
             log_stage_event(&data_dir, "DB", &format!("Saved to database in {} ms", history_ms));
+            perf.lap("history_db");
 
             // Remember a failed service translation so it can be retried from the pill or the tray.
             let pending = (translation_failed && retryable).then(|| PendingRetry {
@@ -2226,6 +2341,8 @@ impl AppController {
                 0.0
             };
             log_stage_event(&data_dir, "COMPLETE", &format!("Pipeline complete in {} ms! Speed factor: {:.1}x", total_pipeline_ms, speed_factor));
+            perf.lap("finalize");
+            perf.finish(if translation_failed { "translation_failed" } else { "ok" });
 
             let (chunks, mut actions) = chunk_diagnostics(
                     settings.audio_chunking,
