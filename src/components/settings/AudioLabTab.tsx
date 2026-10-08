@@ -16,12 +16,17 @@ import {
   type NoiseReduction,
 } from "@/lib/tauri";
 
+/** What a translated recording opened with Second Try said and became. */
+export type LabSourceTexts = { spoken: string; translated: string };
+
 export default function AudioLabTab({
   t,
   initialAudio,
+  initialTexts,
 }: {
   t: Tokens;
   initialAudio?: string | null;
+  initialTexts?: LabSourceTexts | null;
 }) {
   const { models, settings } = useSettingsContext();
   const [items, setItems] = useState<LabAudioItem[]>([]);
@@ -45,6 +50,7 @@ export default function AudioLabTab({
   const [result, setResult] = useState<LabExperimentResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rawUploadName, setRawUploadName] = useState<string | null>(null);
+  const [copied, setCopied] = useState<"spoken" | "translated" | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const availableModels =
@@ -175,9 +181,96 @@ export default function AudioLabTab({
     setError(null);
   }
   const selItem = items.find((x) => x.filename === selected);
+  // The texts belong to the recording Second Try opened, not to one picked afterwards.
+  const sourceTexts = initialTexts && selected === initialAudio ? initialTexts : null;
+
+  async function copyText(which: "spoken" | "translated", text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(which);
+      setTimeout(() => setCopied((c) => (c === which ? null : c)), 1500);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
 
   return (
     <div>
+      {sourceTexts && (
+        <Section title="This Recording" t={t}>
+          <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+            {(
+              [
+                ["spoken", "As spoken", sourceTexts.spoken],
+                ["translated", "Translated", sourceTexts.translated],
+              ] as const
+            ).map(([which, label, text]) => (
+              <div
+                key={which}
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  background: t.inputBg,
+                  border: `1px solid ${which === "spoken" ? t.accent + "55" : t.border}`,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: 6,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                      color: which === "spoken" ? t.accent : t.textDim,
+                      fontFamily: "JetBrains Mono, monospace",
+                    }}
+                  >
+                    {label}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void copyText(which, text)}
+                    style={{
+                      background: `${t.accent}14`,
+                      border: `1px solid ${t.accent}30`,
+                      borderRadius: 4,
+                      color: t.accent,
+                      padding: "2px 8px",
+                      fontSize: 11,
+                      fontWeight: 500,
+                      fontFamily: "Inter, sans-serif",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {copied === which ? "Copied" : "Copy"}
+                  </button>
+                </div>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 12,
+                    color: t.text,
+                    fontFamily: "Inter, sans-serif",
+                    lineHeight: 1.5,
+                    whiteSpace: "pre-wrap",
+                    userSelect: "text",
+                  }}
+                >
+                  {text}
+                </p>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
       <Section title="Source Recording (Real Audio)" t={t}>
         <div style={{ padding: 12 }}>
           {items.length === 0 ? (

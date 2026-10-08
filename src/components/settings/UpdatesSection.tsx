@@ -11,6 +11,7 @@ import {
 
 function statusText(status: UpdateStatus | null): string {
   if (!status) return "Updates are only available in the desktop app";
+  if (status.store_managed) return "Updates come from the Microsoft Store";
   switch (status.state) {
     case "checking":
       return "Checking GitHub for a new version…";
@@ -82,45 +83,47 @@ export default function UpdatesSection({ t }: { t: Tokens }) {
         t={t}
         last={status?.state !== "downloading"}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {available && (
+        {!status?.store_managed && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {available && (
+              <button
+                type="button"
+                onClick={onInstall}
+                style={{
+                  padding: "5px 10px",
+                  borderRadius: 6,
+                  border: `1px solid ${t.successColor}`,
+                  background: `${t.successColor}20`,
+                  color: t.successColor,
+                  fontSize: 11,
+                  cursor: "pointer",
+                  fontWeight: 600,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Install & Restart
+              </button>
+            )}
             <button
               type="button"
-              onClick={onInstall}
+              onClick={onCheck}
+              disabled={!status || busy}
               style={{
                 padding: "5px 10px",
                 borderRadius: 6,
-                border: `1px solid ${t.successColor}`,
-                background: `${t.successColor}20`,
-                color: t.successColor,
+                border: `1px solid ${t.border}`,
+                background: t.surface,
+                color: accentColor,
                 fontSize: 11,
-                cursor: "pointer",
-                fontWeight: 600,
+                cursor: !status || busy ? "default" : "pointer",
+                opacity: !status || busy ? 0.6 : 1,
                 whiteSpace: "nowrap",
               }}
             >
-              Install & Restart
+              {status?.state === "checking" ? "Checking…" : "Check for Updates"}
             </button>
-          )}
-          <button
-            type="button"
-            onClick={onCheck}
-            disabled={!status || busy}
-            style={{
-              padding: "5px 10px",
-              borderRadius: 6,
-              border: `1px solid ${t.border}`,
-              background: t.surface,
-              color: accentColor,
-              fontSize: 11,
-              cursor: !status || busy ? "default" : "pointer",
-              opacity: !status || busy ? 0.6 : 1,
-              whiteSpace: "nowrap",
-            }}
-          >
-            {status?.state === "checking" ? "Checking…" : "Check for Updates"}
-          </button>
-        </div>
+          </div>
+        )}
       </Row>
       {status?.state === "downloading" && (
         <div style={{ padding: "0 16px 12px" }}>

@@ -56,6 +56,12 @@ Most open-source tools (like Blender, Audacity, and Ollama when they started) us
 - Do not use the certificate buttons in a regular SignPath.io account: self-signed certificates there do not help with SmartScreen, and CA certificates cost money.
 - Signing runs as a GitHub Actions step on binaries built by CI.
 
+#### Solution 2b: Microsoft Store (Windows, What RevFly Uses)
+Store installs show no SmartScreen warning: Microsoft signs MSIX packages itself on publish, and individual developer accounts are free.
+- The product is reserved in [Partner Center](https://partner.microsoft.com/dashboard) as an **MSIX or PWA app** (Store ID `9NVMTPSDZFWR`). Its identity is in `packaging/msix/AppxManifest.xml`.
+- CI builds the package with `scripts/build_msix.ps1` and uploads it as the `revfly-microsoft-store` workflow artifact (not to the GitHub Release: it is unsigned and only installs through the Store).
+- From the Store package, RevFly turns its own updater off (`updater::store_managed`): the Store delivers updates, and its policies forbid apps replacing their own files.
+
 ---
 
 #### Solution 3: Official Paid Signing (Commercial Grade)
@@ -204,6 +210,12 @@ After publishing, refresh the cask with the new version and checksum, and push i
 bash scripts/update_homebrew_cask.sh 0.1.0 ../homebrew-tap
 cd ../homebrew-tap && git commit -am "revfly 0.1.0" && git push
 ```
+
+#### Step 6: Submit to the Microsoft Store
+1. Download the package: `gh run download <run-id> -n revfly-microsoft-store` (the run built for the version tag).
+2. In Partner Center, open RevFly → **Start submission** (or **Update** on the last one) → **Packages**, and upload `RevFly_<version>_x64.msix`. Each submission needs a higher version than the last.
+3. On the first submission, explain the `runFullTrust` capability: "RevFly is a desktop dictation app: it registers global hotkeys, records the microphone, and pastes text into the app the user is typing in, which needs a full-trust desktop process."
+4. Submit. Certification usually takes from a few hours to a few days.
 
 ---
 

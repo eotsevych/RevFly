@@ -706,20 +706,6 @@ summary:focus-visible {
   display: none;
 }
 
-.pill-action {
-  margin-left: auto;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.08);
-  font-size: 0.74rem;
-  font-weight: 600;
-}
-
-.pill-action[hidden] {
-  display: none;
-}
-
 .pill-label {
   font-weight: 650;
   font-size: 0.92rem;

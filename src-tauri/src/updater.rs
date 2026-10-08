@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -43,6 +43,31 @@ pub struct UpdateStatus {
     /// Download progress 0-100, when the server reports a size.
     pub percent: Option<u8>,
     pub message: Option<String>,
+    /// Installed from the Microsoft Store, which delivers updates itself.
+    pub store_managed: bool,
+}
+
+/// True when RevFly runs from its Microsoft Store (MSIX) package. The Store installs updates, and
+/// its policies forbid an app replacing its own files, so the built-in updater stays off there.
+pub fn store_managed() -> bool {
+    static MANAGED: OnceLock<bool> = OnceLock::new();
+    *MANAGED.get_or_init(|| {
+        #[cfg(windows)]
+        {
+            extern "system" {
+                fn GetCurrentPackageFullName(length: *mut u32, name: *mut u16) -> i32;
+            }
+            const APPMODEL_ERROR_NO_PACKAGE: i32 = 15700;
+            let mut length = 0u32;
+            // With no buffer this only reports whether the process has a package identity.
+            let rc = unsafe { GetCurrentPackageFullName(&mut length, std::ptr::null_mut()) };
+            rc != APPMODEL_ERROR_NO_PACKAGE
+        }
+        #[cfg(not(windows))]
+        {
+            false
+        }
+    })
 }
 
 struct Inner {
@@ -70,6 +95,7 @@ pub fn status(app: &AppHandle) -> UpdateStatus {
         version: inner.version.clone(),
         percent: inner.percent,
         message: inner.message.clone(),
+        store_managed: store_managed(),
     }
 }
 
@@ -117,6 +143,10 @@ fn tray_label(status: &UpdateStatus) -> String {
 
 /// Starts the background update loop. Release builds only: dev builds have no published update feed.
 pub fn spawn_background_checks(app: &AppHandle) {
+    if store_managed() {
+        tray::set_update_item(app, "Updates via Microsoft Store", false);
+        return;
+    }
     if cfg!(debug_assertions) {
         return;
     }
@@ -147,6 +177,9 @@ pub fn on_tray_click(app: &AppHandle) {
 /// Checks the release feed. Background checks stay silent on "no update" and on errors;
 /// user-initiated checks report both.
 pub async fn check(app: &AppHandle, user_initiated: bool) {
+    if store_managed() {
+        return;
+    }
     let previous = status(app);
     if !try_begin(app, UpdateState::Checking) {
         return;
@@ -188,6 +221,9 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
     if tray::is_recording() {
         // Replacing the app mid-dictation would lose the recording.
         return Err("Finish the current recording first.".to_string());
+    }
+    if store_managed() {
+        return Err("Updates come from the Microsoft Store.".to_string());
     }
     if !try_begin(app, UpdateState::Downloading) {
         return Err("An update check or install is already running.".to_string());

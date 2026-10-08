@@ -110,6 +110,17 @@ fn resolve_input_device_reporting_fallback(device_name: Option<&str>) -> Option<
 
 /// Seconds of recording after which the microphone must have delivered real audio.
 pub const MIC_CHECK_AFTER: Duration = Duration::from_millis(2500);
+/// Longest Stop waits for the audio captured before the stop to arrive from the callback. It
+/// usually arrives within one buffer (~10-20 ms); Bluetooth mics deliver in bigger batches.
+const STOP_FLUSH_MAX: Duration = Duration::from_millis(120);
+
+/// When the user asked to stop, and whether the callback has delivered audio from past that moment
+/// (so everything before it is in the buffer).
+#[derive(Default)]
+struct StopMark {
+    at: Option<Instant>,
+    reached: bool,
+}
 /// Once audio has flowed, this long without new samples means the device went away.
 const MIC_STALL_AFTER: Duration = Duration::from_millis(1500);
 /// Once real audio has flowed, this long of pure digital silence means the microphone stopped
@@ -536,7 +547,7 @@ pub struct AudioRecorder {
     cmd_tx: Sender<AudioCmd>,
     is_recording: Arc<AtomicBool>,
     /// Moment the user asked to stop; audio captured after it is dropped.
-    stop_at: Arc<Mutex<Option<Instant>>>,
+    stop_at: Arc<Mutex<StopMark>>,
 }
 
 impl AudioRecorder {
@@ -544,7 +555,7 @@ impl AudioRecorder {
         let (cmd_tx, cmd_rx) = channel::<AudioCmd>();
         let is_recording = Arc::new(AtomicBool::new(false));
         let is_rec_thread = Arc::clone(&is_recording);
-        let stop_at = Arc::new(Mutex::new(None::<Instant>));
+        let stop_at = Arc::new(Mutex::new(StopMark::default()));
         let stop_at_thread = Arc::clone(&stop_at);
         let reopen_tx = cmd_tx.clone();
 
@@ -580,7 +591,7 @@ impl AudioRecorder {
                             b.clear();
                         }
                         if let Ok(mut s) = stop_at_thread.lock() {
-                            *s = None;
+                            *s = StopMark::default();
                         }
 
                         // Mark recording active before starting stream so initial audio buffers are captured immediately
@@ -624,9 +635,14 @@ impl AudioRecorder {
                         let _ = reply.send(res);
                     }
                     AudioCmd::Stop { denoise, reply } => {
-                        // Allow a brief flush window for audio captured before the stop to arrive from the callback.
-                        // Frames captured after the stop are discarded in the callback (see frames_before_stop).
-                        thread::sleep(Duration::from_millis(120));
+                        // Wait for the audio captured before the stop to arrive from the callback. Frames
+                        // captured after the stop are discarded there (see frames_before_stop).
+                        let flush_started = Instant::now();
+                        while flush_started.elapsed() < STOP_FLUSH_MAX
+                            && !stop_at_thread.lock().map(|s| s.reached).unwrap_or(true)
+                        {
+                            thread::sleep(Duration::from_millis(5));
+                        }
                         is_rec_thread.store(false, Ordering::SeqCst);
                         generation.fetch_add(1, Ordering::SeqCst);
                         current = None;
@@ -767,7 +783,7 @@ impl AudioRecorder {
     /// `denoise` is the noise reduction mix (see `denoise::strength_wet`), None when off.
     pub fn stop_recording(&self, denoise: Option<f32>) -> CapturedAudio {
         if let Ok(mut s) = self.stop_at.lock() {
-            *s = Some(Instant::now());
+            *s = StopMark { at: Some(Instant::now()), reached: false };
         }
         let (reply_tx, reply_rx) = channel();
         if self.cmd_tx.send(AudioCmd::Stop { denoise, reply: reply_tx }).is_ok() {
@@ -801,7 +817,7 @@ fn start_stream_inner(
     buffer: Arc<Mutex<Vec<f32>>>,
     native_buffer: Arc<Mutex<Vec<f32>>>,
     is_rec: Arc<AtomicBool>,
-    stop_at: Arc<Mutex<Option<Instant>>>,
+    stop_at: Arc<Mutex<StopMark>>,
     app_handle: AppHandle,
     device_name: Option<String>,
     control: StreamControl,
@@ -988,21 +1004,30 @@ fn frames_before_stop(
     info: &cpal::InputCallbackInfo,
     frames: usize,
     sample_rate: u32,
-    stop_at: &Mutex<Option<Instant>>,
+    stop_at: &Mutex<StopMark>,
 ) -> usize {
-    let Some(stop) = stop_at.lock().ok().and_then(|s| *s) else {
+    let Ok(mut mark) = stop_at.lock() else {
+        return frames;
+    };
+    let Some(stop) = mark.at else {
         return frames;
     };
     let ts = info.timestamp();
     let latency = ts.callback.duration_since(&ts.capture).unwrap_or_default();
     let Some(first_capture) = Instant::now().checked_sub(latency) else {
+        mark.reached = true;
         return frames;
     };
     if stop <= first_capture {
+        mark.reached = true;
         return 0;
     }
     let captured_before = (stop - first_capture).as_secs_f64() * sample_rate as f64;
-    (captured_before as usize).min(frames)
+    let keep = (captured_before as usize).min(frames);
+    if keep < frames {
+        mark.reached = true;
+    }
+    keep
 }
 
 #[derive(Debug)]

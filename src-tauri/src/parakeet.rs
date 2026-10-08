@@ -31,6 +31,8 @@ fn total_model_bytes() -> u64 {
 pub struct ParakeetTranscriber {
     model: Option<parakeet_rs::ParakeetTDT>,
     current_dir: String,
+    /// Threads the loaded model's session runs on.
+    threads: usize,
 }
 
 impl ParakeetTranscriber {
@@ -38,6 +40,7 @@ impl ParakeetTranscriber {
         Self {
             model: None,
             current_dir: String::new(),
+            threads: 0,
         }
     }
 
@@ -187,17 +190,22 @@ impl ParakeetTranscriber {
 
         let rss_before = crate::vitals::process_rss_mb();
         let started = Instant::now();
-        let parakeet = parakeet_rs::ParakeetTDT::from_pretrained(dir_str, None)
+        // The crate defaults to 4 threads whatever the machine has.
+        let threads = crate::cpu_features::parakeet_threads();
+        let config = parakeet_rs::ExecutionConfig::default().with_intra_threads(threads);
+        let parakeet = parakeet_rs::ParakeetTDT::from_pretrained(dir_str, Some(config))
             .map_err(|e| format!("Failed to load Parakeet: {:?}", e))?;
 
         self.model = Some(parakeet);
         self.current_dir = dir_str.to_string();
+        self.threads = threads;
         crate::pipeline_logger::log_stage_event(
             &get_data_dir(),
             "MODEL_LOAD",
             &format!(
-                "Loaded Parakeet TDT in {} ms; app memory {} → {} MB",
+                "Loaded Parakeet TDT in {} ms on {} threads; app memory {} → {} MB",
                 started.elapsed().as_millis(),
+                threads,
                 rss_before,
                 crate::vitals::process_rss_mb()
             ),
@@ -239,10 +247,7 @@ impl ParakeetTranscriber {
         }
         let inference_ms = t0.elapsed().as_millis() as u64;
 
-        let hw = crate::cpu_features::detect_hardware_profile();
-        let thread_count = hw.recommended_threads;
-
-        Ok((texts.join(" "), "auto".to_string(), inference_ms, thread_count))
+        Ok((texts.join(" "), "auto".to_string(), inference_ms, self.threads as i32))
     }
 }
 

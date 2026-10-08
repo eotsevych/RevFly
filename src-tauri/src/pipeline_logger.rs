@@ -42,6 +42,10 @@ pub struct TranscriptionDiagnosticLog {
     #[serde(default)]
     pub translation_error: Option<String>,
     pub final_text: String,
+    /// The text in the spoken language (after cleanup and masking), when `final_text` is its
+    /// translation. Shown in Audio Lab's second try.
+    #[serde(default)]
+    pub spoken_text: Option<String>,
     pub clipboard_paste_ms: u64,
     pub history_save_ms: u64,
     pub total_pipeline_ms: u64,

@@ -152,6 +152,12 @@ jobs:
             bun run tauri build --bundles nsis,msi
           fi
 
+      # The same app, packaged for the Microsoft Store (it switches its own updater off there).
+      # Unsigned: the Store signs it on publish, so it is kept out of the GitHub Release.
+      - name: Build Microsoft Store package
+        shell: pwsh
+        run: ./scripts/build_msix.ps1
+
       - name: Upload Windows installers
         uses: actions/upload-artifact@v4
         with:
@@ -160,6 +166,13 @@ jobs:
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/nsis/*.exe.sig
             src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: error
+
+      - name: Upload Microsoft Store package
+        uses: actions/upload-artifact@v4
+        with:
+          name: revfly-microsoft-store
+          path: src-tauri/target/release/bundle/msix/*.msix
           if-no-files-found: error
 
       - name: Attach to release

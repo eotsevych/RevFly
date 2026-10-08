@@ -6,10 +6,11 @@ import {
   triggerClearTranscriptionLogs,
   type ChunkDiagnosticEvent,
 } from "@/lib/tauri";
+import type { LabSourceTexts } from "./AudioLabTab";
 
 interface LogsTabProps {
   t: Tokens;
-  onOpenInAudioLab?: (audioFilename: string) => void;
+  onOpenInAudioLab?: (audioFilename: string, texts?: LabSourceTexts) => void;
 }
 
 /** Fields of a displayed log row that the chunk/action fallbacks read. */
@@ -177,6 +178,7 @@ export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
         model: l.model_name || "whisper",
         text: l.final_text || l.raw_text || "(No transcript text)",
         rawText: l.raw_text || "",
+        spokenText: l.spoken_text || null,
         audioFile: l.audio_filename,
         audioDurationSec: l.audio_duration_sec,
         vadTrimmedSec: l.vad_trimmed_sec,
@@ -406,7 +408,12 @@ export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          onOpenInAudioLab(log.audioFile || "latest_recording.wav");
+                          onOpenInAudioLab(
+                            log.audioFile || "latest_recording.wav",
+                            log.spokenText
+                              ? { spoken: log.spokenText, translated: log.text }
+                              : undefined,
+                          );
                         }}
                         title="Open in Audio Lab for second try re-test"
                         style={{

@@ -149,11 +149,6 @@ fn retry_translation(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn paste_original(state: State<'_, AppState>) -> Result<(), String> {
-    state.controller.paste_original()
-}
-
-#[tauri::command]
 fn get_history(
     state: State<'_, AppState>,
     limit: Option<usize>,
@@ -498,7 +493,6 @@ pub fn run() {
             toggle_recording,
             cancel_recording,
             retry_translation,
-            paste_original,
             check_accessibility,
             request_accessibility,
             open_accessibility_settings,

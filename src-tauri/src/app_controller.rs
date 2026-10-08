@@ -394,16 +394,6 @@ pub(crate) struct PendingRetry {
     history_id: i64,
 }
 
-/// How long the pill offers "Paste original" after a translation was pasted.
-const ORIGINAL_OFFER_HOLD: Duration = Duration::from_secs(5);
-
-/// The spoken text of the last translated dictation, offered on the pill until `session` changes.
-#[derive(Clone)]
-pub(crate) struct OriginalOffer {
-    text: String,
-    session: u64,
-}
-
 /// Entry point for the audio thread; routes a microphone problem to the running controller.
 pub fn report_mic_problem(app_handle: &AppHandle, report: crate::audio::MicReport) {
     if let Some(state) = app_handle.try_state::<crate::AppState>() {
@@ -690,6 +680,7 @@ fn keep_failed_recording(
         translation_ms: 0,
         translation_error: None,
         final_text: String::new(),
+        spoken_text: None,
         clipboard_paste_ms: 0,
         history_save_ms: 0,
         total_pipeline_ms: pipeline_ms,
@@ -754,7 +745,6 @@ pub struct AppController {
     /// The last failed translation, offered for retry until another recording finishes.
     pending_retry: Arc<Mutex<Option<PendingRetry>>>,
     /// The untranslated text of the last translation, while the pill offers to paste it instead.
-    original_offer: Arc<Mutex<Option<OriginalOffer>>>,
     /// When and how the current recording started, for the start/stop log.
     recording_start: Arc<Mutex<Option<RecordingStart>>>,
     /// Set when a recording starts; read when it's processed.
@@ -862,7 +852,6 @@ impl AppController {
             last_activity,
             session_id,
             pending_retry: Arc::new(Mutex::new(None)),
-            original_offer: Arc::new(Mutex::new(None)),
             recording_start: Arc::new(Mutex::new(None)),
             recording_mode: Arc::new(Mutex::new(RecordingMode::Main)),
             start_gate: Arc::new(Mutex::new(())),
@@ -1496,7 +1485,6 @@ impl AppController {
         let pipeline_logger_arc = Arc::clone(&self.pipeline_logger);
         let session_id_arc = Arc::clone(&self.session_id);
         let pending_retry_arc = Arc::clone(&self.pending_retry);
-        let original_offer_arc = Arc::clone(&self.original_offer);
         let session = self.session_id.load(Ordering::SeqCst);
         let mode = *self.recording_mode.lock().unwrap();
 
@@ -1954,6 +1942,7 @@ impl AppController {
                     translation_ms: 0,
                     translation_error: None,
                     final_text: String::new(),
+                    spoken_text: None,
                     clipboard_paste_ms: 0,
                     history_save_ms: 0,
                     total_pipeline_ms: pipeline_start.elapsed().as_millis() as u64,
@@ -2275,16 +2264,15 @@ impl AppController {
                 return;
             }
 
-            // A translation was pasted: the pill offers the spoken text for a few seconds.
-            let offers_original = !skip_translation && !translation_failed && pre_translate_text.trim() != final_text.trim();
-            *original_offer_arc.lock().unwrap() =
-                offers_original.then(|| OriginalOffer { text: pre_translate_text.clone(), session });
+            // Kept in the diagnostic log so Audio Lab's second try can show what was actually said.
+            let spoken_text = (!skip_translation && !translation_failed && pre_translate_text.trim() != final_text.trim())
+                .then(|| pre_translate_text.clone());
 
-            // Step 6: Set phase. A failed translation, or one offering its original, goes straight back
-            // to Idle so the hotkey works while the pill (with its button) is still on screen.
+            // Step 6: Set phase. A failed translation goes straight back to Idle so the hotkey works
+            // while its error is still on screen.
             {
                 let mut p = phase_arc.lock().unwrap();
-                if translation_failed || offers_original {
+                if translation_failed {
                     *p = AssistantPhase::Idle;
                 } else {
                     *p = AssistantPhase::Done;
@@ -2314,8 +2302,7 @@ impl AppController {
                         "state": "done",
                         "title": "Copied to clipboard",
                         "subtitle": null,
-                        "text": final_text,
-                        "original": offers_original
+                        "text": final_text
                     }),
                 );
             }
@@ -2430,6 +2417,7 @@ impl AppController {
                 translation_ms,
                 translation_error: translation_error_detail.clone(),
                 final_text: final_text.clone(),
+                spoken_text,
                 clipboard_paste_ms: paste_ms,
                 history_save_ms: history_ms,
                 total_pipeline_ms,
@@ -2447,21 +2435,6 @@ impl AppController {
 
             // A failed translation hides itself after LONG_ERROR_HOLD (see show_long_error_payload).
             if translation_failed {
-                return;
-            }
-            // The "Paste original" offer stays up a few seconds unless a new recording replaces it.
-            if offers_original {
-                tokio::time::sleep(ORIGINAL_OFFER_HOLD).await;
-                let p = phase_arc.lock().unwrap();
-                if *p == AssistantPhase::Idle && session_id_arc.load(Ordering::SeqCst) == session {
-                    *original_offer_arc.lock().unwrap() = None;
-                    *last_activity_arc.lock().unwrap() = Instant::now();
-                    let _ = app_handle.emit(
-                        "assistant-state-changed",
-                        serde_json::json!({ "state": "idle", "title": "Ready", "subtitle": null }),
-                    );
-                    hide_main_window(&app_handle);
-                }
                 return;
             }
             // Show the done pill briefly, then revert to Idle and hide the window.
@@ -2506,53 +2479,6 @@ impl AppController {
         let mut settings = self.get_settings();
         settings.target_lang = lang.to_string();
         self.save_settings(settings)
-    }
-
-    /// Pastes (or copies) the spoken text of the last translation, while the pill still offers it.
-    pub fn paste_original(&self) -> Result<(), String> {
-        let current = self.session_id.load(Ordering::SeqCst);
-        let offer = self
-            .original_offer
-            .lock()
-            .unwrap()
-            .take()
-            .filter(|o| o.session == current)
-            .ok_or_else(|| "The original text is no longer available".to_string())?;
-        if *self.phase.lock().unwrap() != AssistantPhase::Idle {
-            return Err("RevFly is busy; try again when it finishes".to_string());
-        }
-        let settings = self.get_settings();
-        if settings.auto_paste {
-            copy_and_paste(&offer.text)?;
-        } else {
-            crate::paste::copy_to_clipboard(&offer.text)?;
-        }
-        log_stage_event(&get_data_dir(), "PASTE_ORIGINAL", &format!("{} the untranslated text: \"{}\"", if settings.auto_paste { "Pasted" } else { "Copied" }, offer.text));
-        // A new session also stops the offer's hide timer; this one hides the pill sooner.
-        let session = self.session_id.fetch_add(1, Ordering::SeqCst) + 1;
-        let _ = self.app_handle.emit(
-            "assistant-state-changed",
-            serde_json::json!({
-                "state": "done",
-                "title": if settings.auto_paste { "Original pasted" } else { "Original copied" },
-                "subtitle": null,
-                "text": offer.text
-            }),
-        );
-        let app_handle = self.app_handle.clone();
-        let phase_arc = Arc::clone(&self.phase);
-        let session_id_arc = Arc::clone(&self.session_id);
-        tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(900)).await;
-            if *phase_arc.lock().unwrap() == AssistantPhase::Idle && session_id_arc.load(Ordering::SeqCst) == session {
-                let _ = app_handle.emit(
-                    "assistant-state-changed",
-                    serde_json::json!({ "state": "idle", "title": "Ready", "subtitle": null }),
-                );
-                hide_main_window(&app_handle);
-            }
-        });
-        Ok(())
     }
 
     pub fn set_translation_provider(&self, provider: &str) -> Result<(), String> {

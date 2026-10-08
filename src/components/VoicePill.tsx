@@ -6,7 +6,6 @@ import {
   subscribeToAudioLevels,
   subscribeToStateChanges,
   triggerCancelRecording,
-  triggerPasteOriginal,
   triggerRetryTranslation,
   triggerStartDragging,
   type AssistantStateEvent,
@@ -231,7 +230,6 @@ export function VoicePill() {
     targetLang.toLowerCase() === "none";
   const spokenOnly =
     settings?.source_lang && settings.source_lang !== "Auto" ? settings.source_lang : null;
-  const offersOriginal = state.state === "done" && state.original === true;
 
   const meta = STATE_META[state.state];
   // The backend says what this recording does with the speech (see AssistantStateEvent.mode).
@@ -248,12 +246,7 @@ export function VoicePill() {
       ? `In ${spokenOnly ?? "your language"}`
       : `Auto-translate on · ${spokenOnly ?? `not ${targetLang}`} → ${targetLang}`;
   const dynamicSublabel =
-    (offersOriginal
-      ? `${settings?.auto_paste === false ? "Copied" : "Pasted"} in ${targetLang}`
-      : null) ||
-    state.subtitle ||
-    finishHint ||
-    (state.state === "listening" ? listeningIntent : meta.sublabel);
+    state.subtitle || finishHint || (state.state === "listening" ? listeningIntent : meta.sublabel);
 
   const displayedSubtitle =
     state.state === "error" && state.text ? `Copied: "${state.text}"` : dynamicSublabel;
@@ -328,11 +321,9 @@ export function VoicePill() {
                 transition: "color 0.3s ease",
               }}
             >
-              {offersOriginal
-                ? "Translated"
-                : state.title && (state.state !== "listening" || micWarning)
-                  ? state.title
-                  : meta.label}
+              {state.title && (state.state !== "listening" || micWarning)
+                ? state.title
+                : meta.label}
             </span>
             {isAutoMode && inRun && !micWarning && (
               <span
@@ -412,29 +403,6 @@ export function VoicePill() {
             </button>
           )}
         </div>
-
-        {/* After a translation: paste what was actually said instead */}
-        {offersOriginal && (
-          <button
-            type="button"
-            onClick={() => void triggerPasteOriginal()}
-            className="shrink-0 self-center"
-            style={{
-              padding: "4px 10px",
-              borderRadius: 999,
-              border: `1px solid ${accent}66`,
-              background: `${accent}1f`,
-              color: accent,
-              fontFamily: "Inter, sans-serif",
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: "pointer",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {settings?.auto_paste === false ? "Copy original" : "Paste original"}
-          </button>
-        )}
 
         {/* Recording timer, vertically centred on the right edge of the pill */}
         {state.state === "listening" && (

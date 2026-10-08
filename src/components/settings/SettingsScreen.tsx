@@ -8,7 +8,7 @@ import ThemeTab from "@/components/settings/ThemeTab";
 import TranslationsTab from "@/components/settings/TranslationsTab";
 import StorageTab from "@/components/settings/StorageTab";
 import LogsTab from "@/components/settings/LogsTab";
-import AudioLabTab from "@/components/settings/AudioLabTab";
+import AudioLabTab, { type LabSourceTexts } from "@/components/settings/AudioLabTab";
 
 type TabId = "general" | "theme" | "translations" | "storage" | "logs" | "audio-labs";
 
@@ -125,10 +125,12 @@ function SettingsInner() {
   const { settings, updateSettings, closeWindow } = useSettingsContext();
   const [activeTab, setActiveTab] = useState<TabId>("general");
   const [labSelectedAudio, setLabSelectedAudio] = useState<string | null>(null);
+  const [labTexts, setLabTexts] = useState<LabSourceTexts | null>(null);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
-  const handleOpenInAudioLab = (audioFilename: string) => {
+  const handleOpenInAudioLab = (audioFilename: string, texts?: LabSourceTexts) => {
     setLabSelectedAudio(audioFilename);
+    setLabTexts(texts ?? null);
     setActiveTab("audio-labs");
   };
 
@@ -302,7 +304,9 @@ function SettingsInner() {
             {activeTab === "translations" && <TranslationsTab t={t} />}
             {activeTab === "storage" && <StorageTab t={t} />}
             {activeTab === "logs" && <LogsTab t={t} onOpenInAudioLab={handleOpenInAudioLab} />}
-            {activeTab === "audio-labs" && <AudioLabTab t={t} initialAudio={labSelectedAudio} />}
+            {activeTab === "audio-labs" && (
+              <AudioLabTab t={t} initialAudio={labSelectedAudio} initialTexts={labTexts} />
+            )}
           </div>
 
           {/* Footer */}

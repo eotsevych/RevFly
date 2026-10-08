@@ -29,9 +29,8 @@ const EN = {
   "demo.onDevice": "Parakeet · on-device",
   "demo.translating": "Translating",
   "demo.direction": "Ukrainian → English",
-  "demo.translated": "Translated",
+  "demo.done": "Done",
   "demo.pastedIn": "Pasted in English",
-  "demo.original": "Paste original",
 };
 
 let lang = document.documentElement.dataset.lang === "uk" ? "uk" : "en";
@@ -188,7 +187,6 @@ document.querySelectorAll("[data-asset]").forEach((link) => (link.href = RELEASE
 const pill = document.getElementById("demo-pill");
 const pillLabel = document.getElementById("pill-label");
 const pillSub = document.getElementById("pill-sub");
-const pillAction = document.getElementById("pill-action");
 const spoken = document.getElementById("demo-spoken");
 const typed = document.getElementById("demo-typed");
 const placeholder = document.getElementById("demo-placeholder");
@@ -204,9 +202,6 @@ function setPill(state, labelKey, subKey) {
   pill.dataset.state = state;
   pillLabel.textContent = t(labelKey);
   pillSub.textContent = t(subKey);
-  // After a translation the app offers the words as spoken.
-  pillAction.hidden = state !== "done";
-  pillAction.textContent = t("demo.original");
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -221,7 +216,7 @@ async function typeText(text) {
 
 function showFinalFrame() {
   spoken.classList.add("is-hidden");
-  setPill("done", "demo.translated", "demo.pastedIn");
+  setPill("done", "demo.done", "demo.pastedIn");
   placeholder.hidden = true;
   reply.hidden = false;
   replyText.textContent = RESULT;
@@ -243,7 +238,7 @@ async function runDemo() {
     setPill("translating", "demo.translating", "demo.direction");
     await sleep(1300);
 
-    setPill("done", "demo.translated", "demo.pastedIn");
+    setPill("done", "demo.done", "demo.pastedIn");
     await typeText(RESULT);
     await sleep(700);
 

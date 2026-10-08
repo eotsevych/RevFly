@@ -141,8 +141,6 @@ export interface AssistantStateEvent {
   /** While listening: what happens to the speech. "translate" = will be translated (translate
    * hotkey); "auto" = translated if it isn't in the target language; "transcribe" = never. */
   mode?: "translate" | "transcribe" | "auto" | null;
-  /** Done after a translation: the pill offers to paste the untranslated text instead. */
-  original?: boolean;
 }
 
 export async function fetchSettings(): Promise<BackendSettings | null> {
@@ -180,18 +178,6 @@ export async function triggerRetryTranslation(): Promise<string | null> {
   if (!isTauri()) return null;
   try {
     await invoke("retry_translation");
-    return null;
-  } catch (err) {
-    return String(err);
-  }
-}
-
-/** Pastes (or copies) the untranslated text of the last translation. Resolves to an error message,
- * or null when it worked. */
-export async function triggerPasteOriginal(): Promise<string | null> {
-  if (!isTauri()) return null;
-  try {
-    await invoke("paste_original");
     return null;
   } catch (err) {
     return String(err);
@@ -462,6 +448,8 @@ export interface TranscriptionDiagnosticLog {
   translation_skip_reason: string;
   translation_ms: number;
   final_text: string;
+  /** The text in the spoken language, when final_text is its translation. */
+  spoken_text?: string | null;
   clipboard_paste_ms: number;
   history_save_ms: number;
   total_pipeline_ms: number;
@@ -796,6 +784,8 @@ export interface UpdateStatus {
   version: string | null;
   percent: number | null;
   message: string | null;
+  /** Installed from the Microsoft Store, which delivers updates itself. */
+  store_managed?: boolean;
 }
 
 export async function fetchUpdateStatus(): Promise<UpdateStatus | null> {

@@ -23,6 +23,26 @@ impl fmt::Display for HardwareProfile {
     }
 }
 
+/// Threads for Parakeet's ONNX session: the performance cores on Apple Silicon (efficiency cores
+/// only slow a parallel matrix multiply down), otherwise the general recommendation.
+pub fn parakeet_threads() -> usize {
+    #[cfg(target_os = "macos")]
+    {
+        extern "C" {
+            fn sysctlbyname(name: *const u8, oldp: *mut std::ffi::c_void, oldlenp: *mut usize, newp: *mut std::ffi::c_void, newlen: usize) -> i32;
+        }
+        let mut cores: i32 = 0;
+        let mut len = std::mem::size_of::<i32>();
+        let ok = unsafe {
+            sysctlbyname(b"hw.perflevel0.physicalcpu\0".as_ptr(), &mut cores as *mut i32 as *mut _, &mut len, std::ptr::null_mut(), 0)
+        } == 0;
+        if ok && cores > 0 {
+            return (cores as usize).clamp(4, 8);
+        }
+    }
+    (detect_hardware_profile().recommended_threads.max(1) as usize).min(8)
+}
+
 pub fn detect_hardware_profile() -> HardwareProfile {
     let os = std::env::consts::OS.to_string();
     let arch = std::env::consts::ARCH.to_string();
