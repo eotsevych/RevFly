@@ -104,9 +104,14 @@ fn get_active_monitor(win: &tauri::WebviewWindow) -> Option<tauri::Monitor> {
                 let count = objc_msgSend(screen_array, sel_count) as usize;
                 let frame_fn: extern "C" fn(*mut c_void, *const c_void) -> NSRect =
                     std::mem::transmute(objc_msgSend as *const ());
+                // Through a non-variadic signature: on Apple Silicon a variadic argument goes on the
+                // stack, objc_msgSend reads it from a register, and the index came out as garbage
+                // (an out-of-range crash whenever a second display was connected).
+                let object_at_index: extern "C" fn(*mut c_void, *const c_void, usize) -> *mut c_void =
+                    std::mem::transmute(objc_msgSend as *const ());
 
                 for i in 0..count {
-                    let screen = objc_msgSend(screen_array, sel_object_at_index, i);
+                    let screen = object_at_index(screen_array, sel_object_at_index, i);
                     if !screen.is_null() {
                         let frame = frame_fn(screen, sel_frame);
                         let in_rect = mouse.x >= frame.origin.x
