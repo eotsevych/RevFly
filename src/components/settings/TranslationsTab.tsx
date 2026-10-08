@@ -1,5 +1,6 @@
 import React from "react";
 import type { Tokens } from "@/lib/tokens";
+import type { TranslationMode } from "@/lib/tauri";
 import {
   Section,
   FormLabel,
@@ -47,13 +48,23 @@ const TARGET_LANGUAGES = [
   { value: "Russian", label: "Russian" },
 ];
 
-// 3 Providers: No Translation, LLM (both local & cloud), Custom API
-const PROVIDERS = [
+// When dictation is translated (the same setting as General → Translation).
+const MODES: { value: TranslationMode; label: string; desc: string }[] = [
+  { value: "off", label: "Off", desc: "Voice to text only. Nothing is translated" },
   {
-    value: "No Translation",
-    label: "No Translation",
-    desc: "Keep raw transcript, voice-to-text only",
+    value: "hotkey",
+    label: "Separate hotkey",
+    desc: "Only recordings started with the translate hotkey (set it in General)",
   },
+  {
+    value: "auto",
+    label: "Automatic",
+    desc: "The launch hotkey translates speech that isn't in the target language",
+  },
+];
+
+// Which service translates: LLM (both local & cloud) or a custom API
+const PROVIDERS = [
   {
     value: "LLM",
     label: "LLM (both local & cloud)",
@@ -121,14 +132,10 @@ const DEFAULT_PROMPT = PROMPT_PRESETS[0]!.template;
 export default function TranslationsTab({ t }: { t: Tokens }) {
   const { settings, updateSettings } = useSettingsContext();
 
-  // Normalize active provider to one of the 3 modes
+  const translationMode: TranslationMode = settings.translation_mode ?? "hotkey";
+  const translationOff = translationMode === "off";
   const rawProvider = settings.translation_provider || "LLM";
-  const activeProvider =
-    rawProvider.toLowerCase().includes("no") || rawProvider.toLowerCase().includes("none")
-      ? "No Translation"
-      : rawProvider.toLowerCase().includes("custom")
-        ? "Custom API"
-        : "LLM";
+  const activeProvider = rawProvider.toLowerCase().includes("custom") ? "Custom API" : "LLM";
 
   const setProvider = (p: string) => {
     updateSettings({ translation_provider: p });
@@ -157,296 +164,310 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
     updateSettings({ prompt_template: `${currentPrompt} ${varName}` });
   };
 
+  const card = (
+    p: { value: string; label: string; desc: string },
+    active: boolean,
+    onClick: () => void,
+  ) => (
+    <button
+      key={p.value}
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: "14px 14px",
+        borderRadius: 10,
+        cursor: "pointer",
+        background: active ? `${t.accent}18` : t.inputBg,
+        border: `1px solid ${active ? `${t.accent}66` : t.border}`,
+        textAlign: "left",
+        transition: "all 0.2s",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "space-between",
+        minHeight: 90,
+      }}
+    >
+      <div>
+        <p
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: active ? t.accent : t.text,
+            fontFamily: "Inter, sans-serif",
+            margin: "0 0 4px",
+          }}
+        >
+          {p.label}
+        </p>
+        <p
+          style={{
+            fontSize: 11,
+            color: t.textDim,
+            fontFamily: "Inter, sans-serif",
+            margin: 0,
+            lineHeight: 1.4,
+          }}
+        >
+          {p.desc}
+        </p>
+      </div>
+      {active && (
+        <div
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: "50%",
+            background: t.accent,
+            marginTop: 8,
+          }}
+        />
+      )}
+    </button>
+  );
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {/* ── 3 Provider Selector Cards ── */}
-      <Section title="Translation Mode" t={t}>
+      {/* ── When to translate ── */}
+      <Section title="When to Translate" t={t}>
         <div
           style={{ padding: 12, display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}
         >
-          {PROVIDERS.map((p) => {
-            const active = activeProvider === p.value;
-            return (
-              <button
-                key={p.value}
-                type="button"
-                onClick={() => setProvider(p.value)}
-                style={{
-                  padding: "14px 14px",
-                  borderRadius: 10,
-                  cursor: "pointer",
-                  background: active ? `${t.accent}18` : t.inputBg,
-                  border: `1px solid ${active ? `${t.accent}66` : t.border}`,
-                  textAlign: "left",
-                  transition: "all 0.2s",
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "space-between",
-                  minHeight: 90,
-                }}
-              >
-                <div>
-                  <p
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: active ? t.accent : t.text,
-                      fontFamily: "Inter, sans-serif",
-                      margin: "0 0 4px",
-                    }}
-                  >
-                    {p.label}
-                  </p>
-                  <p
-                    style={{
-                      fontSize: 11,
-                      color: t.textDim,
-                      fontFamily: "Inter, sans-serif",
-                      margin: 0,
-                      lineHeight: 1.4,
-                    }}
-                  >
-                    {p.desc}
-                  </p>
-                </div>
-                {active && (
-                  <div
-                    style={{
-                      width: 7,
-                      height: 7,
-                      borderRadius: "50%",
-                      background: t.accent,
-                      marginTop: 8,
-                    }}
-                  />
-                )}
-              </button>
-            );
-          })}
+          {MODES.map((m) =>
+            card(m, translationMode === m.value, () =>
+              updateSettings({ translation_mode: m.value }),
+            ),
+          )}
         </div>
       </Section>
 
+      {translationOff && (
+        <div
+          style={{
+            padding: 16,
+            borderRadius: 8,
+            background: t.inputBg,
+            border: `1px solid ${t.border}`,
+            color: t.textMuted,
+            fontSize: 12,
+            fontFamily: "Inter, sans-serif",
+            lineHeight: 1.6,
+          }}
+        >
+          <strong style={{ color: t.text, display: "block", marginBottom: 4 }}>
+            Voice-to-text only
+          </strong>
+          Spoken audio is transcribed locally and pasted in the language you speak. No web requests
+          or translation steps. Choose Separate hotkey or Automatic to set up translation.
+        </div>
+      )}
+
+      {/* ── Translation service ── */}
+      {!translationOff && (
+        <Section title="Translation Service" t={t}>
+          <div
+            style={{ padding: 12, display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}
+          >
+            {PROVIDERS.map((p) => card(p, activeProvider === p.value, () => setProvider(p.value)))}
+          </div>
+        </Section>
+      )}
+
       {/* ── Provider Configuration Section ── */}
-      <Section
-        title={
-          activeProvider === "No Translation"
-            ? "Voice-to-Text Mode"
-            : activeProvider === "LLM"
+      {!translationOff && (
+        <Section
+          title={
+            activeProvider === "LLM"
               ? "LLM Provider Configuration (Local & Cloud)"
               : "Custom API Configuration"
-        }
-        t={t}
-      >
-        <div style={{ padding: 16 }}>
-          {/* No Translation Mode */}
-          {activeProvider === "No Translation" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <div
-                style={{
-                  padding: 16,
-                  borderRadius: 8,
-                  background: t.inputBg,
-                  border: `1px solid ${t.border}`,
-                  color: t.textMuted,
-                  fontSize: 12,
-                  fontFamily: "Inter, sans-serif",
-                  lineHeight: 1.6,
-                }}
-              >
-                <strong style={{ color: t.text, display: "block", marginBottom: 4 }}>
-                  Direct Voice-to-Text Mode Active
-                </strong>
-                Spoken audio is transcribed locally by the speech recognition model in RAM and
-                pasted directly into your active window. No external web requests or translation
-                steps are performed.
-              </div>
-            </div>
-          )}
-
-          {/* Combined LLM Mode (Both Local & Cloud) */}
-          {activeProvider === "LLM" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              {/* Quick Presets */}
-              <div>
-                <FormLabel t={t}>Quick Presets</FormLabel>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
-                  {LLM_PRESETS.map((pre) => {
-                    const isSelected =
-                      currentEndpoint.trim() === pre.endpoint.trim() &&
-                      currentModel.trim() === pre.model.trim();
-                    return (
-                      <button
-                        key={pre.name}
-                        type="button"
-                        onClick={() => applyLlmPreset(pre)}
-                        title={pre.hint}
-                        style={{
-                          padding: "6px 12px",
-                          borderRadius: 8,
-                          background: isSelected ? `${t.accent}22` : t.inputBg,
-                          border: `1px solid ${isSelected ? `${t.accent}66` : t.border}`,
-                          color: isSelected ? t.accent : t.textMuted,
-                          fontSize: 11,
-                          fontFamily: "Inter, sans-serif",
-                          fontWeight: isSelected ? 600 : 400,
-                          cursor: "pointer",
-                          transition: "all 0.15s",
-                        }}
-                      >
-                        {pre.name}
-                      </button>
-                    );
-                  })}
+          }
+          t={t}
+        >
+          <div style={{ padding: 16 }}>
+            {/* Combined LLM Mode (Both Local & Cloud) */}
+            {activeProvider === "LLM" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                {/* Quick Presets */}
+                <div>
+                  <FormLabel t={t}>Quick Presets</FormLabel>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
+                    {LLM_PRESETS.map((pre) => {
+                      const isSelected =
+                        currentEndpoint.trim() === pre.endpoint.trim() &&
+                        currentModel.trim() === pre.model.trim();
+                      return (
+                        <button
+                          key={pre.name}
+                          type="button"
+                          onClick={() => applyLlmPreset(pre)}
+                          title={pre.hint}
+                          style={{
+                            padding: "6px 12px",
+                            borderRadius: 8,
+                            background: isSelected ? `${t.accent}22` : t.inputBg,
+                            border: `1px solid ${isSelected ? `${t.accent}66` : t.border}`,
+                            color: isSelected ? t.accent : t.textMuted,
+                            fontSize: 11,
+                            fontFamily: "Inter, sans-serif",
+                            fontWeight: isSelected ? 600 : 400,
+                            cursor: "pointer",
+                            transition: "all 0.15s",
+                          }}
+                        >
+                          {pre.name}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
 
-              {/* Endpoint URL */}
-              <FormGroup>
-                <FormLabel t={t}>Endpoint URL (OpenAI-compatible)</FormLabel>
-                <FieldInput
-                  value={currentEndpoint}
-                  onChange={(v) =>
-                    updateSettings({
-                      llm_endpoint: v,
-                      local_llm_url: v,
-                    })
-                  }
-                  placeholder="https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-                  mono
-                  t={t}
-                />
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: t.textDim,
-                    fontFamily: "Inter, sans-serif",
-                    marginTop: 4,
-                    display: "block",
-                  }}
-                >
-                  Works with Google Gemini, local Ollama (http://localhost:11434), LM Studio
-                  (http://localhost:1234), or OpenAI.
-                </span>
-              </FormGroup>
-
-              {/* API Key & Model Name in 2 columns */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                {/* Endpoint URL */}
                 <FormGroup>
-                  <FormLabel t={t}>API Key (Optional for Local)</FormLabel>
-                  <ApiKeyInput
-                    value={currentApiKey}
+                  <FormLabel t={t}>Endpoint URL (OpenAI-compatible)</FormLabel>
+                  <FieldInput
+                    value={currentEndpoint}
                     onChange={(v) =>
                       updateSettings({
-                        llm_api_key: v,
-                        api_key: v,
+                        llm_endpoint: v,
+                        local_llm_url: v,
                       })
                     }
-                    placeholder="Leave empty for local Ollama / LM Studio"
+                    placeholder="https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+                    mono
                     t={t}
                   />
                   <span
                     style={{
-                      fontSize: 10,
+                      fontSize: 11,
                       color: t.textDim,
                       fontFamily: "Inter, sans-serif",
                       marginTop: 4,
                       display: "block",
                     }}
                   >
-                    Required for Gemini / OpenAI. Leave blank if using localhost.
+                    Works with Google Gemini, local Ollama (http://localhost:11434), LM Studio
+                    (http://localhost:1234), or OpenAI.
                   </span>
                 </FormGroup>
 
+                {/* API Key & Model Name in 2 columns */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <FormGroup>
+                    <FormLabel t={t}>API Key (Optional for Local)</FormLabel>
+                    <ApiKeyInput
+                      value={currentApiKey}
+                      onChange={(v) =>
+                        updateSettings({
+                          llm_api_key: v,
+                          api_key: v,
+                        })
+                      }
+                      placeholder="Leave empty for local Ollama / LM Studio"
+                      t={t}
+                    />
+                    <span
+                      style={{
+                        fontSize: 10,
+                        color: t.textDim,
+                        fontFamily: "Inter, sans-serif",
+                        marginTop: 4,
+                        display: "block",
+                      }}
+                    >
+                      Required for Gemini / OpenAI. Leave blank if using localhost.
+                    </span>
+                  </FormGroup>
+
+                  <FormGroup>
+                    <FormLabel t={t}>Model Name</FormLabel>
+                    <FieldInput
+                      value={currentModel}
+                      onChange={(v) =>
+                        updateSettings({
+                          llm_model: v,
+                          gemini_model: v,
+                          local_llm_model: v,
+                        })
+                      }
+                      placeholder="gemini-3.6-flash, llama3.2, etc."
+                      mono
+                      t={t}
+                    />
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 7 }}>
+                      {LLM_MODEL_SUGGESTIONS.map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() =>
+                            updateSettings({
+                              llm_model: m,
+                              gemini_model: m,
+                              local_llm_model: m,
+                            })
+                          }
+                          style={{
+                            padding: "2px 8px",
+                            borderRadius: 12,
+                            background: currentModel === m ? `${t.accent}22` : t.inputBg,
+                            border: `1px solid ${currentModel === m ? `${t.accent}66` : t.border}`,
+                            color: currentModel === m ? t.accent : t.textMuted,
+                            fontSize: 10,
+                            fontFamily: "JetBrains Mono, monospace",
+                            cursor: "pointer",
+                          }}
+                        >
+                          {m}
+                        </button>
+                      ))}
+                    </div>
+                  </FormGroup>
+                </div>
+              </div>
+            )}
+
+            {/* Custom API Mode */}
+            {activeProvider === "Custom API" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 <FormGroup>
-                  <FormLabel t={t}>Model Name</FormLabel>
+                  <FormLabel t={t}>Endpoint URL (REST)</FormLabel>
                   <FieldInput
-                    value={currentModel}
-                    onChange={(v) =>
-                      updateSettings({
-                        llm_model: v,
-                        gemini_model: v,
-                        local_llm_model: v,
-                      })
-                    }
-                    placeholder="gemini-3.6-flash, llama3.2, etc."
+                    value={settings.custom_api_url || "https://api.openai.com/v1/chat/completions"}
+                    onChange={(v) => updateSettings({ custom_api_url: v })}
+                    placeholder="https://api.openai.com/v1/chat/completions"
                     mono
                     t={t}
                   />
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 7 }}>
-                    {LLM_MODEL_SUGGESTIONS.map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        onClick={() =>
-                          updateSettings({
-                            llm_model: m,
-                            gemini_model: m,
-                            local_llm_model: m,
-                          })
-                        }
-                        style={{
-                          padding: "2px 8px",
-                          borderRadius: 12,
-                          background: currentModel === m ? `${t.accent}22` : t.inputBg,
-                          border: `1px solid ${currentModel === m ? `${t.accent}66` : t.border}`,
-                          color: currentModel === m ? t.accent : t.textMuted,
-                          fontSize: 10,
-                          fontFamily: "JetBrains Mono, monospace",
-                          cursor: "pointer",
-                        }}
-                      >
-                        {m}
-                      </button>
-                    ))}
-                  </div>
                 </FormGroup>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <FormGroup>
+                    <FormLabel t={t}>API Key</FormLabel>
+                    <ApiKeyInput
+                      value={settings.custom_api_key || ""}
+                      onChange={(v) => updateSettings({ custom_api_key: v })}
+                      placeholder="Bearer sk-…"
+                      t={t}
+                    />
+                  </FormGroup>
+
+                  <FormGroup>
+                    <FormLabel t={t}>Model Name</FormLabel>
+                    <FieldInput
+                      value={settings.custom_api_model || "gpt-4o-mini"}
+                      onChange={(v) => updateSettings({ custom_api_model: v })}
+                      placeholder="gpt-4o-mini"
+                      mono
+                      t={t}
+                    />
+                  </FormGroup>
+                </div>
               </div>
-            </div>
-          )}
-
-          {/* Custom API Mode */}
-          {activeProvider === "Custom API" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <FormGroup>
-                <FormLabel t={t}>Endpoint URL (REST)</FormLabel>
-                <FieldInput
-                  value={settings.custom_api_url || "https://api.openai.com/v1/chat/completions"}
-                  onChange={(v) => updateSettings({ custom_api_url: v })}
-                  placeholder="https://api.openai.com/v1/chat/completions"
-                  mono
-                  t={t}
-                />
-              </FormGroup>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <FormGroup>
-                  <FormLabel t={t}>API Key</FormLabel>
-                  <ApiKeyInput
-                    value={settings.custom_api_key || ""}
-                    onChange={(v) => updateSettings({ custom_api_key: v })}
-                    placeholder="Bearer sk-…"
-                    t={t}
-                  />
-                </FormGroup>
-
-                <FormGroup>
-                  <FormLabel t={t}>Model Name</FormLabel>
-                  <FieldInput
-                    value={settings.custom_api_model || "gpt-4o-mini"}
-                    onChange={(v) => updateSettings({ custom_api_model: v })}
-                    placeholder="gpt-4o-mini"
-                    mono
-                    t={t}
-                  />
-                </FormGroup>
-              </div>
-            </div>
-          )}
-        </div>
-      </Section>
+            )}
+          </div>
+        </Section>
+      )}
 
       {/* ── Spoken and Target Languages ── */}
-      {activeProvider !== "No Translation" && (
+      {!translationOff && (
         <Section title="Language Configuration" t={t}>
           <div style={{ padding: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <FormGroup>
@@ -466,9 +487,9 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
                   display: "block",
                 }}
               >
-                Translation triggers only when this language is spoken (e.g. Ukrainian). If you
-                speak any other language, translation is automatically skipped. Choose Auto-detect
-                to translate any language.
+                With Automatic translation, only this language is translated (e.g. Ukrainian);
+                anything else is pasted as spoken. Choose Auto-detect to translate any language. The
+                translate hotkey translates whatever you speak.
               </span>
             </FormGroup>
 
@@ -498,7 +519,7 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
       )}
 
       {/* ── Prompt Template Configuration ── */}
-      {activeProvider !== "No Translation" && (
+      {!translationOff && (
         <Section title="Prompt Template (LLM Instructions)" t={t}>
           <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
             <div>

@@ -67,19 +67,27 @@ fn open_accessibility_settings() {
 fn save_settings(
     state: State<'_, AppState>,
     app_handle: AppHandle,
-    new_settings: AppSettings,
+    mut new_settings: AppSettings,
 ) -> Result<(), String> {
+    new_settings.migrate();
     let old_settings = state.controller.get_settings();
     state.controller.save_settings(new_settings.clone())?;
 
-    // Update global hotkeys if changed
-    if old_settings.hotkey != new_settings.hotkey || old_settings.translate_hotkey != new_settings.translate_hotkey {
-        state.key_listener.update_hotkeys(&new_settings.hotkey, &new_settings.translate_hotkey);
-        register_global_shortcuts(&app_handle, &new_settings);
-        prompt_accessibility_for_modifier_hotkeys(&new_settings);
+    // Update global hotkeys if changed (the translate hotkey is only active in its mode)
+    if old_settings.hotkey != new_settings.hotkey
+        || old_settings.active_translate_hotkey() != new_settings.active_translate_hotkey()
+    {
+        apply_hotkeys(&app_handle, &state, &new_settings);
     }
 
     Ok(())
+}
+
+/// Points the modifier-key listener and the key-combo shortcuts at the settings' hotkeys.
+pub(crate) fn apply_hotkeys(app_handle: &AppHandle, state: &AppState, settings: &AppSettings) {
+    state.key_listener.update_hotkeys(&settings.hotkey, settings.active_translate_hotkey());
+    register_global_shortcuts(app_handle, settings);
+    prompt_accessibility_for_modifier_hotkeys(settings);
 }
 
 /// (Re)registers the key-combo hotkeys (e.g. `Control+Shift+Space`) with the global-shortcut
@@ -94,19 +102,19 @@ pub(crate) fn register_global_shortcuts(app_handle: &AppHandle, settings: &AppSe
             log::warn!("Could not register hotkey {}: {}", settings.hotkey, e);
         }
     }
-    if let Ok(shortcut) = settings.translate_hotkey.parse::<Shortcut>() {
+    if let Ok(shortcut) = settings.active_translate_hotkey().parse::<Shortcut>() {
         if Some(shortcut) == main {
             log::warn!("Translate hotkey is the same as the main hotkey; ignoring it");
         } else if let Err(e) = gs.register(shortcut) {
-            log::warn!("Could not register translate hotkey {}: {}", settings.translate_hotkey, e);
+            log::warn!("Could not register translate hotkey {}: {}", settings.active_translate_hotkey(), e);
         }
     }
 }
 
 /// Which recording a pressed key-combo shortcut starts: the translate one if it matches
-/// `translate_hotkey`, otherwise the main one.
+/// the active translate hotkey, otherwise the main one.
 fn shortcut_mode(shortcut: &Shortcut, settings: &AppSettings) -> RecordingMode {
-    let is_translate = settings.translate_hotkey.parse::<Shortcut>().map(|t| &t == shortcut).unwrap_or(false);
+    let is_translate = settings.active_translate_hotkey().parse::<Shortcut>().map(|t| &t == shortcut).unwrap_or(false);
     let is_main = settings.hotkey.parse::<Shortcut>().map(|m| &m == shortcut).unwrap_or(false);
     if is_translate && !is_main {
         RecordingMode::Translate
@@ -116,7 +124,7 @@ fn shortcut_mode(shortcut: &Shortcut, settings: &AppSettings) -> RecordingMode {
 }
 
 fn prompt_accessibility_for_modifier_hotkeys(settings: &AppSettings) {
-    let uses_modifier = [&settings.hotkey, &settings.translate_hotkey]
+    let uses_modifier = [settings.hotkey.as_str(), settings.active_translate_hotkey()]
         .iter()
         .any(|h| global_key_listener::hotkey_str_to_modifier_keycode(h).is_some());
     if uses_modifier && !global_key_listener::is_accessibility_trusted() {
@@ -138,6 +146,11 @@ fn cancel_recording(state: State<'_, AppState>) -> Result<(), String> {
 #[tauri::command]
 fn retry_translation(state: State<'_, AppState>) -> Result<(), String> {
     state.controller.retry_translation()
+}
+
+#[tauri::command]
+fn paste_original(state: State<'_, AppState>) -> Result<(), String> {
+    state.controller.paste_original()
 }
 
 #[tauri::command]
@@ -464,7 +477,7 @@ pub fn run() {
             let key_listener = global_key_listener::start_global_key_listener(
                 Arc::clone(&controller),
                 &hotkey_str,
-                &settings.translate_hotkey,
+                settings.active_translate_hotkey(),
                 app.handle().clone(),
             );
 
@@ -485,6 +498,7 @@ pub fn run() {
             toggle_recording,
             cancel_recording,
             retry_translation,
+            paste_original,
             check_accessibility,
             request_accessibility,
             open_accessibility_settings,

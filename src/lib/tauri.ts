@@ -5,16 +5,19 @@ export const isTauri = (): boolean => {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 };
 
+export type TranslationMode = "off" | "hotkey" | "auto";
+
 export interface BackendSettings {
   api_key: string;
   source_lang: string;
   target_lang: string;
   skip_languages: string;
   hotkey: string;
-  /** Second hotkey that records and always translates. Empty = off. */
+  /** When dictation is translated: never, only with `translate_hotkey`, or automatically by the
+   * launch hotkey whenever the speech isn't in the target language. */
+  translation_mode?: TranslationMode;
+  /** Second hotkey that records and always translates; used in "hotkey" mode. Empty = not set. */
   translate_hotkey?: string;
-  /** Whether the main hotkey still translates once a translate hotkey is set. */
-  auto_translate?: boolean;
   sound_effect: boolean;
   auto_paste: boolean;
   show_hints?: boolean;
@@ -135,9 +138,11 @@ export interface AssistantStateEvent {
   warning?: boolean;
   /** While listening: the mic is being reopened, or reopening didn't bring sound back. */
   mic?: "reconnecting" | "down";
-  /** While listening, once a translate hotkey is set: which hotkey started the recording.
-   * "transcribe" = main hotkey, transcription only; "auto" = main hotkey, translates as before. */
+  /** While listening: what happens to the speech. "translate" = will be translated (translate
+   * hotkey); "auto" = translated if it isn't in the target language; "transcribe" = never. */
   mode?: "translate" | "transcribe" | "auto" | null;
+  /** Done after a translation: the pill offers to paste the untranslated text instead. */
+  original?: boolean;
 }
 
 export async function fetchSettings(): Promise<BackendSettings | null> {
@@ -175,6 +180,18 @@ export async function triggerRetryTranslation(): Promise<string | null> {
   if (!isTauri()) return null;
   try {
     await invoke("retry_translation");
+    return null;
+  } catch (err) {
+    return String(err);
+  }
+}
+
+/** Pastes (or copies) the untranslated text of the last translation. Resolves to an error message,
+ * or null when it worked. */
+export async function triggerPasteOriginal(): Promise<string | null> {
+  if (!isTauri()) return null;
+  try {
+    await invoke("paste_original");
     return null;
   } catch (err) {
     return String(err);

@@ -9,13 +9,15 @@ pub struct AppSettings {
     pub target_lang: String,
     pub skip_languages: String,
     pub hotkey: String,
-    /// Second hotkey that records and always translates to `target_lang`. Empty = off.
+    /// When dictation is translated: "off" (never), "hotkey" (only recordings started with
+    /// `translate_hotkey`; the main hotkey never translates) or "auto" (the main hotkey translates
+    /// whatever isn't in `target_lang`). Empty in settings saved before 0.1.12; see `migrate`.
+    #[serde(default)]
+    pub translation_mode: String,
+    /// Second hotkey that records and always translates to `target_lang`. Used only in "hotkey"
+    /// mode. Empty = not set.
     #[serde(default)]
     pub translate_hotkey: String,
-    /// Whether the main hotkey still translates automatically once `translate_hotkey` is set.
-    /// Ignored while `translate_hotkey` is empty (the main hotkey then always translates as before).
-    #[serde(default = "default_true")]
-    pub auto_translate: bool,
     pub sound_effect: bool,
     pub auto_paste: bool,
     /// Shows how to finish a recording on the pill while listening.
@@ -193,8 +195,8 @@ impl Default for AppSettings {
             hotkey: "RightOption".to_string(),
             #[cfg(not(target_os = "macos"))]
             hotkey: "Control+Shift+Space".to_string(),
+            translation_mode: "hotkey".to_string(),
             translate_hotkey: String::new(),
-            auto_translate: true,
             sound_effect: true,
             auto_paste: true,
             show_hints: true,
@@ -269,13 +271,58 @@ pub fn get_data_dir() -> PathBuf {
 }
 
 impl AppSettings {
+    pub fn translation_off(&self) -> bool {
+        self.translation_mode == "off"
+    }
+
+    pub fn auto_translates(&self) -> bool {
+        self.translation_mode == "auto"
+    }
+
+    /// The translate hotkey to register: empty unless the mode uses it.
+    pub fn active_translate_hotkey(&self) -> &str {
+        if self.translation_mode == "hotkey" {
+            self.translate_hotkey.trim()
+        } else {
+            ""
+        }
+    }
+
+    /// Fills in `translation_mode` for settings saved before it existed, keeping what the user
+    /// had: "No Translation" as the provider → off; a translate hotkey → hotkey; otherwise the
+    /// main hotkey translated automatically → auto. The provider no longer turns translation off,
+    /// so a "No Translation" provider is reset to the default one. Returns whether anything changed.
+    pub fn migrate(&mut self) -> bool {
+        let provider = self.translation_provider.to_lowercase();
+        let provider_off = provider.contains("no translation") || provider == "none";
+        if !matches!(self.translation_mode.as_str(), "off" | "hotkey" | "auto") {
+            self.translation_mode = if provider_off {
+                "off"
+            } else if !self.translate_hotkey.trim().is_empty() {
+                "hotkey"
+            } else {
+                "auto"
+            }
+            .to_string();
+        } else if !provider_off {
+            return false;
+        }
+        if provider_off {
+            self.translation_provider = default_translation_provider();
+        }
+        true
+    }
+
     pub fn load() -> Self {
         let config_dir = get_config_dir();
         let settings_path = config_dir.join("settings.json");
 
         if settings_path.exists() {
             if let Ok(content) = fs::read_to_string(&settings_path) {
-                if let Ok(settings) = serde_json::from_str::<AppSettings>(&content) {
+                if let Ok(mut settings) = serde_json::from_str::<AppSettings>(&content) {
+                    if settings.migrate() {
+                        let _ = settings.save();
+                    }
                     return settings;
                 }
             }
@@ -295,5 +342,46 @@ impl AppSettings {
         let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
         fs::write(settings_path, json).map_err(|e| e.to_string())?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppSettings;
+
+    fn legacy(provider: &str, translate_hotkey: &str) -> AppSettings {
+        let mut s = AppSettings::default();
+        s.translation_mode = String::new();
+        s.translation_provider = provider.to_string();
+        s.translate_hotkey = translate_hotkey.to_string();
+        s
+    }
+
+    #[test]
+    fn migrate_keeps_what_the_user_had() {
+        let mut off = legacy("No Translation", "F5");
+        assert!(off.migrate());
+        assert_eq!(off.translation_mode, "off");
+        assert_eq!(off.translation_provider, "LLM");
+        assert_eq!(off.active_translate_hotkey(), "");
+
+        let mut hotkey = legacy("LLM", "F5");
+        assert!(hotkey.migrate());
+        assert_eq!(hotkey.translation_mode, "hotkey");
+        assert_eq!(hotkey.active_translate_hotkey(), "F5");
+
+        let mut auto = legacy("Custom API", "");
+        assert!(auto.migrate());
+        assert_eq!(auto.translation_mode, "auto");
+        assert_eq!(auto.translation_provider, "Custom API");
+
+        assert!(!auto.migrate(), "already migrated");
+    }
+
+    #[test]
+    fn new_installs_translate_only_with_the_translate_hotkey() {
+        let s = AppSettings::default();
+        assert_eq!(s.translation_mode, "hotkey");
+        assert!(!s.auto_translates());
     }
 }

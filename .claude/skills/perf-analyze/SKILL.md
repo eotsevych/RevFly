@@ -51,6 +51,8 @@ to a different log. Default: all data, with extra attention to the last 24 hours
   `available_mem_min_mb` low or `swap_used_peak_mb` rising means memory pressure. On macOS
   `available_mem_min_mb` comes from the kernel's memory-pressure level; before 0.1.10 it was
   always 0 there, so ignore it in older lines.
+- `app_version`: the RevFly version that wrote the line (since 0.1.12; older lines lack it, so
+  tell builds apart by restarts). Compare versions before blaming a release.
 - `context`: `thermal_state` (nominal/fair/serious/critical), `low_power_mode`, `load_avg_1m`
   (other apps competing for CPU), `app_uptime_sec`, `dictations_since_launch`.
 

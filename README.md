@@ -28,8 +28,8 @@ No cloud audio upload. No browser required. Just tap your hotkey and speak.
 ### 1. Instant Global Hotkey
 - **Single-Tap Modifier Keys**: Use `Right Option` (⌥) or `Right Control` (⌃) directly on macOS.
 - **Key Combos Everywhere**: Use any shortcut such as `Ctrl+Shift+Space` on Windows and Linux.
-- **Press to Start, Press to Finish**: Press the hotkey once to begin recording, press it again to stop and paste. The pill shows a reminder while you record; turn it off in **Settings** → **General** → **Show hints**.
-- **Separate Translate Hotkey**: Optionally set a second hotkey in **Settings** → **General** → **Translate hotkey**. It records and translates to your target language, while the launch hotkey only transcribes (or keeps translating too, if you turn **Launch hotkey also translates** on).
+- **Press to Start, Press to Finish**: Press the hotkey once to begin recording, press it again to stop and paste. The pill shows a reminder for your first few recordings and after you change a hotkey; turn it off in **Settings** → **General** → **Show hints**.
+- **Translate When You Mean To**: **Settings** → **General** → **Translation** sets when RevFly translates: **Off**, **Separate hotkey** (default: the launch hotkey keeps the language you speak, a second **Translate hotkey** translates to your target language) or **Automatic** (the launch hotkey translates anything not in the target language). A translating recording shows on the pill in teal with the target language, such as `EN`; automatic translation shows an outlined `AUTO→EN`. After a translation, **Paste original** on the pill pastes what you actually said.
 - **Global Cancel**: Tap `Escape` at any time to instantly stop recording or cancel translation.
 - **Micro-Sounds**: Subtly chimes on recording start and completion.
 
@@ -65,7 +65,7 @@ No cloud audio upload. No browser required. Just tap your hotkey and speak.
 ### 8. Floating Animated Voice Pill
 - **Always-on-Top Minimal HUD**: Small floating indicator that stays above other windows with transparent glass design.
 - **4 Visual States**:
-  - **Listening**: Real-time equalizer bars reacting to your microphone audio volume, with a reminder of which key finishes the recording.
+  - **Listening**: Real-time equalizer bars reacting to your microphone audio volume, with what happens to your speech (kept in your language, translated, or auto-translated) and, for your first few recordings, which key finishes it.
   - **Transcribing**: Three pulsing dots while Whisper or Parakeet runs locally in RAM.
   - **Translating**: Pulsing violet glow displaying language direction (`Auto → English`).
   - **Done**: Quick emerald green checkmark as text pastes.

@@ -394,6 +394,16 @@ pub(crate) struct PendingRetry {
     history_id: i64,
 }
 
+/// How long the pill offers "Paste original" after a translation was pasted.
+const ORIGINAL_OFFER_HOLD: Duration = Duration::from_secs(5);
+
+/// The spoken text of the last translated dictation, offered on the pill until `session` changes.
+#[derive(Clone)]
+pub(crate) struct OriginalOffer {
+    text: String,
+    session: u64,
+}
+
 /// Entry point for the audio thread; routes a microphone problem to the running controller.
 pub fn report_mic_problem(app_handle: &AppHandle, report: crate::audio::MicReport) {
     if let Some(state) = app_handle.try_state::<crate::AppState>() {
@@ -411,8 +421,7 @@ pub fn report_mic_recovered(app_handle: &AppHandle, switched_to: Option<String>)
 /// Which hotkey started the recording, which decides whether it gets translated.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecordingMode {
-    /// The main hotkey (or the app/tray): translates automatically unless a translate hotkey is set
-    /// and `auto_translate` is off, in which case it only transcribes.
+    /// The main hotkey (or the app/tray): translates only in "auto" translation mode.
     Main,
     /// The translate hotkey: always translates to the target language (when it isn't already in it).
     Translate,
@@ -421,20 +430,18 @@ pub enum RecordingMode {
 impl RecordingMode {
     /// True when this recording must not be translated.
     fn transcribe_only(self, settings: &AppSettings) -> bool {
-        self == RecordingMode::Main && !settings.translate_hotkey.trim().is_empty() && !settings.auto_translate
+        settings.translation_off() || (self == RecordingMode::Main && !settings.auto_translates())
     }
 
-    /// The pill's `mode` while listening, so it can show the right finish key and target. None
-    /// while no translate hotkey is set (nothing to tell apart).
-    fn pill_mode(self, settings: &AppSettings) -> Option<&'static str> {
-        if settings.translate_hotkey.trim().is_empty() {
-            None
+    /// The pill's `mode` while listening: "translate" (will be translated), "auto" (translated if
+    /// not in the target language) or "transcribe" (never translated).
+    fn pill_mode(self, settings: &AppSettings) -> &'static str {
+        if self.transcribe_only(settings) {
+            "transcribe"
         } else if self == RecordingMode::Translate {
-            Some("translate")
-        } else if self.transcribe_only(settings) {
-            Some("transcribe")
+            "translate"
         } else {
-            Some("auto")
+            "auto"
         }
     }
 }
@@ -746,6 +753,8 @@ pub struct AppController {
     session_id: Arc<AtomicU64>,
     /// The last failed translation, offered for retry until another recording finishes.
     pending_retry: Arc<Mutex<Option<PendingRetry>>>,
+    /// The untranslated text of the last translation, while the pill offers to paste it instead.
+    original_offer: Arc<Mutex<Option<OriginalOffer>>>,
     /// When and how the current recording started, for the start/stop log.
     recording_start: Arc<Mutex<Option<RecordingStart>>>,
     /// Set when a recording starts; read when it's processed.
@@ -853,6 +862,7 @@ impl AppController {
             last_activity,
             session_id,
             pending_retry: Arc::new(Mutex::new(None)),
+            original_offer: Arc::new(Mutex::new(None)),
             recording_start: Arc::new(Mutex::new(None)),
             recording_mode: Arc::new(Mutex::new(RecordingMode::Main)),
             start_gate: Arc::new(Mutex::new(())),
@@ -884,6 +894,7 @@ impl AppController {
             let mut s = self.settings.lock().unwrap();
             *s = new_settings.clone();
         }
+        crate::tray::sync_translation_menu(&new_settings);
 
         // Single Model Policy: If active model changed, drop the other from RAM immediately
         if old_model != new_settings.model_name {
@@ -1485,6 +1496,7 @@ impl AppController {
         let pipeline_logger_arc = Arc::clone(&self.pipeline_logger);
         let session_id_arc = Arc::clone(&self.session_id);
         let pending_retry_arc = Arc::clone(&self.pending_retry);
+        let original_offer_arc = Arc::clone(&self.original_offer);
         let session = self.session_id.load(Ordering::SeqCst);
         let mode = *self.recording_mode.lock().unwrap();
 
@@ -2094,8 +2106,9 @@ impl AppController {
             let is_english = crate::translate::normalize_lang(&detected_effective) == "english";
 
             let provider_norm = settings.translation_provider.to_lowercase();
-            let is_no_trans = provider_norm.contains("no")
-                || provider_norm.contains("none")
+            let is_no_trans = settings.translation_off()
+                || provider_norm.contains("no translation")
+                || provider_norm == "none"
                 || target_norm == "none";
             let is_custom = provider_norm.contains("custom");
             let is_llm = !is_no_trans && !is_custom;
@@ -2116,18 +2129,19 @@ impl AppController {
                 false
             };
 
-            let skip_check = should_skip(
-                &normalized_source_text,
-                &detected_effective,
-                &settings.source_lang,
-                &settings.target_lang,
-            );
+            // The translate hotkey translates whatever was spoken; only automatic translation is
+            // limited to the spoken language set in settings.
+            let skip_check = if mode == RecordingMode::Translate {
+                crate::translate::normalize_lang(&detected_effective) == target_norm
+            } else {
+                should_skip(&normalized_source_text, &detected_effective, &settings.source_lang, &settings.target_lang)
+            };
 
             let source_norm = crate::translate::normalize_lang(&settings.source_lang);
             let (skip_translation, skip_reason) = if is_no_trans {
                 (true, "No translation mode (Voice-to-Text only)".to_string())
             } else if mode.transcribe_only(&settings) {
-                (true, "Transcription-only hotkey".to_string())
+                (true, "Transcription-only hotkey (translation uses the translate hotkey)".to_string())
             } else if skip_check {
                 if crate::translate::normalize_lang(&detected_effective) == target_norm {
                     (true, format!("Already in target language ({})", settings.target_lang))
@@ -2261,11 +2275,16 @@ impl AppController {
                 return;
             }
 
-            // Step 6: Set phase. A failed translation goes straight back to Idle so the hotkey works while
-            // the error (with its Retry button) is still on screen.
+            // A translation was pasted: the pill offers the spoken text for a few seconds.
+            let offers_original = !skip_translation && !translation_failed && pre_translate_text.trim() != final_text.trim();
+            *original_offer_arc.lock().unwrap() =
+                offers_original.then(|| OriginalOffer { text: pre_translate_text.clone(), session });
+
+            // Step 6: Set phase. A failed translation, or one offering its original, goes straight back
+            // to Idle so the hotkey works while the pill (with its button) is still on screen.
             {
                 let mut p = phase_arc.lock().unwrap();
-                if translation_failed {
+                if translation_failed || offers_original {
                     *p = AssistantPhase::Idle;
                 } else {
                     *p = AssistantPhase::Done;
@@ -2295,7 +2314,8 @@ impl AppController {
                         "state": "done",
                         "title": "Copied to clipboard",
                         "subtitle": null,
-                        "text": final_text
+                        "text": final_text,
+                        "original": offers_original
                     }),
                 );
             }
@@ -2429,6 +2449,21 @@ impl AppController {
             if translation_failed {
                 return;
             }
+            // The "Paste original" offer stays up a few seconds unless a new recording replaces it.
+            if offers_original {
+                tokio::time::sleep(ORIGINAL_OFFER_HOLD).await;
+                let p = phase_arc.lock().unwrap();
+                if *p == AssistantPhase::Idle && session_id_arc.load(Ordering::SeqCst) == session {
+                    *original_offer_arc.lock().unwrap() = None;
+                    *last_activity_arc.lock().unwrap() = Instant::now();
+                    let _ = app_handle.emit(
+                        "assistant-state-changed",
+                        serde_json::json!({ "state": "idle", "title": "Ready", "subtitle": null }),
+                    );
+                    hide_main_window(&app_handle);
+                }
+                return;
+            }
             // Show the done pill briefly, then revert to Idle and hide the window.
             tokio::time::sleep(Duration::from_millis(600)).await;
             {
@@ -2471,6 +2506,53 @@ impl AppController {
         let mut settings = self.get_settings();
         settings.target_lang = lang.to_string();
         self.save_settings(settings)
+    }
+
+    /// Pastes (or copies) the spoken text of the last translation, while the pill still offers it.
+    pub fn paste_original(&self) -> Result<(), String> {
+        let current = self.session_id.load(Ordering::SeqCst);
+        let offer = self
+            .original_offer
+            .lock()
+            .unwrap()
+            .take()
+            .filter(|o| o.session == current)
+            .ok_or_else(|| "The original text is no longer available".to_string())?;
+        if *self.phase.lock().unwrap() != AssistantPhase::Idle {
+            return Err("RevFly is busy; try again when it finishes".to_string());
+        }
+        let settings = self.get_settings();
+        if settings.auto_paste {
+            copy_and_paste(&offer.text)?;
+        } else {
+            crate::paste::copy_to_clipboard(&offer.text)?;
+        }
+        log_stage_event(&get_data_dir(), "PASTE_ORIGINAL", &format!("{} the untranslated text: \"{}\"", if settings.auto_paste { "Pasted" } else { "Copied" }, offer.text));
+        // A new session also stops the offer's hide timer; this one hides the pill sooner.
+        let session = self.session_id.fetch_add(1, Ordering::SeqCst) + 1;
+        let _ = self.app_handle.emit(
+            "assistant-state-changed",
+            serde_json::json!({
+                "state": "done",
+                "title": if settings.auto_paste { "Original pasted" } else { "Original copied" },
+                "subtitle": null,
+                "text": offer.text
+            }),
+        );
+        let app_handle = self.app_handle.clone();
+        let phase_arc = Arc::clone(&self.phase);
+        let session_id_arc = Arc::clone(&self.session_id);
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(900)).await;
+            if *phase_arc.lock().unwrap() == AssistantPhase::Idle && session_id_arc.load(Ordering::SeqCst) == session {
+                let _ = app_handle.emit(
+                    "assistant-state-changed",
+                    serde_json::json!({ "state": "idle", "title": "Ready", "subtitle": null }),
+                );
+                hide_main_window(&app_handle);
+            }
+        });
+        Ok(())
     }
 
     pub fn set_translation_provider(&self, provider: &str) -> Result<(), String> {

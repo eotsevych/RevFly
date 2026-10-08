@@ -53,6 +53,7 @@ pub fn init() {
             append(&serde_json::json!({
                 "type": "heartbeat",
                 "ts": crate::pipeline_logger::current_timestamp(),
+                "app_version": env!("CARGO_PKG_VERSION"),
                 "app_uptime_sec": uptime_sec(),
                 "dictations_since_launch": DICTATIONS.load(Ordering::Relaxed),
                 // CPU averaged over the whole interval since the previous heartbeat.
@@ -176,6 +177,7 @@ impl PerfRun {
         let record = serde_json::json!({
             "type": "dictation",
             "ts": crate::pipeline_logger::current_timestamp(),
+            "app_version": env!("CARGO_PKG_VERSION"),
             "outcome": self.outcome,
             "total_ms": total_ms,
             "stages_ms": stages,

@@ -84,6 +84,8 @@ static EJECT_ITEM: std::sync::OnceLock<tauri::menu::MenuItem<tauri::Wry>> = std:
 static TOGGLE_ITEM: std::sync::OnceLock<tauri::menu::MenuItem<tauri::Wry>> = std::sync::OnceLock::new();
 static UPDATE_ITEM: std::sync::OnceLock<tauri::menu::MenuItem<tauri::Wry>> = std::sync::OnceLock::new();
 static RETRY_ITEM: std::sync::OnceLock<tauri::menu::MenuItem<tauri::Wry>> = std::sync::OnceLock::new();
+/// Translation submenu items with the setting value each stands for ("mode:off", "provider:LLM").
+static TRANSLATION_ITEMS: std::sync::OnceLock<Vec<(String, CheckMenuItem<tauri::Wry>)>> = std::sync::OnceLock::new();
 static IS_RECORDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn update_tray_model_status(app: &AppHandle, is_loaded: bool) {
@@ -115,6 +117,37 @@ pub fn set_model_download_progress(percent: u32) {
 }
 
 /// Enables "Retry Last Translation" while a failed translation is waiting to be retried.
+const TRANSLATION_MODES: [(&str, &str); 3] = [
+    ("off", "Off (Voice to Text only)"),
+    ("hotkey", "With the Translate Hotkey"),
+    ("auto", "Automatic (Launch Hotkey)"),
+];
+const TRANSLATION_PROVIDERS: [(&str, &str); 2] = [("LLM", "LLM (both local & cloud)"), ("Custom API", "Custom API")];
+
+fn provider_key(settings: &AppSettings) -> &'static str {
+    if settings.translation_provider.to_lowercase().contains("custom") {
+        "Custom API"
+    } else {
+        "LLM"
+    }
+}
+
+/// Ticks the translation mode and provider the settings use. Called whenever settings are saved,
+/// so the menu matches changes made in the Settings window too.
+pub fn sync_translation_menu(settings: &AppSettings) {
+    let Some(items) = TRANSLATION_ITEMS.get() else {
+        return;
+    };
+    let mode = format!("mode:{}", settings.translation_mode);
+    let provider = format!("provider:{}", provider_key(settings));
+    for (key, item) in items {
+        let _ = item.set_checked(*key == mode || *key == provider);
+        if key.starts_with("provider:") {
+            let _ = item.set_enabled(!settings.translation_off());
+        }
+    }
+}
+
 pub fn set_retry_item(enabled: bool) {
     if let Some(item) = RETRY_ITEM.get() {
         let _ = item.set_enabled(enabled);
@@ -247,51 +280,27 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
         .collect();
     let output_submenu = Submenu::with_items(app, "Audio Output", true, &output_items_refs)?;
 
-    // Translation submenu: 3 options (No Translation, LLM [both local & cloud], Custom API)
-    let current_provider = &settings.translation_provider;
-    let is_no_trans = current_provider.eq_ignore_ascii_case("no translation")
-        || current_provider.eq_ignore_ascii_case("none")
-        || settings.target_lang == "No Translation";
-    let is_custom_api = current_provider.to_lowercase().contains("custom") && !is_no_trans;
-    let is_llm = !is_no_trans && !is_custom_api;
-
-    let mut trans_menu_items = Vec::new();
-
-    let no_trans_item = CheckMenuItem::with_id(
-        app,
-        "trans_provider:No Translation",
-        "No Translation (Voice to Text only)",
-        true,
-        is_no_trans,
-        None::<&str>,
-    )?;
-    trans_menu_items.push(no_trans_item);
-
-    let llm_item = CheckMenuItem::with_id(
-        app,
-        "trans_provider:LLM",
-        "LLM (both local & cloud)",
-        true,
-        is_llm,
-        None::<&str>,
-    )?;
-    trans_menu_items.push(llm_item);
-
-    let custom_api_item = CheckMenuItem::with_id(
-        app,
-        "trans_provider:Custom API",
-        "Custom API",
-        true,
-        is_custom_api,
-        None::<&str>,
-    )?;
-    trans_menu_items.push(custom_api_item);
-
-    let trans_items_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = trans_menu_items
-        .iter()
-        .map(|i| i as &dyn tauri::menu::IsMenuItem<tauri::Wry>)
-        .collect();
+    // Translation submenu: when to translate (the mode), then which service does it.
+    let mut translation_items = Vec::new();
+    for (mode, label) in TRANSLATION_MODES {
+        let item = CheckMenuItem::with_id(app, format!("trans_mode:{}", mode), label, true, settings.translation_mode == mode, None::<&str>)?;
+        translation_items.push((format!("mode:{}", mode), item));
+    }
+    for (provider, label) in TRANSLATION_PROVIDERS {
+        let checked = provider_key(settings) == provider;
+        let item = CheckMenuItem::with_id(app, format!("trans_provider:{}", provider), label, !settings.translation_off(), checked, None::<&str>)?;
+        translation_items.push((format!("provider:{}", provider), item));
+    }
+    let trans_sep = PredefinedMenuItem::separator(app)?;
+    let mut trans_items_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = Vec::new();
+    for (i, (_, item)) in translation_items.iter().enumerate() {
+        if i == TRANSLATION_MODES.len() {
+            trans_items_refs.push(&trans_sep);
+        }
+        trans_items_refs.push(item);
+    }
     let trans_submenu = Submenu::with_items(app, "Translation", true, &trans_items_refs)?;
+    let _ = TRANSLATION_ITEMS.set(translation_items.clone());
 
     let sep2 = PredefinedMenuItem::separator(app)?;
     let update_item = MenuItem::with_id(app, "check_updates", "Check for Updates…", true, None::<&str>)?;
@@ -365,6 +374,14 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
             } else if let Some(provider) = id.strip_prefix("trans_provider:") {
                 if let Some(state) = app.try_state::<crate::AppState>() {
                     let _ = state.controller.set_translation_provider(provider);
+                }
+            } else if let Some(mode) = id.strip_prefix("trans_mode:") {
+                if let Some(state) = app.try_state::<crate::AppState>() {
+                    let mut settings = state.controller.get_settings();
+                    settings.translation_mode = mode.to_string();
+                    if state.controller.save_settings(settings.clone()).is_ok() {
+                        crate::apply_hotkeys(app, &state, &settings);
+                    }
                 }
             }
         });

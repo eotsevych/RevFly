@@ -6,6 +6,7 @@ import {
   subscribeToAudioLevels,
   subscribeToStateChanges,
   triggerCancelRecording,
+  triggerPasteOriginal,
   triggerRetryTranslation,
   triggerStartDragging,
   type AssistantStateEvent,
@@ -28,6 +29,52 @@ const STATE_META: Record<
   done: { label: "Copied!", sublabel: "Translation in clipboard" },
   error: { label: "Error", sublabel: "Action could not complete" },
 };
+
+/** Color of a recording started with the translate hotkey, from listening through translating. */
+const TRANSLATE_ACCENT = "#14b8a6";
+
+/** Width of the pill in every stage except long messages (the window is 340 wide). */
+const PILL_WIDTH = 300;
+
+/** How many recordings show "Press … to finish" after install or after a hotkey changes. */
+const FINISH_HINT_RECORDINGS = 3;
+const FINISH_HINT_KEY = "revfly_finish_hint";
+
+const LANGUAGE_CODES: Record<string, string> = {
+  english: "EN",
+  ukrainian: "UK",
+  spanish: "ES",
+  french: "FR",
+  german: "DE",
+  italian: "IT",
+  polish: "PL",
+  japanese: "JA",
+  chinese: "ZH",
+  russian: "RU",
+};
+
+function languageCode(name: string): string {
+  return LANGUAGE_CODES[name.trim().toLowerCase()] ?? name.trim().slice(0, 2).toUpperCase();
+}
+
+/** Whether this recording shows the finish hint; counts it if so. The count restarts whenever
+ * either hotkey changes, so a new key is explained a few times too. */
+function takeFinishHint(s: BackendSettings): boolean {
+  if (s.show_hints === false) return false;
+  const keys = `${s.hotkey}|${s.translate_hotkey ?? ""}`;
+  try {
+    const saved = JSON.parse(localStorage.getItem(FINISH_HINT_KEY) || "null") as {
+      keys: string;
+      shown: number;
+    } | null;
+    const shown = saved?.keys === keys ? saved.shown : 0;
+    if (shown >= FINISH_HINT_RECORDINGS) return false;
+    localStorage.setItem(FINISH_HINT_KEY, JSON.stringify({ keys, shown: shown + 1 }));
+    return true;
+  } catch {
+    return true;
+  }
+}
 
 function getStateAccent(
   state: "idle" | "listening" | "transcribing" | "translating" | "done" | "error",
@@ -54,6 +101,9 @@ export function VoicePill() {
   const [audioLevels, setAudioLevels] = useState<AudioLevels | undefined>(undefined);
   const [settings, setSettings] = useState<BackendSettings | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
+  const [showFinishHint, setShowFinishHint] = useState(false);
+  // The backend sends the mode only while listening; keep it so processing stays in its color.
+  const [runMode, setRunMode] = useState<AssistantStateEvent["mode"]>(undefined);
 
   useEffect(() => {
     fetchSettings().then((s) => {
@@ -62,6 +112,8 @@ export function VoicePill() {
 
     const unlistenState = subscribeToStateChanges((payload) => {
       setState(payload);
+      if (payload.state === "listening") setRunMode(payload.mode);
+      else if (payload.state === "idle") setRunMode(undefined);
     });
 
     const unlistenAudio = subscribeToAudioLevels((levels) => {
@@ -125,7 +177,12 @@ export function VoicePill() {
     let timer: ReturnType<typeof setInterval> | null = null;
     if (state.state === "listening") {
       setElapsedSec(0);
-      fetchSettings().then((s) => s && setSettings(s));
+      setShowFinishHint(false);
+      fetchSettings().then((s) => {
+        if (!s) return;
+        setSettings(s);
+        setShowFinishHint(takeFinishHint(s));
+      });
       const start = Date.now();
       timer = setInterval(() => {
         setElapsedSec(Math.floor((Date.now() - start) / 1000));
@@ -155,38 +212,48 @@ export function VoicePill() {
   const accentKey: AccentColor = (localStorage.getItem("revfly_accent") as AccentColor) || "violet";
   const t = tok(themeMode, accentKey);
   const micWarning = state.state === "listening" && state.warning === true;
-  const accent = micWarning ? "#ff9f43" : getStateAccent(state.state, t.accent, state.title);
+  // A recording started with the translate hotkey stays teal until it's done; automatic
+  // translation only gets an outlined badge, since it may not translate at all.
+  const isTranslateMode = runMode === "translate";
+  const isAutoMode = runMode === "auto";
+  const inRun = ["listening", "transcribing", "translating"].includes(state.state);
+  const inTranslateRun = isTranslateMode && inRun;
+  const accent = micWarning
+    ? "#ff9f43"
+    : inTranslateRun
+      ? TRANSLATE_ACCENT
+      : getStateAccent(state.state, t.accent, state.title);
 
   const targetLang = settings?.target_lang || "English";
   const isNoTranslation =
-    settings?.translation_provider === "No Translation" ||
-    settings?.translation_provider === "none" ||
+    settings?.translation_mode === "off" ||
     targetLang.toLowerCase().includes("no translation") ||
     targetLang.toLowerCase() === "none";
+  const spokenOnly =
+    settings?.source_lang && settings.source_lang !== "Auto" ? settings.source_lang : null;
+  const offersOriginal = state.state === "done" && state.original === true;
 
   const meta = STATE_META[state.state];
-  // Once a translate hotkey is set, the backend says which hotkey started this recording.
-  const isTranslateMode = state.mode === "translate";
-  const isTranscribeOnly = state.mode === "transcribe";
+  // The backend says what this recording does with the speech (see AssistantStateEvent.mode).
+  const isTranscribeOnly = runMode === "transcribe";
   const startedWith = isTranslateMode ? settings?.translate_hotkey : settings?.hotkey;
-  const modeSuffix = isTranslateMode ? ` · → ${targetLang}` : "";
   const finishHint =
-    state.state === "listening" && settings?.show_hints !== false && startedWith
-      ? `Press ${formatDisplay(startedWith).replace(/ \(.*\)/, "")} to finish${modeSuffix}`
+    state.state === "listening" && showFinishHint && startedWith
+      ? `Press ${formatDisplay(startedWith).replace(/ \(.*\)/, "")} to finish`
       : null;
+  // While listening, say what will happen to the speech.
+  const listeningIntent = isTranslateMode
+    ? `Translating to ${targetLang}`
+    : isNoTranslation || isTranscribeOnly
+      ? `In ${spokenOnly ?? "your language"}`
+      : `Auto-translate on · ${spokenOnly ?? `not ${targetLang}`} → ${targetLang}`;
   const dynamicSublabel =
+    (offersOriginal
+      ? `${settings?.auto_paste === false ? "Copied" : "Pasted"} in ${targetLang}`
+      : null) ||
     state.subtitle ||
     finishHint ||
-    (state.state === "listening" && isTranslateMode ? `Translating to ${targetLang}` : null) ||
-    (state.state === "listening"
-      ? isNoTranslation || isTranscribeOnly
-        ? "Voice to Text"
-        : meta.sublabel
-      : state.state === "transcribing"
-        ? isNoTranslation
-          ? "Voice to Text"
-          : meta.sublabel
-        : meta.sublabel);
+    (state.state === "listening" ? listeningIntent : meta.sublabel);
 
   const displayedSubtitle =
     state.state === "error" && state.text ? `Copied: "${state.text}"` : dynamicSublabel;
@@ -215,9 +282,10 @@ export function VoicePill() {
             minHeight: isLong ? 68 : undefined,
             paddingTop: isLong ? 12 : undefined,
             paddingBottom: isLong ? 12 : undefined,
-            width: isLong ? "100%" : "fit-content",
-            minWidth: 220,
-            maxWidth: isLong ? 384 : 320,
+            // One width for every stage so the pill doesn't jump as its content changes; only
+            // long messages (errors, mic warnings) grow to fit.
+            width: isLong ? "100%" : PILL_WIDTH,
+            maxWidth: isLong ? 384 : PILL_WIDTH,
             borderRadius: isLong ? 28 : 40,
             background: t.pillBg,
             border: `1px solid ${t.pillBorder}`,
@@ -260,10 +328,50 @@ export function VoicePill() {
                 transition: "color 0.3s ease",
               }}
             >
-              {state.title && (state.state !== "listening" || micWarning)
-                ? state.title
-                : meta.label}
+              {offersOriginal
+                ? "Translated"
+                : state.title && (state.state !== "listening" || micWarning)
+                  ? state.title
+                  : meta.label}
             </span>
+            {isAutoMode && inRun && !micWarning && (
+              <span
+                title={`Auto-translate to ${targetLang}`}
+                style={{
+                  fontFamily: "JetBrains Mono, monospace",
+                  fontSize: 10.5,
+                  fontWeight: 700,
+                  letterSpacing: "0.06em",
+                  lineHeight: "16px",
+                  color: TRANSLATE_ACCENT,
+                  border: `1px solid ${TRANSLATE_ACCENT}88`,
+                  borderRadius: 5,
+                  padding: "0 5px",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                AUTO→{languageCode(targetLang)}
+              </span>
+            )}
+            {inTranslateRun && (
+              <span
+                title={`Translating to ${targetLang}`}
+                style={{
+                  fontFamily: "JetBrains Mono, monospace",
+                  fontSize: 10.5,
+                  fontWeight: 700,
+                  letterSpacing: "0.06em",
+                  lineHeight: "16px",
+                  color: TRANSLATE_ACCENT,
+                  background: `${TRANSLATE_ACCENT}1f`,
+                  border: `1px solid ${TRANSLATE_ACCENT}55`,
+                  borderRadius: 5,
+                  padding: "0 5px",
+                }}
+              >
+                {languageCode(targetLang)}
+              </span>
+            )}
           </div>
 
           <span
@@ -274,7 +382,7 @@ export function VoicePill() {
               color: state.state === "error" ? t.text : t.textMuted,
               marginTop: 2,
               fontFamily: "Inter, sans-serif",
-              maxWidth: isLong ? "none" : 200,
+              maxWidth: isLong ? "none" : "100%",
               whiteSpace: isLong ? "normal" : undefined,
             }}
             title={displayedSubtitle}
@@ -304,6 +412,29 @@ export function VoicePill() {
             </button>
           )}
         </div>
+
+        {/* After a translation: paste what was actually said instead */}
+        {offersOriginal && (
+          <button
+            type="button"
+            onClick={() => void triggerPasteOriginal()}
+            className="shrink-0 self-center"
+            style={{
+              padding: "4px 10px",
+              borderRadius: 999,
+              border: `1px solid ${accent}66`,
+              background: `${accent}1f`,
+              color: accent,
+              fontFamily: "Inter, sans-serif",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {settings?.auto_paste === false ? "Copy original" : "Paste original"}
+          </button>
+        )}
 
         {/* Recording timer, vertically centred on the right edge of the pill */}
         {state.state === "listening" && (

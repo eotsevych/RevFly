@@ -22,6 +22,7 @@ import {
   getModelsDirPath,
   fetchHardwareProfile,
   type HardwareProfile,
+  type TranslationMode,
   NOISE_REDUCTION_OPTIONS,
 } from "@/lib/tauri";
 
@@ -75,6 +76,12 @@ const MODEL_LOAD_OPTIONS: { value: "on_start" | "on_stop"; label: string }[] = [
   { value: "on_stop", label: "Save memory" },
 ];
 
+const TRANSLATION_MODE_OPTIONS: { value: TranslationMode; label: string }[] = [
+  { value: "off", label: "Off" },
+  { value: "hotkey", label: "Separate hotkey" },
+  { value: "auto", label: "Automatic" },
+];
+
 export default function GeneralTab({ t }: { t: Tokens }) {
   const {
     settings,
@@ -90,7 +97,10 @@ export default function GeneralTab({ t }: { t: Tokens }) {
   const [isTestingMic, setIsTestingMic] = useState(false);
   const [translateHotkeyConflict, setTranslateHotkeyConflict] = useState(false);
   const translateHotkey = settings.translate_hotkey ?? "";
-  const autoTranslate = settings.auto_translate ?? true;
+  const translationMode: TranslationMode = settings.translation_mode ?? "hotkey";
+  const targetName = settings.target_lang || "the target language";
+  const spokenOnly =
+    settings.source_lang && settings.source_lang !== "Auto" ? settings.source_lang : null;
   const [micLevel, setMicLevel] = useState(0);
   const [micPeak, setMicPeak] = useState(0);
   const [noiseFloor, setNoiseFloor] = useState(0);
@@ -396,9 +406,9 @@ export default function GeneralTab({ t }: { t: Tokens }) {
         <Row
           label="Launch hotkey"
           hint={
-            translateHotkey && !autoTranslate
-              ? "Global shortcut to record and transcribe (no translation)"
-              : "Global shortcut to start recording"
+            translationMode === "auto"
+              ? `Records and transcribes; translates to ${targetName} when you speak ${spokenOnly ?? "another language"}`
+              : "Records and transcribes in the language you speak"
           }
           t={t}
         >
@@ -415,45 +425,48 @@ export default function GeneralTab({ t }: { t: Tokens }) {
         </Row>
 
         <Row
-          label="Translate hotkey"
+          label="Translation"
           hint={
-            translateHotkeyConflict
-              ? "That's already the launch hotkey — pick a different key"
-              : `Records and translates to ${settings.target_lang || "the target language"}. Off by default`
+            translationMode === "off"
+              ? "Never translate. Text is pasted in the language you speak"
+              : translationMode === "hotkey"
+                ? `Only recordings started with the translate hotkey are translated to ${targetName}`
+                : `The launch hotkey translates ${spokenOnly ?? "anything not in " + targetName} to ${targetName}`
           }
           t={t}
         >
-          <HotkeyRecorder
-            value={translateHotkey}
-            clearable
-            onChange={(v) => {
-              if (v && v === settings.hotkey) {
-                setTranslateHotkeyConflict(true);
-                return;
-              }
-              setTranslateHotkeyConflict(false);
-              // First time a translate hotkey is set, split the keys: the launch hotkey becomes
-              // transcription-only. The toggle below turns auto-translation back on.
-              updateSettings(
-                !translateHotkey && v
-                  ? { translate_hotkey: v, auto_translate: false }
-                  : { translate_hotkey: v },
-              );
-            }}
+          <Segmented
+            options={TRANSLATION_MODE_OPTIONS}
+            value={translationMode}
+            onChange={(v) => updateSettings({ translation_mode: v })}
             t={t}
           />
         </Row>
 
-        {translateHotkey && (
+        {translationMode === "hotkey" && (
           <Row
-            label="Launch hotkey also translates"
-            hint="Off: the launch hotkey only transcribes"
+            label="Translate hotkey"
+            hint={
+              translateHotkeyConflict
+                ? "That's already the launch hotkey — pick a different key"
+                : translateHotkey
+                  ? `Records and translates to ${targetName}`
+                  : `Set a key to record and translate to ${targetName}`
+            }
             t={t}
           >
-            <Toggle
-              value={autoTranslate}
-              onChange={(v) => updateSettings({ auto_translate: v })}
-              accent={t.accent}
+            <HotkeyRecorder
+              value={translateHotkey}
+              clearable
+              onChange={(v) => {
+                if (v && v === settings.hotkey) {
+                  setTranslateHotkeyConflict(true);
+                  return;
+                }
+                setTranslateHotkeyConflict(false);
+                updateSettings({ translate_hotkey: v });
+              }}
+              t={t}
             />
           </Row>
         )}
@@ -683,7 +696,7 @@ export default function GeneralTab({ t }: { t: Tokens }) {
         </Row>
         <Row
           label="Show hints"
-          hint="Show how to finish a recording on the pill. Turn off once you know the hotkey"
+          hint="Show how to finish a recording on the pill for your first few recordings, and again after you change a hotkey"
           t={t}
           last
         >
@@ -768,7 +781,7 @@ export default function GeneralTab({ t }: { t: Tokens }) {
 
         <Row
           label="Spoken language"
-          hint="Language you speak into the microphone (Auto-detect or lock to Ukrainian/English)"
+          hint="Language you speak into the microphone (Auto-detect or lock to one). With Automatic translation, only this language is translated"
           t={t}
           last={false}
         >
