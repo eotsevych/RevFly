@@ -26,8 +26,10 @@ to a different log. Default: all data, with extra attention to the last 24 hours
    rather than reading the whole file. Useful cuts:
    - speed_factor over time (by hour or by dictation number) to see a trend, not just day medians
    - the slowest 10 dictations with every stage, `usage` and `context`
-   - non-`ok` outcomes and which stage they stopped after (the latest stage present, in the
-     pipeline order below; the keys in `stages_ms` are written alphabetically, not in order)
+   - non-`ok` outcomes and the stage they ended in (the latest stage present, in the pipeline
+     order below; the keys in `stages_ms` are written alphabetically, not in order). Since 0.1.10
+     an early-ending run files its unfinished time under that stage and stops its clock there, so
+     the time an error stays on the pill isn't counted. Older runs lack that last stage.
    - heartbeats: `app_rss_mb` against `app_uptime_sec` (memory growth while idle), and app restarts
      (`app_uptime_sec` dropping back near 0)
    - `inference_ms` against `speech_sec` (inference should scale roughly linearly with speech)
@@ -46,7 +48,9 @@ to a different log. Default: all data, with extra attention to the last 24 hours
   mean the model wasn't ready (expected with `model_load_mode: on_stop`, or right after
   `IDLE_CLEANUP` freed it).
 - `usage`: sampled every 250 ms while processing. CPU is % of one core (400 = four cores busy).
-  `available_mem_min_mb` low or `swap_used_peak_mb` rising means memory pressure.
+  `available_mem_min_mb` low or `swap_used_peak_mb` rising means memory pressure. On macOS
+  `available_mem_min_mb` comes from the kernel's memory-pressure level; before 0.1.10 it was
+  always 0 there, so ignore it in older lines.
 - `context`: `thermal_state` (nominal/fair/serious/critical), `low_power_mode`, `load_avg_1m`
   (other apps competing for CPU), `app_uptime_sec`, `dictations_since_launch`.
 

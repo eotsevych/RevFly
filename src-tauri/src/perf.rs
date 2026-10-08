@@ -25,6 +25,22 @@ const MAX_LOG_BYTES: u64 = 10 * 1024 * 1024;
 static APP_START: OnceLock<Instant> = OnceLock::new();
 static DICTATIONS: AtomicU64 = AtomicU64::new(0);
 
+/// Pipeline stages in order. A run that ends early files its unfinished time under the stage after
+/// the last one it completed.
+const STAGE_ORDER: [&str; 11] = [
+    "stop_capture",
+    "audio_prep",
+    "vad",
+    "save_audio",
+    "model_ready",
+    "inference",
+    "post_process",
+    "translation",
+    "paste",
+    "history_db",
+    "finalize",
+];
+
 /// Records the app start time and starts the heartbeat. Call once at startup.
 pub fn init() {
     APP_START.get_or_init(Instant::now);
@@ -60,6 +76,9 @@ fn uptime_sec() -> u64 {
 pub struct PerfRun {
     started: Instant,
     last_lap: Instant,
+    /// When the run ended, if `set_outcome` ended it before the pipeline returned (e.g. while an
+    /// error stays on the pill).
+    ended: Option<Instant>,
     stages: Vec<(&'static str, u64)>,
     sampler: Option<Sampler>,
     outcome: &'static str,
@@ -85,6 +104,7 @@ impl PerfRun {
         PerfRun {
             started: now,
             last_lap: now,
+            ended: None,
             stages: vec![("stop_capture", stop_capture_ms)],
             sampler: Some(Sampler::start()),
             outcome: "aborted",
@@ -107,9 +127,29 @@ impl PerfRun {
         self.last_lap = now;
     }
 
-    /// How the run ended, for runs that return early ("cancelled", "failed", ...). Written on drop.
+    /// How the run ended, for runs that return early ("cancelled", "failed", ...). Ends the run
+    /// now: the time since the last lap goes to the stage that was in progress, and whatever the
+    /// pipeline does afterwards (holding an error on the pill) isn't counted. Written on drop.
     pub fn set_outcome(&mut self, outcome: &'static str) {
         self.outcome = outcome;
+        if self.ended.is_some() {
+            return;
+        }
+        let now = Instant::now();
+        let in_progress = self
+            .stages
+            .last()
+            .and_then(|(last, _)| STAGE_ORDER.iter().position(|s| s == last))
+            .and_then(|i| STAGE_ORDER.get(i + 1));
+        let ms = now.duration_since(self.last_lap).as_millis() as u64;
+        if let (Some(stage), true) = (in_progress, ms > 0) {
+            self.stages.push((stage, ms));
+        }
+        self.last_lap = now;
+        self.ended = Some(now);
+        if let Some(sampler) = &self.sampler {
+            sampler.request_stop();
+        }
     }
 
     /// Ends the run and writes it. A run dropped without this is written as "aborted" unless
@@ -119,7 +159,8 @@ impl PerfRun {
     }
 
     fn write(&mut self) {
-        let total_ms = self.started.elapsed().as_millis() as u64 + self.stages[0].1;
+        let end = self.ended.unwrap_or_else(Instant::now);
+        let total_ms = end.duration_since(self.started).as_millis() as u64 + self.stages[0].1;
         let usage = self.sampler.take().map(Sampler::stop).unwrap_or_default();
         let stages: serde_json::Map<String, serde_json::Value> =
             self.stages.iter().map(|(name, ms)| (name.to_string(), (*ms).into())).collect();
@@ -226,7 +267,7 @@ impl Probe {
         self.sys.refresh_memory();
         let mut reading = Reading {
             system_cpu_pct: self.sys.global_cpu_usage(),
-            available_mem_mb: self.sys.available_memory() / (1024 * 1024),
+            available_mem_mb: available_mem_mb(&self.sys),
             swap_used_mb: self.sys.used_swap() / (1024 * 1024),
             ..Default::default()
         };
@@ -303,8 +344,13 @@ impl Sampler {
         Sampler { stop, handle }
     }
 
-    fn stop(self) -> Usage {
+    /// Ends sampling after the current sample without waiting for it.
+    fn request_stop(&self) {
         self.stop.store(true, Ordering::Relaxed);
+    }
+
+    fn stop(self) -> Usage {
+        self.request_stop();
         self.handle.join().unwrap_or_default()
     }
 }
@@ -333,6 +379,31 @@ impl SystemContext {
             total_mem_mb: sys.total_memory() / (1024 * 1024),
         }
     }
+}
+
+/// Memory the system can still hand out, in MB. On macOS sysinfo's figure subtracts compressed
+/// memory from free + inactive and reads 0 whenever the compressor is busy, so this uses the kernel's
+/// memory-pressure level instead (the percentage Activity Monitor's pressure graph is based on).
+#[cfg(target_os = "macos")]
+fn available_mem_mb(sys: &System) -> u64 {
+    extern "C" {
+        fn sysctlbyname(name: *const u8, oldp: *mut std::ffi::c_void, oldlenp: *mut usize, newp: *mut std::ffi::c_void, newlen: usize) -> i32;
+    }
+    let mut level: i32 = 0;
+    let mut len = std::mem::size_of::<i32>();
+    let ok = unsafe {
+        sysctlbyname(b"kern.memorystatus_level\0".as_ptr(), &mut level as *mut i32 as *mut _, &mut len, std::ptr::null_mut(), 0)
+    } == 0;
+    if ok && (0..=100).contains(&level) {
+        sys.total_memory() / (1024 * 1024) * level as u64 / 100
+    } else {
+        sys.available_memory() / (1024 * 1024)
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn available_mem_mb(sys: &System) -> u64 {
+    sys.available_memory() / (1024 * 1024)
 }
 
 #[cfg(target_os = "macos")]
@@ -398,6 +469,24 @@ mod tests {
         assert!(usage.samples >= 2, "samples: {}", usage.samples);
         assert!(usage.app_rss_peak_mb > 0);
         assert!(usage.app_cpu_peak_pct > 0.0);
+        assert!(usage.available_mem_min_mb > 0);
+    }
+
+    #[test]
+    fn early_outcome_files_unfinished_time_under_the_next_stage() {
+        let mut run = PerfRun::start(100);
+        run.lap("audio_prep");
+        thread::sleep(Duration::from_millis(30));
+        run.set_outcome("cancelled");
+        thread::sleep(Duration::from_millis(200));
+        let (stage, ms) = *run.stages.last().unwrap();
+        assert_eq!(stage, "vad");
+        assert!((30..200).contains(&ms), "vad: {} ms", ms);
+        let total = run.ended.unwrap().duration_since(run.started).as_millis();
+        assert!(total < 200, "total: {} ms", total);
+        run.sampler.take().map(Sampler::stop);
+        // Dropping would append this test run to the real performance log.
+        std::mem::forget(run);
     }
 
     #[test]

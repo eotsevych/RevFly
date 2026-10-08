@@ -567,6 +567,12 @@ impl AudioRecorder {
                 match cmd {
                     AudioCmd::Start { app_handle, device_name, reply } => {
                         stop_mic_test();
+                        // A stream still open here was never stopped; it would keep appending to
+                        // the shared buffers alongside the new one and double the audio.
+                        if let Some(stale) = active_stream.take() {
+                            let _ = stale.pause();
+                            log::warn!("Closed a microphone stream left open by an earlier recording");
+                        }
                         if let Ok(mut b) = buffer.lock() {
                             b.clear();
                         }

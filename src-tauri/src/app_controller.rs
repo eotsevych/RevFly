@@ -745,6 +745,10 @@ pub struct AppController {
     recording_start: Arc<Mutex<Option<RecordingStart>>>,
     /// Set when a recording starts; read when it's processed.
     recording_mode: Arc<Mutex<RecordingMode>>,
+    /// Held while a recording starts. The phase turns Listening before the microphone is open, so
+    /// a stop or cancel arriving in between (e.g. a quick hold-to-talk release) waits on this;
+    /// otherwise it reached the recorder before the start did and the microphone was left open.
+    start_gate: Arc<Mutex<()>>,
 }
 
 impl AppController {
@@ -846,6 +850,7 @@ impl AppController {
             pending_retry: Arc::new(Mutex::new(None)),
             recording_start: Arc::new(Mutex::new(None)),
             recording_mode: Arc::new(Mutex::new(RecordingMode::Main)),
+            start_gate: Arc::new(Mutex::new(())),
         })
     }
 
@@ -1013,6 +1018,7 @@ impl AppController {
     }
 
     pub fn cancel(&self, trigger: &'static str) {
+        let _started = self.start_gate.lock().unwrap();
         if let Some(start) = self.recording_start.lock().unwrap().take() {
             log_stage_event(
                 &get_data_dir(),
@@ -1276,6 +1282,7 @@ impl AppController {
 
     fn start_listening(&self, trigger: &'static str) -> Result<(), String> {
         let pressed = Instant::now();
+        let _starting = self.start_gate.lock().unwrap();
         self.session_id.fetch_add(1, Ordering::SeqCst);
         {
             let mut phase = self.phase.lock().unwrap();
@@ -1404,6 +1411,14 @@ impl AppController {
 
     fn stop_listening_and_process(&self, trigger: &'static str) -> Result<(), String> {
         let pipeline_start = Instant::now();
+        {
+            // Let a start in progress open the microphone first; if opening failed, there's
+            // nothing to stop.
+            let _started = self.start_gate.lock().unwrap();
+            if !self.is_listening() {
+                return Ok(());
+            }
+        }
 
         {
             let mut phase = self.phase.lock().unwrap();
