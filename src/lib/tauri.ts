@@ -28,6 +28,8 @@ export interface BackendSettings {
   input_device?: string | null;
   output_device?: string | null;
   theme?: string;
+  /** How the floating pill looks (see PILL_STYLES in components/pill/styles.tsx). */
+  pill_style?: string;
   model_idle_unload_sec?: number;
   /** When the speech model loads for a recording: while talking (faster) or after (saves RAM). */
   model_load_mode?: "on_start" | "on_stop";
@@ -600,6 +602,25 @@ export interface LabExperimentRequest {
   annotate_ambiguity?: boolean;
   normalize_structured_values?: boolean;
   noise_reduction?: NoiseReduction;
+}
+
+/** Audio Lab's "Translate Again" result. */
+export interface LabTranslation {
+  text: string;
+  ms: number;
+  /** Service, model and endpoint that answered. */
+  service: string;
+}
+
+/** Translates text with the chosen service ("LLM" or "Custom API") without pasting it. Throws
+ * the service's error message when it fails. */
+export async function triggerLabTranslate(
+  text: string,
+  provider: string,
+  targetLang: string,
+): Promise<LabTranslation> {
+  if (!isTauri()) throw new Error("Translation works only in the desktop app.");
+  return await invoke<LabTranslation>("lab_translate", { text, provider, targetLang });
 }
 
 export interface LabExperimentResult {

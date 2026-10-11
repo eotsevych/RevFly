@@ -4,6 +4,8 @@ import Segmented from "@/components/ui/Segmented";
 import { Section, Row } from "./SettingsPrimitives";
 import { useSettingsContext } from "./useSettingsContext";
 import { useResolvedTheme, type ThemeMode } from "@/lib/theme";
+import { PillPreview } from "@/components/pill/PillPreview";
+import { PILL_STYLES, pillStyleOf } from "@/components/pill/view";
 
 interface Props {
   t: Tokens;
@@ -16,6 +18,7 @@ export default function ThemeTab({ t, accent, onAccentChange }: Props) {
 
   const currentMode = (settings.theme || "system") as ThemeMode;
   const effectiveTheme = useResolvedTheme(currentMode);
+  const pillStyle = pillStyleOf(settings.pill_style);
 
   return (
     <div>
@@ -106,65 +109,118 @@ export default function ThemeTab({ t, accent, onAccentChange }: Props) {
         </div>
       </Section>
 
-      {/* Live preview */}
-      <Section title="Live Preview" t={t}>
-        <div style={{ padding: 20 }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 14,
-              padding: "14px 22px",
-              background:
-                effectiveTheme === "dark"
-                  ? "linear-gradient(135deg, #111120 0%, #0d0d1e 100%)"
-                  : "linear-gradient(135deg, #ffffff 0%, #f7f6ff 100%)",
-              border: `1px solid ${t.pillBorder}`,
-              borderRadius: 36,
-              boxShadow: `0 0 28px ${t.accent}22, ${t.pillShadow}`,
-              width: "fit-content",
-            }}
-          >
-            <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
-              {[12, 22, 16, 28, 20, 14, 24].map((h, i) => (
+      <Section title="Pill Style" t={t}>
+        <div
+          style={{
+            padding: 10,
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(270px, 1fr))",
+            gap: 8,
+          }}
+        >
+          {PILL_STYLES.map((style) => {
+            const selected = pillStyle === style.id;
+            return (
+              <button
+                key={style.id}
+                type="button"
+                aria-pressed={selected}
+                title={style.description}
+                onClick={() => void updateSettings({ pill_style: style.id })}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6,
+                  padding: 6,
+                  textAlign: "left",
+                  borderRadius: 9,
+                  border: `1px solid ${selected ? t.accent : t.border}`,
+                  background: selected ? `${t.accent}12` : "transparent",
+                  boxShadow: selected ? `0 0 0 1px ${t.accent}` : "none",
+                  cursor: "pointer",
+                  transition: "border-color 0.2s, background 0.2s",
+                }}
+              >
+                {/* Every style at the same 80% scale, so their sizes compare honestly */}
                 <div
-                  key={i}
-                  className="wave-bar"
                   style={{
-                    background: `linear-gradient(180deg, ${t.accent}, #00d4ff)`,
-                    height: h,
-                    animationDelay: `${i * 0.12}s`,
+                    height: 62,
+                    borderRadius: 6,
+                    background: effectiveTheme === "dark" ? "#0b0b12" : "#ecebf1",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    overflow: "hidden",
+                    pointerEvents: "none",
                   }}
-                />
-              ))}
-            </div>
-            <div>
-              <p
-                style={{
-                  fontSize: 11,
-                  fontFamily: "JetBrains Mono, monospace",
-                  color: t.accent,
-                  fontWeight: 600,
-                  margin: 0,
-                  letterSpacing: "0.08em",
-                  textTransform: "uppercase",
-                }}
-              >
-                Listening
-              </p>
-              <p
-                style={{
-                  fontSize: 10,
-                  color: t.textMuted,
-                  fontFamily: "Inter, sans-serif",
-                  margin: "2px 0 0",
-                }}
-              >
-                Capturing audio input
-              </p>
-            </div>
-          </div>
+                >
+                  <div style={{ transform: "scale(0.8)" }}>
+                    <PillPreview style={style.id} t={t} />
+                  </div>
+                </div>
+                <div
+                  style={{ display: "flex", alignItems: "baseline", gap: 7, padding: "0 4px 2px" }}
+                >
+                  <span
+                    style={{
+                      width: 12,
+                      height: 12,
+                      borderRadius: "50%",
+                      border: `1.5px solid ${selected ? t.accent : t.textDim}`,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                      alignSelf: "center",
+                    }}
+                  >
+                    {selected && (
+                      <span
+                        style={{ width: 6, height: 6, borderRadius: "50%", background: t.accent }}
+                      />
+                    )}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      color: t.text,
+                      fontFamily: "Inter, sans-serif",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {style.name}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 11.5,
+                      color: t.textMuted,
+                      fontFamily: "Inter, sans-serif",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      minWidth: 0,
+                    }}
+                  >
+                    {style.hint}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
         </div>
+        <p
+          style={{
+            margin: 0,
+            padding: "0 14px 10px",
+            fontSize: 11.5,
+            color: t.textDim,
+            fontFamily: "Inter, sans-serif",
+          }}
+        >
+          Long errors, microphone warnings and Retry always use the Classic pill. A new style shows
+          from your next recording.
+        </p>
       </Section>
     </div>
   );

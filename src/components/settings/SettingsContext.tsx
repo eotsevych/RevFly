@@ -34,6 +34,7 @@ const defaultSettings: BackendSettings = {
   input_device: null,
   output_device: null,
   theme: "system",
+  pill_style: "classic",
   model_idle_unload_sec: 30,
   model_load_mode: "on_start",
   text_normalization: true,

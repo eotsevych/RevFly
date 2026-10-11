@@ -1,10 +1,12 @@
 import { useEffect, useRef } from "react";
 import type { AudioLevels } from "../../lib/tauri";
 import type { Tokens } from "../../lib/tokens";
+import { OrbitDots, ScanWave } from "./Motion";
 
-// Seven capsule towers. The centre tower follows low pitch (voice), the edges follow high pitch
-// ("s", "t", breath); the backend sends band energy already mirrored in that order.
-const BAR_COUNT = 7;
+// Nine capsule towers. The centre tower follows low pitch (voice), the edges follow high pitch
+// ("s", "t", breath); the backend sends seven bands already mirrored in that order, and the bars
+// in between blend their neighbours (see bandAt).
+const BAR_COUNT = 9;
 const BAR_WIDTH = 4;
 const BAR_GAP = 3;
 const BAR_MIN_H = 8; // never collapse, so the capsule shape stays visible
@@ -24,8 +26,36 @@ const FRAME_MS = 1000 / 60;
 const LOUD_START = 0.35;
 const LOUD_FULL = 0.8;
 
+/** Bar geometry, so the smaller pill styles can show the same live bars. */
+export interface WaveSize {
+  count: number;
+  width: number;
+  gap: number;
+  min: number;
+  max: number;
+  growth: number;
+}
+
+const CLASSIC_WAVE: WaveSize = {
+  count: BAR_COUNT,
+  width: BAR_WIDTH,
+  gap: BAR_GAP,
+  min: BAR_MIN_H,
+  max: BAR_MAX_H,
+  growth: BAR_GROWTH,
+};
+
 const GRADIENT_QUIET = ["#6468da", "#389aff", "#04caff"] as const;
 const GRADIENT_LOUD = ["#8f6bff", "#4aa3ff", "#1ae4ff"] as const;
+
+/** Energy for bar `i` of `count`, interpolated across the backend's bands. */
+function bandAt(bands: number[], i: number, count: number): number {
+  if (bands.length < 2) return bands[0] ?? 0;
+  const pos = (i * (bands.length - 1)) / (count - 1);
+  const lo = Math.floor(pos);
+  const frac = pos - lo;
+  return (bands[lo] ?? 0) * (1 - frac) + (bands[Math.min(lo + 1, bands.length - 1)] ?? 0) * frac;
+}
 
 function mixHex(a: string, b: string, t: number): string {
   const pa = parseInt(a.slice(1), 16);
@@ -40,13 +70,23 @@ function barGradient(loud: number): string {
   return `linear-gradient(180deg, ${top} 0%, ${mid} 50%, ${bottom} 100%)`;
 }
 
-export function SoundWave({ levels }: { levels?: AudioLevels | undefined }) {
+export function SoundWave({
+  levels,
+  size = CLASSIC_WAVE,
+  gradient,
+}: {
+  levels?: AudioLevels | undefined;
+  size?: WaveSize;
+  /** A fixed bar colour instead of the blue that brightens with loudness. */
+  gradient?: string | undefined;
+}) {
   const barsRef = useRef<(HTMLDivElement | null)[]>([]);
   const levelsRef = useRef<AudioLevels | undefined>(levels);
   levelsRef.current = levels;
+  const { count, width, gap, min, max, growth } = size;
 
   useEffect(() => {
-    const heights = new Array<number>(BAR_COUNT).fill(BAR_MIN_H);
+    const heights = new Array<number>(count).fill(min);
     let voice = false;
     let quietSince = 0;
     let loud = 0;
@@ -76,9 +116,9 @@ export function SoundWave({ levels }: { levels?: AudioLevels | undefined }) {
         : Math.min(1, Math.max(0, (volume - LOUD_START) / (LOUD_FULL - LOUD_START)));
       loud = loudTarget > loud ? loudTarget : loud * fallKeep + loudTarget * (1 - fallKeep);
 
-      for (let i = 0; i < BAR_COUNT; i++) {
-        const target = silent ? BAR_MIN_H : BAR_MIN_H + (bands[i] ?? 0) * volume * BAR_GROWTH;
-        const cur = heights[i] ?? BAR_MIN_H;
+      for (let i = 0; i < count; i++) {
+        const target = silent ? min : min + bandAt(bands, i, count) * volume * growth;
+        const cur = heights[i] ?? min;
         let next: number;
         if (target > cur) {
           // Instant rise, with a small spring overshoot on the onset of a loud word.
@@ -88,7 +128,7 @@ export function SoundWave({ levels }: { levels?: AudioLevels | undefined }) {
         } else {
           next = cur * fallKeep + target * (1 - fallKeep);
         }
-        next = Math.min(BAR_MAX_H + BAR_OVERSHOOT_MAX, Math.max(BAR_MIN_H, next));
+        next = Math.min(max + BAR_OVERSHOOT_MAX, Math.max(min, next));
         heights[i] = next;
         const bar = barsRef.current[i];
         if (bar) bar.style.height = `${next.toFixed(2)}px`;
@@ -96,7 +136,7 @@ export function SoundWave({ levels }: { levels?: AudioLevels | undefined }) {
 
       if (Math.abs(loud - paintedLoud) > 0.02) {
         paintedLoud = loud;
-        const background = barGradient(loud);
+        const background = gradient ?? barGradient(loud);
         const glow =
           loud > 0.01 ? `0 0 10px rgba(4, 202, 255, ${(0.7 * loud).toFixed(3)})` : "none";
         for (const bar of barsRef.current) {
@@ -109,57 +149,27 @@ export function SoundWave({ levels }: { levels?: AudioLevels | undefined }) {
       frame = requestAnimationFrame(tick);
     });
     return () => cancelAnimationFrame(frame);
-  }, []);
+  }, [count, min, max, growth, gradient]);
 
   return (
-    <div style={{ display: "flex", alignItems: "center", height: WAVE_BOX_H, gap: BAR_GAP }}>
-      {Array.from({ length: BAR_COUNT }, (_, i) => (
+    <div
+      style={{ display: "flex", alignItems: "center", height: max + BAR_OVERSHOOT_MAX + 1, gap }}
+    >
+      {Array.from({ length: count }, (_, i) => (
         <div
           key={i}
           ref={(el) => {
             barsRef.current[i] = el;
           }}
           style={{
-            width: BAR_WIDTH,
-            height: BAR_MIN_H,
-            borderRadius: BAR_WIDTH,
-            background: barGradient(0),
+            width,
+            height: min,
+            borderRadius: width,
+            background: gradient ?? barGradient(0),
             willChange: "height",
           }}
         />
       ))}
-    </div>
-  );
-}
-
-export function TranscribingIndicator({ t }: { t: Tokens }) {
-  return (
-    <div
-      className="relative flex items-center overflow-hidden rounded-full px-2 py-1.5"
-      style={{ background: t.transcribeBg, border: `1px solid ${t.transcribeBr}` }}
-    >
-      <div
-        className="scan-line absolute inset-0"
-        style={{ background: `linear-gradient(90deg, transparent, ${t.scanShimmer}, transparent)` }}
-      />
-      <div className="flex gap-[4px]">
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="transcribe-dot" style={{ background: "#00d4ff" }} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-export function TranslatingIndicator({ accent }: { accent: string }) {
-  return (
-    <div className="relative flex items-center justify-center" style={{ width: 38, height: 38 }}>
-      <div className="translate-ring" style={{ borderColor: accent }} />
-      <div className="translate-ring" style={{ borderColor: accent }} />
-      <div className="translate-ring" style={{ borderColor: accent }} />
-      <div className="absolute inset-0 flex items-center justify-center">
-        <div style={{ width: 12, height: 12, borderRadius: "50%", background: accent }} />
-      </div>
     </div>
   );
 }
@@ -401,8 +411,10 @@ export function StateIndicator({
 }) {
   if (state === "listening" && micDown) return <MicDownIndicator mode={micDown} accent={accent} />;
   if (state === "listening") return <SoundWave levels={levels} />;
-  if (state === "transcribing") return <TranscribingIndicator t={t} />;
-  if (state === "translating") return <TranslatingIndicator accent={accent} />;
+  // The same scanning wave and orbit as the smaller styles, at the width of the nine bars.
+  if (state === "transcribing")
+    return <ScanWave color={accent} n={BAR_COUNT} w={BAR_WIDTH} g={BAR_GAP} amp={16} />;
+  if (state === "translating") return <OrbitDots color={accent} r={22} d={9} />;
   if (state === "error") return <ErrorIndicator t={t} title={title} accent={accent} />;
   return <CopiedIndicator />;
 }

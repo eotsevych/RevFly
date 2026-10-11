@@ -33,6 +33,9 @@ pub struct AppSettings {
     pub output_device: Option<String>,
     #[serde(default = "default_theme")]
     pub theme: String, // "system" | "light" | "dark"
+    /// How the floating pill looks: "classic" | "compact" | "compact_plain" | "line" | "capsule" | "dot".
+    #[serde(default = "default_pill_style")]
+    pub pill_style: String,
     #[serde(default = "default_idle_unload_sec")]
     pub model_idle_unload_sec: u64, // 0 = never, 30..3600 seconds
     /// When the speech model is loaded for a recording: "on_start" (while you talk, so it's ready
@@ -176,6 +179,10 @@ fn default_theme() -> String {
     "system".to_string()
 }
 
+fn default_pill_style() -> String {
+    "classic".to_string()
+}
+
 fn default_idle_unload_sec() -> u64 {
     30
 }
@@ -207,6 +214,7 @@ impl Default for AppSettings {
             input_device: None,
             output_device: None,
             theme: "system".to_string(),
+            pill_style: default_pill_style(),
             model_idle_unload_sec: default_idle_unload_sec(),
             model_load_mode: default_model_load_mode(),
             window_x: None,

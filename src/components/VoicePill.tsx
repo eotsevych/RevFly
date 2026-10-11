@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   fetchSettings,
   isTauri,
@@ -6,7 +6,6 @@ import {
   subscribeToAudioLevels,
   subscribeToStateChanges,
   triggerCancelRecording,
-  triggerRetryTranslation,
   triggerStartDragging,
   type AssistantStateEvent,
   type AudioLevels,
@@ -15,7 +14,8 @@ import {
 import { tok, type AccentColor, type Theme } from "@/lib/tokens";
 import { useResolvedTheme } from "@/lib/theme";
 import { formatDisplay } from "@/lib/hotkey";
-import { StateIndicator } from "./pill/Indicators";
+import { PillBody } from "./pill/styles";
+import { TRANSLATE_ACCENT, parseDirection, pillStyleOf, type PillView } from "./pill/view";
 
 const STATE_META: Record<
   "idle" | "listening" | "transcribing" | "translating" | "done" | "error",
@@ -25,36 +25,13 @@ const STATE_META: Record<
   listening: { label: "Listening", sublabel: "Capturing audio input" },
   transcribing: { label: "Transcribing", sublabel: "Converting speech to text" },
   translating: { label: "Translating", sublabel: "Processing translation" },
-  done: { label: "Copied!", sublabel: "Translation in clipboard" },
+  done: { label: "Copied!", sublabel: "Text in clipboard" },
   error: { label: "Error", sublabel: "Action could not complete" },
 };
-
-/** Color of a recording started with the translate hotkey, from listening through translating. */
-const TRANSLATE_ACCENT = "#14b8a6";
-
-/** Width of the pill in every stage except long messages (the window is 340 wide). */
-const PILL_WIDTH = 300;
 
 /** How many recordings show "Press … to finish" after install or after a hotkey changes. */
 const FINISH_HINT_RECORDINGS = 3;
 const FINISH_HINT_KEY = "revfly_finish_hint";
-
-const LANGUAGE_CODES: Record<string, string> = {
-  english: "EN",
-  ukrainian: "UK",
-  spanish: "ES",
-  french: "FR",
-  german: "DE",
-  italian: "IT",
-  polish: "PL",
-  japanese: "JA",
-  chinese: "ZH",
-  russian: "RU",
-};
-
-function languageCode(name: string): string {
-  return LANGUAGE_CODES[name.trim().toLowerCase()] ?? name.trim().slice(0, 2).toUpperCase();
-}
 
 /** Whether this recording shows the finish hint; counts it if so. The count restarts whenever
  * either hotkey changes, so a new key is explained a few times too. */
@@ -100,6 +77,9 @@ export function VoicePill() {
   const [audioLevels, setAudioLevels] = useState<AudioLevels | undefined>(undefined);
   const [settings, setSettings] = useState<BackendSettings | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
+  // How long the last recording ran, shown by the smaller styles while it's processed.
+  const [heardSec, setHeardSec] = useState<number | null>(null);
+  const elapsedRef = useRef(0);
   const [showFinishHint, setShowFinishHint] = useState(false);
   // The backend sends the mode only while listening; keep it so processing stays in its color.
   const [runMode, setRunMode] = useState<AssistantStateEvent["mode"]>(undefined);
@@ -176,6 +156,8 @@ export function VoicePill() {
     let timer: ReturnType<typeof setInterval> | null = null;
     if (state.state === "listening") {
       setElapsedSec(0);
+      elapsedRef.current = 0;
+      setHeardSec(null);
       setShowFinishHint(false);
       fetchSettings().then((s) => {
         if (!s) return;
@@ -184,9 +166,13 @@ export function VoicePill() {
       });
       const start = Date.now();
       timer = setInterval(() => {
-        setElapsedSec(Math.floor((Date.now() - start) / 1000));
+        elapsedRef.current = Math.floor((Date.now() - start) / 1000);
+        setElapsedSec(elapsedRef.current);
       }, 200);
     } else {
+      if (state.state === "idle") setHeardSec(null);
+      else if (elapsedRef.current > 0) setHeardSec(elapsedRef.current);
+      elapsedRef.current = 0;
       setElapsedSec(0);
     }
     return () => {
@@ -200,13 +186,6 @@ export function VoicePill() {
     }
   };
 
-  const formatTimer = (secs: number) => {
-    const mins = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${mins}:${s < 10 ? "0" : ""}${s}`;
-  };
-
-  const isIdle = state.state === "idle";
   const themeMode: Theme = useResolvedTheme(settings?.theme);
   const accentKey: AccentColor = (localStorage.getItem("revfly_accent") as AccentColor) || "violet";
   const t = tok(themeMode, accentKey);
@@ -244,7 +223,10 @@ export function VoicePill() {
     ? `Translating to ${targetLang}`
     : isNoTranslation || isTranscribeOnly
       ? `In ${spokenOnly ?? "your language"}`
-      : `Auto-translate on · ${spokenOnly ?? `not ${targetLang}`} → ${targetLang}`;
+      : // The AUTO→EN badge already says translation is on.
+        spokenOnly
+        ? `${spokenOnly} → ${targetLang}`
+        : `Translates if not ${targetLang}`;
   const dynamicSublabel =
     state.subtitle || finishHint || (state.state === "listening" ? listeningIntent : meta.sublabel);
 
@@ -254,9 +236,27 @@ export function VoicePill() {
   // Errors and mic warnings that explain what to fix are shown in full, in a pill that grows to fit them.
   const isLong = (state.state === "error" || state.state === "listening") && state.long === true;
 
-  if (isIdle) {
+  if (state.state === "idle") {
     return null;
   }
+
+  const direction = state.state === "translating" ? parseDirection(state.subtitle) : null;
+  const view: PillView = {
+    state: state.state,
+    accent,
+    title: state.title && (state.state !== "listening" || micWarning) ? state.title : meta.label,
+    rawTitle: state.title,
+    subtitle: displayedSubtitle,
+    elapsedSec,
+    heardSec,
+    run: inRun && (isTranslateMode || isAutoMode) ? (isTranslateMode ? "translate" : "auto") : null,
+    targetLang: direction?.[1] ?? targetLang,
+    sourceLang: direction?.[0] ?? spokenOnly,
+    micWarning,
+    micDown: state.mic,
+    long: isLong,
+    retry: state.state === "error" && state.retry === true,
+  };
 
   return (
     <main
@@ -265,168 +265,7 @@ export function VoicePill() {
       style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
       className="w-full h-full min-h-screen flex items-center justify-center p-2 bg-transparent select-none overflow-hidden cursor-grab active:cursor-grabbing"
     >
-      <div
-        data-tauri-drag-region
-        onMouseDown={handleMouseDown}
-        style={
-          {
-            WebkitAppRegion: "drag",
-            height: isLong ? undefined : 68,
-            minHeight: isLong ? 68 : undefined,
-            paddingTop: isLong ? 12 : undefined,
-            paddingBottom: isLong ? 12 : undefined,
-            // One width for every stage so the pill doesn't jump as its content changes; only
-            // long messages (errors, mic warnings) grow to fit.
-            width: isLong ? "100%" : PILL_WIDTH,
-            maxWidth: isLong ? 384 : PILL_WIDTH,
-            borderRadius: isLong ? 28 : 40,
-            background: t.pillBg,
-            border: `1px solid ${t.pillBorder}`,
-            boxShadow: [
-              `0 0 0 1px ${t.pillInset} inset`,
-              t.pillShadow,
-              `0 0 20px ${accent}26`,
-            ].join(", "),
-            transition: "box-shadow 0.3s ease, background 0.3s ease, opacity 0.2s ease",
-          } as React.CSSProperties
-        }
-        className="flex items-center gap-3 pl-4 pr-4 select-none cursor-grab active:cursor-grabbing opacity-100 scale-100"
-      >
-        {/* State visual indicator icon */}
-        <div
-          className="flex items-center justify-center shrink-0"
-          style={{ width: 48, minWidth: 48 }}
-        >
-          <StateIndicator
-            state={state.state}
-            t={t}
-            accent={accent}
-            levels={audioLevels}
-            title={state.title}
-            micDown={micWarning ? state.mic : undefined}
-          />
-        </div>
-
-        {/* Text column: Monospace label + Inter sublabel */}
-        <div className="flex flex-1 flex-col justify-center min-w-0">
-          <div className="flex items-center gap-2">
-            <span
-              style={{
-                fontFamily: "JetBrains Mono, monospace",
-                fontSize: 13,
-                fontWeight: 600,
-                letterSpacing: "0.08em",
-                color: accent,
-                textTransform: "uppercase",
-                transition: "color 0.3s ease",
-              }}
-            >
-              {state.title && (state.state !== "listening" || micWarning)
-                ? state.title
-                : meta.label}
-            </span>
-            {isAutoMode && inRun && !micWarning && (
-              <span
-                title={`Auto-translate to ${targetLang}`}
-                style={{
-                  fontFamily: "JetBrains Mono, monospace",
-                  fontSize: 10.5,
-                  fontWeight: 700,
-                  letterSpacing: "0.06em",
-                  lineHeight: "16px",
-                  color: TRANSLATE_ACCENT,
-                  border: `1px solid ${TRANSLATE_ACCENT}88`,
-                  borderRadius: 5,
-                  padding: "0 5px",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                AUTO→{languageCode(targetLang)}
-              </span>
-            )}
-            {inTranslateRun && (
-              <span
-                title={`Translating to ${targetLang}`}
-                style={{
-                  fontFamily: "JetBrains Mono, monospace",
-                  fontSize: 10.5,
-                  fontWeight: 700,
-                  letterSpacing: "0.06em",
-                  lineHeight: "16px",
-                  color: TRANSLATE_ACCENT,
-                  background: `${TRANSLATE_ACCENT}1f`,
-                  border: `1px solid ${TRANSLATE_ACCENT}55`,
-                  borderRadius: 5,
-                  padding: "0 5px",
-                }}
-              >
-                {languageCode(targetLang)}
-              </span>
-            )}
-          </div>
-
-          <span
-            className={isLong ? undefined : "truncate"}
-            style={{
-              fontSize: isLong ? 12.5 : 13,
-              lineHeight: isLong ? 1.35 : undefined,
-              color: state.state === "error" ? t.text : t.textMuted,
-              marginTop: 2,
-              fontFamily: "Inter, sans-serif",
-              maxWidth: isLong ? "none" : "100%",
-              whiteSpace: isLong ? "normal" : undefined,
-            }}
-            title={displayedSubtitle}
-          >
-            {displayedSubtitle}
-          </span>
-
-          {state.state === "error" && state.retry && (
-            <button
-              type="button"
-              onClick={() => void triggerRetryTranslation()}
-              style={{
-                alignSelf: "flex-start",
-                marginTop: 8,
-                padding: "4px 12px",
-                borderRadius: 999,
-                border: `1px solid ${accent}66`,
-                background: `${accent}1f`,
-                color: accent,
-                fontFamily: "Inter, sans-serif",
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
-            >
-              ↻ Retry translation
-            </button>
-          )}
-        </div>
-
-        {/* Recording timer, vertically centred on the right edge of the pill */}
-        {state.state === "listening" && (
-          <span
-            className="shrink-0 self-center"
-            style={{
-              fontFamily: "JetBrains Mono, monospace",
-              fontSize: 12,
-              fontWeight: 500,
-              fontVariantNumeric: "tabular-nums",
-              lineHeight: "18px",
-              textAlign: "center",
-              minWidth: 44,
-              color: accent,
-              background: `${accent}18`,
-              padding: "1px 6px",
-              borderRadius: 6,
-              border: `1px solid ${accent}33`,
-            }}
-          >
-            {formatTimer(elapsedSec)}
-          </span>
-        )}
-      </div>
+      <PillBody style={pillStyleOf(settings?.pill_style)} view={view} t={t} levels={audioLevels} />
     </main>
   );
 }
