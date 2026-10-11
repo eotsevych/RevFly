@@ -41,6 +41,42 @@ pub fn open_preferences(app: &AppHandle) {
     }
 }
 
+/// Opens the first-run welcome guide, or brings it forward if it's already open. Closing it counts
+/// as finishing it, so it doesn't come back on the next launch.
+pub fn open_onboarding(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("onboarding") {
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_focus();
+        return;
+    }
+    // A borderless rounded card (the page draws it), so the window itself is transparent.
+    let builder = WebviewWindowBuilder::new(app, "onboarding", WebviewUrl::App("index.html#onboarding".into()))
+        .title("Welcome to RevFly")
+        .inner_size(560.0, 510.0)
+        .resizable(false)
+        .maximizable(false)
+        .decorations(false)
+        .transparent(true)
+        .shadow(true)
+        .center()
+        .focused(true);
+
+    match builder.build() {
+        Ok(win) => {
+            let app = app.clone();
+            win.on_window_event(move |event| {
+                if let tauri::WindowEvent::Destroyed = event {
+                    crate::audio::stop_mic_test();
+                    crate::app_controller::set_practice_mode(false);
+                    crate::mark_onboarding_done(&app);
+                }
+            });
+        }
+        Err(e) => log::warn!("Could not open the welcome guide: {}", e),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayIconState {
     Ejected,
@@ -316,6 +352,7 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
     let update_item = MenuItem::with_id(app, "check_updates", "Check for Updates…", true, None::<&str>)?;
     let _ = UPDATE_ITEM.set(update_item.clone());
     let pref_item = MenuItem::with_id(app, "preferences", "Settings...", true, None::<&str>)?;
+    let guide_item = MenuItem::with_id(app, "onboarding", "Welcome Guide…", true, None::<&str>)?;
     let sep3 = PredefinedMenuItem::separator(app)?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit RevFly", true, None::<&str>)?;
 
@@ -331,6 +368,7 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
         &sep2,
         &update_item,
         &pref_item,
+        &guide_item,
         &sep3,
         &quit_item,
     ])?;
@@ -359,6 +397,8 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
                 }
             } else if id == "preferences" {
                 open_preferences(app);
+            } else if id == "onboarding" {
+                open_onboarding(app);
             } else if id == "check_updates" {
                 crate::updater::on_tray_click(app);
             } else if id == "eject_model" {

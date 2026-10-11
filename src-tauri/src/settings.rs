@@ -36,6 +36,10 @@ pub struct AppSettings {
     /// How the floating pill looks: "classic" | "compact" | "compact_plain" | "line" | "capsule" | "dot".
     #[serde(default = "default_pill_style")]
     pub pill_style: String,
+    /// Whether the first-run welcome guide has been finished or closed. Settings saved before the
+    /// guide existed count as done, so only new installs see it.
+    #[serde(default = "default_true")]
+    pub onboarding_done: bool,
     #[serde(default = "default_idle_unload_sec")]
     pub model_idle_unload_sec: u64, // 0 = never, 30..3600 seconds
     /// When the speech model is loaded for a recording: "on_start" (while you talk, so it's ready
@@ -215,6 +219,7 @@ impl Default for AppSettings {
             output_device: None,
             theme: "system".to_string(),
             pill_style: default_pill_style(),
+            onboarding_done: false,
             model_idle_unload_sec: default_idle_unload_sec(),
             model_load_mode: default_model_load_mode(),
             window_x: None,
@@ -391,5 +396,15 @@ mod tests {
         let s = AppSettings::default();
         assert_eq!(s.translation_mode, "hotkey");
         assert!(!s.auto_translates());
+    }
+
+    #[test]
+    fn only_new_installs_see_the_welcome_guide() {
+        assert!(!AppSettings::default().onboarding_done);
+
+        let mut saved = serde_json::to_value(AppSettings::default()).unwrap();
+        saved.as_object_mut().unwrap().remove("onboarding_done");
+        let upgraded: AppSettings = serde_json::from_value(saved).unwrap();
+        assert!(upgraded.onboarding_done, "settings from before the guide count as done");
     }
 }

@@ -71,6 +71,8 @@ fn save_settings(
 ) -> Result<(), String> {
     new_settings.migrate();
     let old_settings = state.controller.get_settings();
+    // A Settings window opened before the welcome guide finished still holds `false`.
+    new_settings.onboarding_done |= old_settings.onboarding_done;
     state.controller.save_settings(new_settings.clone())?;
 
     // Update global hotkeys if changed (the translate hotkey is only active in its mode)
@@ -218,6 +220,41 @@ fn set_audio_device(
 #[tauri::command]
 fn open_preferences_window(app_handle: AppHandle) {
     tray::open_preferences(&app_handle);
+}
+
+#[tauri::command]
+fn open_onboarding_window(app_handle: AppHandle) {
+    tray::open_onboarding(&app_handle);
+}
+
+/// Closes the welcome guide; closing it marks it done (see `tray::open_onboarding`).
+#[tauri::command]
+fn finish_onboarding(app_handle: AppHandle) {
+    mark_onboarding_done(&app_handle);
+    if let Some(win) = app_handle.get_webview_window("onboarding") {
+        let _ = win.close();
+    }
+}
+
+/// Routes the hotkeys to the welcome guide's practice run (see `app_controller::set_practice_mode`).
+#[tauri::command]
+fn set_practice_mode(on: bool) {
+    app_controller::set_practice_mode(on);
+}
+
+/// Saves that the welcome guide was seen, so it doesn't open on the next launch.
+pub(crate) fn mark_onboarding_done(app_handle: &AppHandle) {
+    let Some(state) = app_handle.try_state::<AppState>() else {
+        return;
+    };
+    let mut settings = state.controller.get_settings();
+    if settings.onboarding_done {
+        return;
+    }
+    settings.onboarding_done = true;
+    if let Err(e) = state.controller.save_settings(settings) {
+        log::warn!("Could not save that the welcome guide was seen: {}", e);
+    }
 }
 
 #[tauri::command]
@@ -486,7 +523,10 @@ pub fn run() {
                 app.handle().clone(),
             );
 
-            prompt_accessibility_for_modifier_hotkeys(&settings);
+            // On first launch the welcome guide asks for Accessibility itself, with an explanation.
+            if settings.onboarding_done {
+                prompt_accessibility_for_modifier_hotkeys(&settings);
+            }
 
             app.manage(AppState {
                 controller,
@@ -494,6 +534,10 @@ pub fn run() {
             });
 
             register_global_shortcuts(app.handle(), &settings);
+
+            if !settings.onboarding_done {
+                tray::open_onboarding(app.handle());
+            }
 
             Ok(())
         })
@@ -510,6 +554,9 @@ pub fn run() {
             clear_history,
             get_model_status,
             download_model,
+            open_onboarding_window,
+            finish_onboarding,
+            set_practice_mode,
             get_audio_devices,
             set_audio_device,
             open_preferences_window,

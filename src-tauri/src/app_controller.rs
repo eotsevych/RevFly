@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
@@ -415,6 +415,14 @@ pub fn report_mic_recovered(app_handle: &AppHandle, switched_to: Option<String>)
     if let Some(state) = app_handle.try_state::<crate::AppState>() {
         state.controller.on_mic_recovered(switched_to);
     }
+}
+
+/// While the welcome guide's practice run is open, the hotkeys drive its simulated recording
+/// instead of a real one, so it works while the speech model is still downloading.
+static PRACTICE_MODE: AtomicBool = AtomicBool::new(false);
+
+pub fn set_practice_mode(on: bool) {
+    PRACTICE_MODE.store(on, Ordering::SeqCst);
 }
 
 /// Which hotkey started the recording, which decides whether it gets translated.
@@ -1319,6 +1327,15 @@ impl AppController {
     /// finishes one, keeping the mode it started with).
     pub fn toggle_recording_as(&self, trigger: &'static str, mode: RecordingMode) -> Result<(), String> {
         let cur_phase = { self.phase.lock().unwrap().clone() };
+
+        if PRACTICE_MODE.load(Ordering::SeqCst) && matches!(cur_phase, AssistantPhase::Idle) {
+            let mode = match mode {
+                RecordingMode::Main => "main",
+                RecordingMode::Translate => "translate",
+            };
+            let _ = self.app_handle.emit("practice-hotkey", serde_json::json!({ "mode": mode }));
+            return Ok(());
+        }
 
         match cur_phase {
             AssistantPhase::Idle => {

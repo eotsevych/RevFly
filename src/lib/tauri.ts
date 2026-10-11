@@ -30,6 +30,8 @@ export interface BackendSettings {
   theme?: string;
   /** How the floating pill looks (see PILL_STYLES in components/pill/styles.tsx). */
   pill_style?: string;
+  /** Whether the first-run welcome guide was finished or closed. */
+  onboarding_done?: boolean;
   model_idle_unload_sec?: number;
   /** When the speech model loads for a recording: while talking (faster) or after (saves RAM). */
   model_load_mode?: "on_start" | "on_stop";
@@ -282,6 +284,50 @@ export async function openPreferencesWindow(): Promise<void> {
   }
 }
 
+export async function openOnboardingWindow(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    await invoke("open_onboarding_window");
+  } catch (err) {
+    console.error("Failed to open the welcome guide:", err);
+  }
+}
+
+/** While on, the hotkeys send `practice-hotkey` to the welcome guide instead of recording. */
+export async function setPracticeMode(on: boolean): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    await invoke("set_practice_mode", { on });
+  } catch (err) {
+    console.error("Failed to set practice mode:", err);
+  }
+}
+
+/** A hotkey press during the welcome guide's practice run: which hotkey it was. */
+export async function subscribeToPracticeHotkey(
+  callback: (mode: "main" | "translate") => void,
+): Promise<UnlistenFn | null> {
+  if (!isTauri()) return null;
+  try {
+    return await listen<{ mode: "main" | "translate" }>("practice-hotkey", (event) => {
+      callback(event.payload.mode);
+    });
+  } catch (err) {
+    console.error("Failed to listen to practice hotkeys:", err);
+    return null;
+  }
+}
+
+/** Marks the welcome guide done and closes its window. */
+export async function finishOnboarding(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    await invoke("finish_onboarding");
+  } catch (err) {
+    console.error("Failed to finish the welcome guide:", err);
+  }
+}
+
 export async function closePreferencesWindow(): Promise<void> {
   if (!isTauri()) return;
   try {
@@ -373,6 +419,7 @@ export async function subscribeToModelDownload(
     percent: number;
     downloaded_bytes?: number;
     total_bytes?: number;
+    error?: string;
   }) => void,
 ): Promise<UnlistenFn | null> {
   if (!isTauri()) return null;
@@ -383,6 +430,7 @@ export async function subscribeToModelDownload(
       percent: number;
       downloaded_bytes?: number;
       total_bytes?: number;
+      error?: string;
     }>("model-download-progress", (event) => {
       callback(event.payload);
     });

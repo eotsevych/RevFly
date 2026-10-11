@@ -1,6 +1,7 @@
 import { useEffect, useState, Component, type ReactNode } from "react";
 import { VoicePill } from "./components/VoicePill";
 import { AssistantSettings } from "./components/AssistantSettings";
+import { Onboarding } from "./components/onboarding/Onboarding";
 import { fetchSettings, isTauri } from "./lib/tauri";
 import { applyTheme, initThemeListener, type ThemeMode } from "./lib/theme";
 
@@ -75,11 +76,16 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   }
 }
 
-function checkIsPreferences(): boolean {
-  if (typeof window === "undefined") return false;
-  if (window.location.hash === "#preferences" || window.location.href.includes("preferences")) {
-    return true;
-  }
+type View = "pill" | "preferences" | "onboarding";
+
+const WINDOW_VIEWS: View[] = ["preferences", "onboarding"];
+
+/** Which screen this window shows, from the URL hash or the Tauri window label. */
+function detectView(): View {
+  if (typeof window === "undefined") return "pill";
+  const hash = window.location.hash.replace("#", "");
+  const fromHash = WINDOW_VIEWS.find((v) => v === hash);
+  if (fromHash) return fromHash;
   const tauriWin = window as Window & {
     __TAURI_INTERNALS__?: {
       metadata?: { currentWebview?: { label?: string }; currentWindow?: { label?: string } };
@@ -88,14 +94,11 @@ function checkIsPreferences(): boolean {
   const label =
     tauriWin.__TAURI_INTERNALS__?.metadata?.currentWebview?.label ||
     tauriWin.__TAURI_INTERNALS__?.metadata?.currentWindow?.label;
-  if (label === "preferences") {
-    return true;
-  }
-  return false;
+  return WINDOW_VIEWS.find((v) => v === label) ?? "pill";
 }
 
 export default function App() {
-  const [isPreferences, setIsPreferences] = useState(checkIsPreferences);
+  const [view, setView] = useState<View>(detectView);
 
   useEffect(() => {
     // 1. Initial theme application
@@ -114,27 +117,27 @@ export default function App() {
     const cleanupTheme = initThemeListener();
 
     // 3. Detect view window
-    const detectView = async () => {
-      if (checkIsPreferences()) {
-        setIsPreferences(true);
+    const detectWindowView = async () => {
+      const fromUrl = detectView();
+      if (fromUrl !== "pill") {
+        setView(fromUrl);
         return;
       }
       if (isTauri()) {
         try {
           const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-          const win = getCurrentWebviewWindow();
-          if (win.label === "preferences") {
-            setIsPreferences(true);
-          }
+          const label = getCurrentWebviewWindow().label;
+          const fromLabel = WINDOW_VIEWS.find((v) => v === label);
+          if (fromLabel) setView(fromLabel);
         } catch {
           // ignore
         }
       }
     };
-    detectView();
+    detectWindowView();
 
     const onHashChange = () => {
-      setIsPreferences(checkIsPreferences());
+      setView(detectView());
     };
     window.addEventListener("hashchange", onHashChange);
 
@@ -144,10 +147,18 @@ export default function App() {
     };
   }, []);
 
-  if (isPreferences) {
+  if (view === "preferences") {
     return (
       <ErrorBoundary>
         <AssistantSettings />
+      </ErrorBoundary>
+    );
+  }
+
+  if (view === "onboarding") {
+    return (
+      <ErrorBoundary>
+        <Onboarding />
       </ErrorBoundary>
     );
   }
