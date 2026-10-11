@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Tokens } from "../../lib/tokens";
-import { formatDisplay } from "@/lib/hotkey";
+import { formatDisplay, hotkeyFromKeyEvent } from "@/lib/hotkey";
 
 interface HotkeyRecorderProps {
   value: string;
@@ -10,7 +10,7 @@ interface HotkeyRecorderProps {
   clearable?: boolean;
 }
 
-// Single-modifier hotkeys (e.g. Right Option) rely on the macOS event tap; other platforms only support key combos.
+// The Right ⌥ / Right ⌃ presets rely on the macOS event tap; other platforms only support key combos.
 const IS_MAC = typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
 const COMBO_PRESET = "CommandOrControl+Shift+Space";
 
@@ -21,42 +21,9 @@ export default function HotkeyRecorder({ value, onChange, t, clearable }: Hotkey
     if (!recording) return;
     e.preventDefault();
 
-    // 1. Detect single modifier keys (Right Option, Right Control, etc.)
-    const code = e.code;
-    const singleModifiers: Record<string, string> = {
-      AltRight: "RightOption",
-      ControlRight: "RightControl",
-      AltLeft: "LeftOption",
-      ControlLeft: "LeftControl",
-      MetaRight: "RightCommand",
-      MetaLeft: "LeftCommand",
-      ShiftRight: "RightShift",
-      ShiftLeft: "LeftShift",
-    };
-
-    if (IS_MAC && singleModifiers[code]) {
-      onChange(singleModifiers[code]);
-      setRecording(false);
-      return;
-    }
-
-    // 2. Detect key combinations (e.g. CommandOrControl + Shift + Space)
-    const parts: string[] = [];
-    if (IS_MAC) {
-      if (e.metaKey) parts.push("CommandOrControl");
-      if (e.ctrlKey) parts.push("Control");
-    } else {
-      if (e.ctrlKey) parts.push("CommandOrControl");
-      if (e.metaKey) parts.push("Super");
-    }
-    if (e.altKey) parts.push("Alt");
-    if (e.shiftKey) parts.push("Shift");
-
-    const key = e.key;
-    if (!["Meta", "Control", "Alt", "Shift"].includes(key)) {
-      const finalKey = key === " " ? "Space" : key.length === 1 ? key.toUpperCase() : key;
-      parts.push(finalKey);
-      onChange(parts.join("+"));
+    const hotkey = hotkeyFromKeyEvent(e);
+    if (hotkey) {
+      onChange(hotkey);
       setRecording(false);
     }
   }

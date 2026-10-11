@@ -1,8 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import { tok } from "@/lib/tokens";
 import { useResolvedTheme } from "@/lib/theme";
-import { formatDisplay } from "@/lib/hotkey";
-import HotkeyRecorder from "@/components/ui/HotkeyRecorder";
+import { formatDisplay, hotkeyFromKeyEvent } from "@/lib/hotkey";
 import { SettingsProvider } from "@/components/settings/SettingsContext";
 import { useSettingsContext } from "@/components/settings/useSettingsContext";
 import {
@@ -727,19 +725,102 @@ function Keycap({ p, children }: { p: Palette; children: React.ReactNode }) {
   );
 }
 
+/** Presets offered while changing a hotkey (Right ⌥ / ⌃ need the macOS event tap). */
+const HOTKEY_PRESETS: { value: string; label: string }[] = [
+  ...(IS_MAC
+    ? [
+        { value: "RightOption", label: "Right ⌥" },
+        { value: "RightControl", label: "Right ⌃" },
+      ]
+    : []),
+  { value: "CommandOrControl+Shift+Space", label: IS_MAC ? "⌘ ⇧ Space" : "Ctrl ⇧ Space" },
+];
+
+function Chip({
+  p,
+  on,
+  onClick,
+  children,
+}: {
+  p: Palette;
+  on: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      style={{
+        padding: "2px 7px",
+        borderRadius: 6,
+        background: on ? p.accentSoft : "transparent",
+        border: `1px solid ${on ? p.accentSoftBorder : p.rowBorder}`,
+        color: on ? p.accentText : p.dim,
+        font: `500 11px ${MONO}`,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 function KeysStage({ p }: { p: Palette }) {
   const { settings, updateSettings } = useSettingsContext();
   const [editing, setEditing] = useState<"main" | "translate" | null>(null);
-  const t = tok(useResolvedTheme(settings.theme), "violet");
   const mode = settings.translation_mode ?? "hotkey";
   const target = langCode(settings.target_lang || "English");
   const translateKey = settings.translate_hotkey ?? "";
+  const [conflict, setConflict] = useState(false);
+
+  const save = (which: "main" | "translate", v: string) => {
+    if (which === "main") {
+      // A translate hotkey on the same key would never fire; turn it off.
+      updateSettings(v && v === translateKey ? { hotkey: v, translate_hotkey: "" } : { hotkey: v });
+    } else if (v && v === settings.hotkey) {
+      setConflict(true);
+      return;
+    } else {
+      updateSettings({ translate_hotkey: v });
+    }
+    setConflict(false);
+    setEditing(null);
+  };
+  const saveRef = useRef(save);
+  saveRef.current = save;
+
+  // While changing a hotkey: the next key press is the new hotkey, Esc cancels. The current
+  // hotkeys are held off meanwhile, so pressing one doesn't start a recording.
+  useEffect(() => {
+    if (!editing) return;
+    setPracticeMode(true);
+    const onKey = (e: KeyboardEvent) => {
+      e.preventDefault();
+      if (e.key === "Escape") {
+        setConflict(false);
+        setEditing(null);
+        return;
+      }
+      const hotkey = hotkeyFromKeyEvent(e);
+      if (hotkey) saveRef.current(editing, hotkey);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      setPracticeMode(false);
+    };
+  }, [editing]);
 
   const rows: {
     id: "main" | "translate";
     name: string;
     hint: string;
-    keys: string[] | null;
+    value: string;
     color: string;
     editable: boolean;
   }[] = [
@@ -747,7 +828,7 @@ function KeysStage({ p }: { p: Palette }) {
       id: "main",
       name: "Dictate",
       hint: "Press, speak, press again",
-      keys: keycaps(settings.hotkey),
+      value: settings.hotkey,
       color: p.accent,
       editable: true,
     },
@@ -760,70 +841,85 @@ function KeysStage({ p }: { p: Palette }) {
           : mode === "auto"
             ? `Dictate translates other languages → ${target}`
             : `Press, speak, press again → ${target}`,
-      keys: mode === "hotkey" && translateKey ? keycaps(translateKey) : null,
+      value: mode === "hotkey" ? translateKey : "",
       color: p.teal,
       editable: mode === "hotkey",
     },
   ];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%", maxWidth: 400 }}>
-      {rows.map((k) => (
-        <div
-          key={k.id}
-          onClick={k.editable ? () => setEditing(editing === k.id ? null : k.id) : undefined}
-          title={k.editable ? "Click to change" : undefined}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            padding: 12,
-            borderRadius: 10,
-            background: p.row,
-            border: `1px solid ${editing === k.id ? p.accentSoftBorder : p.rowBorder}`,
-            cursor: k.editable ? "pointer" : "default",
-          }}
-        >
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%", maxWidth: 420 }}>
+      {rows.map((k) => {
+        const active = editing === k.id;
+        return (
           <div
-            style={{ width: 8, height: 8, borderRadius: 4, background: k.color, flexShrink: 0 }}
-          />
-          <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 0 }}>
-            <span style={{ fontSize: 13, fontWeight: 500 }}>{k.name}</span>
-            <span style={{ fontSize: 12, color: p.dim }}>{k.hint}</span>
-          </div>
-          <div style={{ display: "flex", gap: 4 }}>
-            {k.keys ? (
-              k.keys.map((key) => (
-                <Keycap key={key} p={p}>
-                  {key}
-                </Keycap>
-              ))
-            ) : k.editable ? (
-              <span style={{ font: `600 11px ${MONO}`, color: p.accent }}>SET</span>
-            ) : null}
-          </div>
-        </div>
-      ))}
-      {editing && (
-        <div style={{ display: "flex", justifyContent: "center" }}>
-          <HotkeyRecorder
-            value={editing === "main" ? settings.hotkey : translateKey}
-            clearable={editing === "translate"}
-            onChange={(v) => {
-              if (editing === "main") {
-                // A translate hotkey on the same key would never fire; turn it off.
-                updateSettings(
-                  v && v === translateKey ? { hotkey: v, translate_hotkey: "" } : { hotkey: v },
-                );
-              } else if (v !== settings.hotkey) {
-                updateSettings({ translate_hotkey: v });
-              }
-              setEditing(null);
+            key={k.id}
+            onClick={k.editable ? () => setEditing(active ? null : k.id) : undefined}
+            title={k.editable && !active ? "Click to change" : undefined}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: 12,
+              borderRadius: 10,
+              background: p.row,
+              border: `1px solid ${active ? p.accentSoftBorder : p.rowBorder}`,
+              cursor: k.editable ? "pointer" : "default",
             }}
-            t={t}
-          />
-        </div>
-      )}
+          >
+            <div
+              style={{ width: 8, height: 8, borderRadius: 4, background: k.color, flexShrink: 0 }}
+            />
+            <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: 1, minWidth: 0 }}>
+              <span style={{ fontSize: 13, fontWeight: 500 }}>{k.name}</span>
+              {active ? (
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                  {HOTKEY_PRESETS.map((preset) => (
+                    <Chip
+                      key={preset.value}
+                      p={p}
+                      on={k.value === preset.value}
+                      onClick={() => save(k.id, preset.value)}
+                    >
+                      {preset.label}
+                    </Chip>
+                  ))}
+                  {k.id === "translate" && (
+                    <Chip p={p} on={!k.value} onClick={() => save(k.id, "")}>
+                      Off
+                    </Chip>
+                  )}
+                </div>
+              ) : (
+                <span style={{ fontSize: 12, color: p.dim }}>{k.hint}</span>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+              {active ? (
+                <span
+                  style={{
+                    font: `600 11px ${MONO}`,
+                    color: conflict ? p.red : p.accent,
+                    padding: "6px 8px",
+                    borderRadius: 6,
+                    border: `1px dashed ${conflict ? p.red : p.accentSoftBorder}`,
+                  }}
+                >
+                  {conflict ? "USED BY DICTATE" : "PRESS KEYS…"}
+                </span>
+              ) : k.value ? (
+                keycaps(k.value).map((key) => (
+                  <Keycap key={key} p={p}>
+                    {key}
+                  </Keycap>
+                ))
+              ) : k.editable ? (
+                <span style={{ font: `600 11px ${MONO}`, color: p.accent }}>SET</span>
+              ) : null}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
