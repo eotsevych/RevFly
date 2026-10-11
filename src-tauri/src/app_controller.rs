@@ -285,6 +285,15 @@ pub(crate) fn apply_pill_window_behavior(win: &tauri::WebviewWindow, order_front
     }
 }
 
+/// What Audio Lab's "Translate Again" got back from the translation service.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LabTranslation {
+    pub text: String,
+    pub ms: u64,
+    /// Service, model and endpoint, e.g. `LLM gemini-3.6-flash at https://…`.
+    pub service: String,
+}
+
 /// Longest a translation request may take before it counts as failed.
 const TRANSLATION_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -1010,6 +1019,45 @@ impl AppController {
             req,
         )
         .await
+    }
+
+    /// Audio Lab's second try at a translation: sends `text` to the chosen service ("LLM" or
+    /// "Custom API") with the saved keys, endpoints and prompt, and returns the result without
+    /// pasting it. Masking applies as it does for a dictation.
+    pub async fn lab_translate(
+        &self,
+        text: String,
+        provider: String,
+        target_lang: String,
+    ) -> Result<LabTranslation, String> {
+        let text = text.trim().to_string();
+        if text.is_empty() {
+            return Err("There is no text to translate".to_string());
+        }
+        let mut settings = self.get_settings();
+        settings.translation_provider = provider;
+        if !target_lang.trim().is_empty() {
+            settings.target_lang = target_lang.trim().to_string();
+        }
+        let mask_config = mask_config_from(&settings);
+        let input = if mask_config.enabled { crate::masker::apply_masking(&text, &mask_config) } else { text };
+        let route = TranslationRoute::from_settings(&settings);
+        let service = route.describe(&settings);
+        let data_dir = get_data_dir();
+        log_stage_event(&data_dir, "LAB_TRANSLATE_START", &format!("Audio Lab: translating to {} with {}: \"{}\"", settings.target_lang, service, input));
+        let started = Instant::now();
+        let result = route.translate(&settings, &input).await;
+        let ms = started.elapsed().as_millis() as u64;
+        match result {
+            Ok(translated) => {
+                log_stage_event(&data_dir, "LAB_TRANSLATE_DONE", &format!("Translated in {} ms: \"{}\"", ms, translated));
+                Ok(LabTranslation { text: translated.trim().to_string(), ms, service })
+            }
+            Err(e) => {
+                log_stage_event(&data_dir, "LAB_TRANSLATE_FAILED", &format!("{} after {} ms: {}", service, ms, e));
+                Err(format!("{} failed: {}", route.label(), e))
+            }
+        }
     }
 
     pub fn save_lab_custom_audio(&self, base64_wav: String) -> Result<String, String> {

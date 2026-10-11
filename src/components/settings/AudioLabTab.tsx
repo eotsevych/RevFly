@@ -9,6 +9,8 @@ import {
   fetchLabAudioFiles,
   triggerRunLabExperiment,
   triggerSaveLabCustomAudio,
+  triggerLabTranslate,
+  type LabTranslation,
   isTauri,
   type LabAudioItem,
   type LabExperimentResult,
@@ -16,8 +18,26 @@ import {
   type NoiseReduction,
 } from "@/lib/tauri";
 
-/** What a translated recording opened with Second Try said and became. */
-export type LabSourceTexts = { spoken: string; translated: string };
+const TRANSLATION_SERVICES = [
+  { value: "LLM", label: "LLM" },
+  { value: "Custom API", label: "Custom API" },
+];
+
+const TARGET_LANGUAGES = [
+  "English",
+  "Ukrainian",
+  "Spanish",
+  "French",
+  "German",
+  "Italian",
+  "Polish",
+  "Japanese",
+  "Chinese",
+  "Russian",
+].map((l) => ({ value: l, label: l }));
+
+/** What a recording opened with Second Try said, and its translation if it was translated. */
+export type LabSourceTexts = { spoken: string; translated: string | null };
 
 export default function AudioLabTab({
   t,
@@ -50,7 +70,15 @@ export default function AudioLabTab({
   const [result, setResult] = useState<LabExperimentResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rawUploadName, setRawUploadName] = useState<string | null>(null);
-  const [copied, setCopied] = useState<"spoken" | "translated" | null>(null);
+  const [copied, setCopied] = useState<"spoken" | "translated" | "retranslated" | null>(null);
+  const [trService, setTrService] = useState(
+    (settings.translation_provider || "").toLowerCase().includes("custom") ? "Custom API" : "LLM",
+  );
+  const [trTarget, setTrTarget] = useState(settings.target_lang || "English");
+  const [trFrom, setTrFrom] = useState<"spoken" | "result">("spoken");
+  const [trPhase, setTrPhase] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [trResult, setTrResult] = useState<LabTranslation | null>(null);
+  const [trError, setTrError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const availableModels =
@@ -184,7 +212,34 @@ export default function AudioLabTab({
   // The texts belong to the recording Second Try opened, not to one picked afterwards.
   const sourceTexts = initialTexts && selected === initialAudio ? initialTexts : null;
 
-  async function copyText(which: "spoken" | "translated", text: string) {
+  // Translate Again works on what was said (from Second Try) or on this run's transcript.
+  const spokenText = sourceTexts?.spoken ?? null;
+  const sourceRows: ["spoken" | "translated", string, string][] = sourceTexts
+    ? [
+        ["spoken", "As spoken", sourceTexts.spoken],
+        ...(sourceTexts.translated
+          ? [["translated", "Translated", sourceTexts.translated] as ["translated", string, string]]
+          : []),
+      ]
+    : [];
+  const resultText = phase === "done" ? result?.clean_text?.trim() || null : null;
+  const trSource = trFrom === "result" && resultText ? resultText : (spokenText ?? resultText);
+
+  async function translateAgain() {
+    if (!trSource) return;
+    setTrPhase("running");
+    setTrError(null);
+    setTrResult(null);
+    try {
+      setTrResult(await triggerLabTranslate(trSource, trService, trTarget));
+      setTrPhase("done");
+    } catch (err) {
+      setTrError(errorMessage(err));
+      setTrPhase("error");
+    }
+  }
+
+  async function copyText(which: "spoken" | "translated" | "retranslated", text: string) {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(which);
@@ -194,17 +249,139 @@ export default function AudioLabTab({
     }
   }
 
+  // Under "This Recording" after Second Try; otherwise below this run's results.
+  const translateAgainSection = (
+    <Section title="Translate Again" t={t}>
+      {spokenText && resultText && (
+        <Row label="Text" hint="What you said, or this run's transcript" t={t}>
+          <Segmented
+            options={[
+              { value: "spoken", label: "As spoken" },
+              { value: "result", label: "This run" },
+            ]}
+            value={trFrom}
+            onChange={(v) => setTrFrom(v as "spoken" | "result")}
+            t={t}
+          />
+        </Row>
+      )}
+      <Row label="Service" hint="Uses the keys and prompt saved in Translations" t={t}>
+        <Segmented options={TRANSLATION_SERVICES} value={trService} onChange={setTrService} t={t} />
+      </Row>
+      <Row label="Translate to" t={t} last>
+        <FieldSelect value={trTarget} onChange={setTrTarget} options={TARGET_LANGUAGES} t={t} />
+      </Row>
+      <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+        <button
+          type="button"
+          onClick={() => void translateAgain()}
+          disabled={!trSource || trPhase === "running"}
+          style={{
+            padding: "8px 14px",
+            borderRadius: 8,
+            border: "none",
+            background: trPhase === "running" ? t.border : t.accent,
+            color: trPhase === "running" ? t.textDim : "#fff",
+            fontSize: 12,
+            fontWeight: 600,
+            fontFamily: "Inter, sans-serif",
+            cursor: trPhase === "running" ? "not-allowed" : "pointer",
+          }}
+        >
+          {trPhase === "running" ? "Translating…" : `Translate with ${trService}`}
+        </button>
+        {!trSource && (
+          <p style={{ margin: 0, fontSize: 12, color: t.textMuted, lineHeight: 1.5 }}>
+            Nothing to translate yet. Open a recording with Second Try in Logs, or run the
+            experiment above.
+          </p>
+        )}
+        {trError && (
+          <p style={{ margin: 0, fontSize: 12, color: t.errorColor, lineHeight: 1.5 }}>{trError}</p>
+        )}
+        {trResult && (
+          <div
+            style={{
+              padding: "10px 12px",
+              borderRadius: 8,
+              background: t.inputBg,
+              border: `1px solid ${t.accent}55`,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 6,
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  color: t.accent,
+                  fontFamily: "JetBrains Mono, monospace",
+                }}
+              >
+                {trTarget} · {trResult.ms} ms
+              </span>
+              <button
+                type="button"
+                onClick={() => void copyText("retranslated", trResult.text)}
+                style={{
+                  background: `${t.accent}14`,
+                  border: `1px solid ${t.accent}30`,
+                  borderRadius: 4,
+                  color: t.accent,
+                  padding: "2px 8px",
+                  fontSize: 11,
+                  fontWeight: 500,
+                  fontFamily: "Inter, sans-serif",
+                  cursor: "pointer",
+                }}
+              >
+                {copied === "retranslated" ? "Copied" : "Copy"}
+              </button>
+            </div>
+            <p
+              style={{
+                margin: 0,
+                fontSize: 12,
+                color: t.text,
+                fontFamily: "Inter, sans-serif",
+                lineHeight: 1.5,
+                whiteSpace: "pre-wrap",
+                userSelect: "text",
+              }}
+            >
+              {trResult.text}
+            </p>
+            <p
+              style={{
+                margin: "6px 0 0",
+                fontSize: 10,
+                color: t.textDim,
+                fontFamily: "JetBrains Mono, monospace",
+                wordBreak: "break-all",
+              }}
+            >
+              {trResult.service}
+            </p>
+          </div>
+        )}
+      </div>
+    </Section>
+  );
+
   return (
     <div>
       {sourceTexts && (
         <Section title="This Recording" t={t}>
           <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-            {(
-              [
-                ["spoken", "As spoken", sourceTexts.spoken],
-                ["translated", "Translated", sourceTexts.translated],
-              ] as const
-            ).map(([which, label, text]) => (
+            {sourceRows.map(([which, label, text]) => (
               <div
                 key={which}
                 style={{
@@ -270,6 +447,8 @@ export default function AudioLabTab({
           </div>
         </Section>
       )}
+
+      {spokenText && translateAgainSection}
 
       <Section title="Source Recording (Real Audio)" t={t}>
         <div style={{ padding: 12 }}>
@@ -635,6 +814,8 @@ export default function AudioLabTab({
           )}
         </div>
       )}
+
+      {!spokenText && translateAgainSection}
     </div>
   );
 }

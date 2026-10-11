@@ -179,6 +179,7 @@ export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
         text: l.final_text || l.raw_text || "(No transcript text)",
         rawText: l.raw_text || "",
         spokenText: l.spoken_text || null,
+        finalText: (l.final_text || "").trim(),
         audioFile: l.audio_filename,
         audioDurationSec: l.audio_duration_sec,
         vadTrimmedSec: l.vad_trimmed_sec,
@@ -408,11 +409,14 @@ export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
+                          // A translated recording shows both texts; any other shows what was said.
                           onOpenInAudioLab(
                             log.audioFile || "latest_recording.wav",
                             log.spokenText
-                              ? { spoken: log.spokenText, translated: log.text }
-                              : undefined,
+                              ? { spoken: log.spokenText, translated: log.finalText || null }
+                              : log.finalText
+                                ? { spoken: log.finalText, translated: null }
+                                : undefined,
                           );
                         }}
                         title="Open in Audio Lab for second try re-test"

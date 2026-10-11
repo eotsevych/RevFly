@@ -351,6 +351,16 @@ async fn run_lab_experiment(
 }
 
 #[tauri::command]
+async fn lab_translate(
+    state: State<'_, AppState>,
+    text: String,
+    provider: String,
+    target_lang: String,
+) -> Result<app_controller::LabTranslation, String> {
+    state.controller.lab_translate(text, provider, target_lang).await
+}
+
+#[tauri::command]
 fn save_lab_custom_audio(
     state: State<'_, AppState>,
     base64_wav: String,
@@ -515,6 +525,7 @@ pub fn run() {
             play_recorded_audio,
             list_lab_audio_files,
             run_lab_experiment,
+            lab_translate,
             save_lab_custom_audio,
             get_hardware_profile,
             post_process_transcript,

@@ -190,6 +190,24 @@ pub fn list_available_audio_files() -> Vec<LabAudioItem> {
     list
 }
 
+/// Logs a lab run (load + inference, then the model is freed) and updates the tray's model status.
+fn log_lab_run(app_handle: &AppHandle, model: &str, audio_sec: f32, total_ms: u64, inference_ms: u64) {
+    crate::tray::update_tray_model_status(app_handle, false);
+    crate::pipeline_logger::log_stage_event(
+        &get_data_dir(),
+        "LAB_RUN",
+        &format!(
+            "{} on {:.2} s of audio: load {} ms + inference {} ms ({:.1}x), then freed from RAM; app memory {} MB",
+            model,
+            audio_sec,
+            total_ms.saturating_sub(inference_ms),
+            inference_ms,
+            if inference_ms > 0 { audio_sec * 1000.0 / inference_ms as f32 } else { 0.0 },
+            crate::vitals::process_rss_mb()
+        ),
+    );
+}
+
 /// Executes a test experiment on the given audio file.
 pub async fn run_experiment(
     app_handle: &AppHandle,
@@ -271,10 +289,19 @@ pub async fn run_experiment(
             tr.unload();
         }
         let model_dir = ParakeetTranscriber::ensure_model(app_handle).await?;
-        let mut pk = parakeet_transcriber.lock().unwrap();
         let t0 = Instant::now();
-        let res = pk.transcribe(&processed_samples, &model_dir)?;
-        let inference_ms = t0.elapsed().as_millis() as u64;
+        let res = {
+            let mut pk = parakeet_transcriber.lock().unwrap();
+            let res = pk.transcribe(&processed_samples, &model_dir);
+            // A lab run frees its model straight away instead of leaving it to the idle cleanup.
+            pk.unload();
+            res
+        };
+        let total_ms = t0.elapsed().as_millis() as u64;
+        let res = res?;
+        // Inference alone; the rest of the run was loading the model.
+        let inference_ms = if res.2 > 0 { res.2 } else { total_ms };
+        log_lab_run(app_handle, &req.model_name, processed_duration_sec, total_ms, inference_ms);
 
         let speed_factor = if inference_ms > 0 {
             (processed_duration_sec * 1000.0) / (inference_ms as f32)
@@ -329,7 +356,7 @@ pub async fn run_experiment(
             processed_duration_sec,
             vad_cut_sec,
             vad_time_ms,
-            inference_time_ms: inference_ms.max(res.2),
+            inference_time_ms: inference_ms,
             speed_factor,
             hardware_engine: "ONNX Runtime (CPU FastConformer)".to_string(),
             original_audio_filename: req.audio_filename.clone(),
@@ -345,10 +372,18 @@ pub async fn run_experiment(
             pk.unload();
         }
         let model_path = Transcriber::ensure_model(app_handle, &req.model_name).await?;
-        let mut tr = transcriber.lock().unwrap();
-
         let lang_opt = req.language.as_deref();
-        let res = tr.transcribe_detailed(&processed_samples, &model_path, false, lang_opt)?;
+        let t0 = Instant::now();
+        let res = {
+            let mut tr = transcriber.lock().unwrap();
+            let res = tr.transcribe_detailed(&processed_samples, &model_path, false, lang_opt);
+            // A lab run frees its model straight away instead of leaving it to the idle cleanup.
+            tr.unload();
+            res
+        };
+        let total_ms = t0.elapsed().as_millis() as u64;
+        let res = res?;
+        log_lab_run(app_handle, &req.model_name, processed_duration_sec, total_ms, res.inference_ms);
 
         let speed_factor = if res.inference_ms > 0 {
             (processed_duration_sec * 1000.0) / (res.inference_ms as f32)
