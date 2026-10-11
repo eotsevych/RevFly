@@ -84,6 +84,12 @@ static EJECT_ITEM: std::sync::OnceLock<tauri::menu::MenuItem<tauri::Wry>> = std:
 static TOGGLE_ITEM: std::sync::OnceLock<tauri::menu::MenuItem<tauri::Wry>> = std::sync::OnceLock::new();
 static UPDATE_ITEM: std::sync::OnceLock<tauri::menu::MenuItem<tauri::Wry>> = std::sync::OnceLock::new();
 static RETRY_ITEM: std::sync::OnceLock<tauri::menu::MenuItem<tauri::Wry>> = std::sync::OnceLock::new();
+/// The tray menu, so "Retry Last Translation" can be added and removed.
+static TRAY_MENU: std::sync::OnceLock<Menu<tauri::Wry>> = std::sync::OnceLock::new();
+/// Whether "Retry Last Translation" is in the menu right now.
+static RETRY_SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Menu position of "Retry Last Translation": right after "Start Recording".
+const RETRY_POSITION: usize = 4;
 /// Translation submenu items with the setting value each stands for ("mode:off", "provider:LLM").
 static TRANSLATION_ITEMS: std::sync::OnceLock<Vec<(String, CheckMenuItem<tauri::Wry>)>> = std::sync::OnceLock::new();
 static IS_RECORDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -116,7 +122,6 @@ pub fn set_model_download_progress(percent: u32) {
     }
 }
 
-/// Enables "Retry Last Translation" while a failed translation is waiting to be retried.
 const TRANSLATION_MODES: [(&str, &str); 3] = [
     ("off", "Off (Voice to Text only)"),
     ("hotkey", "With the Translate Hotkey"),
@@ -148,10 +153,15 @@ pub fn sync_translation_menu(settings: &AppSettings) {
     }
 }
 
+/// Shows "Retry Last Translation" while a failed translation is waiting to be retried.
 pub fn set_retry_item(enabled: bool) {
-    if let Some(item) = RETRY_ITEM.get() {
-        let _ = item.set_enabled(enabled);
+    let (Some(item), Some(menu)) = (RETRY_ITEM.get(), TRAY_MENU.get()) else {
+        return;
+    };
+    if RETRY_SHOWN.swap(enabled, std::sync::atomic::Ordering::SeqCst) == enabled {
+        return;
     }
+    let _ = if enabled { menu.insert(item, RETRY_POSITION) } else { menu.remove(item) };
 }
 
 pub fn is_recording() -> bool {
@@ -207,8 +217,8 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
 
     let toggle_item = MenuItem::with_id(app, "toggle_recording", "Start Recording", true, None::<&str>)?;
     let _ = TOGGLE_ITEM.set(toggle_item.clone());
-    // Enabled while the last translation failed and can be sent again.
-    let retry_item = MenuItem::with_id(app, "retry_translation", "Retry Last Translation", false, None::<&str>)?;
+    // In the menu only while the last translation failed and can be sent again (see set_retry_item).
+    let retry_item = MenuItem::with_id(app, "retry_translation", "Retry Last Translation", true, None::<&str>)?;
     let _ = RETRY_ITEM.set(retry_item.clone());
     let sep1 = PredefinedMenuItem::separator(app)?;
 
@@ -314,7 +324,6 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
         &eject_item,
         &sep0,
         &toggle_item,
-        &retry_item,
         &sep1,
         &input_submenu,
         &output_submenu,
@@ -325,6 +334,8 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
         &sep3,
         &quit_item,
     ])?;
+
+    let _ = TRAY_MENU.set(menu.clone());
 
     let mut builder = TrayIconBuilder::with_id("main-tray")
         .menu(&menu)
