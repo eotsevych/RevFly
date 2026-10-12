@@ -302,6 +302,22 @@ fn get_tray_state(state: State<'_, AppState>) -> serde_json::Value {
     })
 }
 
+/// Whether RevFly opens when you log in. The system's login item is the source of truth, so it
+/// isn't kept in the settings file.
+#[tauri::command]
+fn get_launch_at_login(app_handle: AppHandle) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    app_handle.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_launch_at_login(app_handle: AppHandle, enabled: bool) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let autolaunch = app_handle.autolaunch();
+    let result = if enabled { autolaunch.enable() } else { autolaunch.disable() };
+    result.map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn close_preferences_window(app_handle: AppHandle) {
     audio::stop_mic_test();
@@ -445,6 +461,7 @@ pub fn run() {
         .plugin(tauri_plugin_log::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -594,6 +611,8 @@ pub fn run() {
             is_model_loaded,
             eject_model,
             get_tray_state,
+            get_launch_at_login,
+            set_launch_at_login,
             updater::get_update_status,
             updater::check_for_updates,
             updater::install_update,

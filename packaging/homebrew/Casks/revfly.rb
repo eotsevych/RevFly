@@ -35,6 +35,7 @@ cask "revfly" do
     "~/Library/Application Support/com.revfly.desktop",
     "~/Library/Application Support/revfly",
     "~/Library/Caches/com.revfly.desktop",
+    "~/Library/LaunchAgents/RevFly.plist",
     "~/Library/Preferences/com.revfly.desktop.plist",
     "~/Library/Saved Application State/com.revfly.desktop.savedState",
     "~/Library/WebKit/com.revfly.desktop",

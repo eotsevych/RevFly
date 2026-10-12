@@ -723,6 +723,22 @@ export async function triggerSaveLabCustomAudio(base64Wav: string): Promise<stri
   }
 }
 
+/** Whether RevFly opens when you log in (the system login item, not a saved setting). */
+export async function getLaunchAtLogin(): Promise<boolean> {
+  if (!isTauri()) return false;
+  try {
+    return await invoke<boolean>("get_launch_at_login");
+  } catch (err) {
+    console.error("Failed to read launch at login:", err);
+    return false;
+  }
+}
+
+export async function setLaunchAtLogin(enabled: boolean): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("set_launch_at_login", { enabled });
+}
+
 export async function checkAccessibility(): Promise<boolean> {
   if (!isTauri()) return true;
   try {
