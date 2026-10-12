@@ -26,13 +26,11 @@ const soft = (c: string) => `${c}24`;
 
 const center: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center" };
 
-/** The pill itself: fixed size, fully rounded. */
+/** The pill itself: fully rounded and as wide as its content. */
 function Shell({
   t,
   accent,
   height,
-  width,
-  minWidth,
   padding,
   gap,
   title,
@@ -42,8 +40,6 @@ function Shell({
   t: Tokens;
   accent: string;
   height: number;
-  width?: number;
-  minWidth?: number;
   padding: string;
   gap: number;
   title?: string | undefined;
@@ -61,8 +57,6 @@ function Shell({
         display: "flex",
         alignItems: "center",
         gap,
-        width,
-        minWidth,
         height,
         padding,
         borderRadius: height / 2,
@@ -181,7 +175,7 @@ function WellVisual({
   }
 }
 
-/** Compact: status on top, timer / languages / short detail underneath (design 3a and 3b). */
+/** Compact: status on top, timer / languages / short detail centred underneath (design 3a and 3b). */
 function TwoLinePill({
   view,
   t,
@@ -229,9 +223,8 @@ function TwoLinePill({
     <Shell
       t={t}
       accent={accent}
-      width={well ? 168 : 164}
       height={48}
-      padding={well ? "0 14px 0 6px" : "0 14px"}
+      padding={well ? "0 16px 0 6px" : "0 16px 0 12px"}
       gap={10}
       title={view.subtitle}
     >
@@ -251,9 +244,26 @@ function TwoLinePill({
       >
         <WellVisual view={view} levels={levels} wave={WELL_WAVE} />
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 2,
+          minWidth: 0,
+        }}
+      >
         <span style={labelStyle(accent)}>{statusWord(view)}</span>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, height: 16, minWidth: 0 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            height: 16,
+            minWidth: 0,
+          }}
+        >
           {detail}
         </div>
       </div>
@@ -261,7 +271,7 @@ function TwoLinePill({
   );
 }
 
-/** Single line: well, status, languages or a short note, timer on the right (design 2b). */
+/** Single line: well, status, languages or a short note, then the timer (design 2b). */
 function LinePill({
   view,
   t,
@@ -281,15 +291,7 @@ function LinePill({
         ? errorReason(view.rawTitle, view.subtitle)
         : null;
   return (
-    <Shell
-      t={t}
-      accent={accent}
-      width={248}
-      height={40}
-      padding="0 14px 0 5px"
-      gap={9}
-      title={view.subtitle}
-    >
+    <Shell t={t} accent={accent} height={40} padding="0 14px 0 5px" gap={9} title={view.subtitle}>
       <div
         style={{
           ...center,
@@ -318,7 +320,6 @@ function LinePill({
           {note}
         </span>
       )}
-      <div style={{ flex: 1 }} />
       {view.state === "listening" && (
         <span
           style={{
@@ -380,14 +381,13 @@ function CapsulePill({
       <Shell
         t={t}
         accent={accent}
-        width={124}
         height={36}
-        padding="0"
+        padding="0 18px"
         gap={8}
         title={view.subtitle}
         onHover={setHovered}
       >
-        <div style={{ ...center, gap: 8, width: "100%" }}>
+        <div style={{ ...center, gap: 8 }}>
           {shape}
           {slot && (
             <span
@@ -470,17 +470,8 @@ function DotPill({
       mark = <ResultIcon kind="x" color={accent} size={14} />;
       word = errorReason(view.rawTitle, view.subtitle);
   }
-  // Every normal stage fits 104 px; only a long error word widens it.
   return (
-    <Shell
-      t={t}
-      accent={accent}
-      minWidth={104}
-      height={28}
-      padding="0 12px 0 8px"
-      gap={8}
-      title={view.subtitle}
-    >
+    <Shell t={t} accent={accent} height={28} padding="0 12px 0 8px" gap={8} title={view.subtitle}>
       <div style={{ ...center, width: 16, height: 16, flexShrink: 0 }}>{mark}</div>
       <span
         style={{ font: `500 11.5px ${MONO}`, color: t.text, fontVariantNumeric: "tabular-nums" }}
