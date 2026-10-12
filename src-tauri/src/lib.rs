@@ -559,10 +559,6 @@ pub fn run() {
 
             register_global_shortcuts(app.handle(), &settings);
 
-            if !settings.onboarding_done {
-                tray::open_onboarding(app.handle());
-            }
-
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -619,12 +615,19 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
-        .run(|app, event| {
-            #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Reopen { .. } = event {
-                tray::reopen_from_dock(app);
+        .run(|app, event| match event {
+            // Opened only once launching has finished: a window built during `setup` on macOS is
+            // left off screen when the menu-bar-only policy is applied at launch.
+            tauri::RunEvent::Ready => {
+                let done = app
+                    .try_state::<AppState>()
+                    .is_none_or(|state| state.controller.get_settings().onboarding_done);
+                if !done {
+                    tray::open_onboarding(app);
+                }
             }
-            #[cfg(not(target_os = "macos"))]
-            let _ = (app, event);
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => tray::reopen_from_dock(app),
+            _ => {}
         });
 }
