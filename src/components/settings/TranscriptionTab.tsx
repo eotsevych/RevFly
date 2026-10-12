@@ -523,7 +523,11 @@ export default function TranscriptionTab({ t }: { t: Tokens }) {
       <Section title="Audio Chunking & VAD" t={t}>
         <Row
           label="Audio chunking"
-          hint="Off: each recording is kept and transcribed as one whole track"
+          hint={
+            settings.audio_chunking
+              ? "On: long recordings are cut at pauses and transcribed piece by piece"
+              : "Off: each recording is kept and transcribed as one whole track"
+          }
           t={t}
           last={!settings.audio_chunking}
         >
