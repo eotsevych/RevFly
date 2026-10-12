@@ -19,22 +19,21 @@ cask "revfly" do
 
   # The app updates itself in place; brew should not fight it.
   auto_updates true
-  depends_on macos: ">= :big_sur"
+  depends_on :macos
 
   app "RevFly.app"
 
   # RevFly is not notarized (no paid Apple Developer ID), so drop the quarantine flag
   # Homebrew adds; otherwise Gatekeeper blocks the first launch.
-  postflight do
-    system_command "/usr/bin/xattr",
-                   args: ["-dr", "com.apple.quarantine", "#{appdir}/RevFly.app"]
+  postflight_steps do
+    run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{appdir}}/RevFly.app"]
   end
 
   uninstall quit: "com.revfly.desktop"
 
   zap trash: [
-    "~/Library/Application Support/revfly",
     "~/Library/Application Support/com.revfly.desktop",
+    "~/Library/Application Support/revfly",
     "~/Library/Caches/com.revfly.desktop",
     "~/Library/Preferences/com.revfly.desktop.plist",
     "~/Library/Saved Application State/com.revfly.desktop.savedState",
