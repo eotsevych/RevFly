@@ -1399,6 +1399,8 @@ function OnboardingInner() {
           ? "Finish"
           : "Continue";
   const busy = tryCtl.phase === "tx" || tryCtl.phase === "translate";
+  // The button records for real, so it waits for the model; the hotkey still runs the practice.
+  const talkOff = busy || practice;
 
   return (
     <div
@@ -1565,7 +1567,8 @@ function OnboardingInner() {
           <button
             type="button"
             onClick={tryCtl.press}
-            disabled={busy}
+            disabled={talkOff}
+            title={practice ? "Available once the speech model is downloaded" : undefined}
             style={{
               display: "flex",
               alignItems: "center",
@@ -1576,8 +1579,8 @@ function OnboardingInner() {
               borderRadius: 10,
               padding: "10px 14px",
               font: `500 14px ${SANS}`,
-              cursor: busy ? "default" : "pointer",
-              opacity: busy ? 0.6 : 1,
+              cursor: talkOff ? "default" : "pointer",
+              opacity: talkOff ? 0.5 : 1,
             }}
           >
             {tryCtl.phase === "listen" ? "Press to finish" : "Press to talk"}
