@@ -77,21 +77,22 @@ Updates installed this way do not show the Gatekeeper warning again, and RevFly 
 
 ## 2. Windows 10 & 11
 
-### Download
-Download `RevFly_<version>_x64-setup.exe` (installer) or `RevFly_<version>_x64_en-US.msi` from [GitHub Releases](https://github.com/eotsevych/RevFly/releases).
+### Option A: Microsoft Store (Recommended)
+Install RevFly from the **[Microsoft Store](https://apps.microsoft.com/detail/9NVMTPSDZFWR)**. There's no SmartScreen warning, and the Store installs updates for you.
 
-### Installation Steps
+### Option B: Download the Installer
+Download `RevFly_<version>_x64-setup.exe` (installer) or `RevFly_<version>_x64_en-US.msi` from [GitHub Releases](https://github.com/eotsevych/RevFly/releases).
 1. Double-click the downloaded `.exe` file.
 2. Follow the setup steps on screen.
 
-### How to Pass the "SmartScreen" Warning
+#### How to Pass the "SmartScreen" Warning
 Microsoft SmartScreen (a Windows security scanner) flags new open-source software:
 1. When the blue "Windows protected your PC" window appears, click **More info**.
 2. Click **Run anyway**.
 3. You only need to do this once.
 
 ### Updates
-RevFly checks for updates once a day and shows a notification when a new version is out. Install it from the tray icon (**Install Update & Restart**) or **Settings** → **General** → **Updates**. No need to download new installers by hand.
+The Store version is updated by the Microsoft Store. The installer version checks for updates once a day and shows a notification when a new version is out. Install it from the tray icon (**Install Update & Restart**) or **Settings** → **General** → **Updates**. No need to download new installers by hand.
 
 ---
 

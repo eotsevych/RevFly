@@ -151,7 +151,10 @@ const ASSET_PATTERNS = {
   "linux-deb": /_amd64\.deb$/,
   "linux-rpm": /\.x86_64\.rpm$/,
 };
-const HERO_ASSET = { mac: "mac-dmg", windows: "win-exe", linux: "linux-appimage" };
+const HERO_ASSET = { mac: "mac-dmg", linux: "linux-appimage" };
+// Store installs skip the SmartScreen prompt and update through the Store.
+const STORE_URL = "https://apps.microsoft.com/detail/9NVMTPSDZFWR";
+if (os === "windows") document.getElementById("hero-download").href = STORE_URL;
 
 async function loadRelease() {
   try {
