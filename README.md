@@ -4,6 +4,8 @@
 
 **The fast, private, local-first desktop voice assistant with instant AI translation.**
 
+<img src="site/assets/og.png" alt="RevFly: speak in any language, paste clean text anywhere" width="720" />
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-brightgreen.svg)](INSTALL.md)
 [![Tauri](https://img.shields.io/badge/Built%20With-Tauri%20v2-orange.svg)](https://v2.tauri.app)
@@ -20,6 +22,11 @@
 **RevFly** is a lightweight desktop assistant that records your speech, transcribes it locally on your computer in RAM (Random Access Memory), translates foreign languages with AI, and automatically pastes the result directly into your active window.
 
 No cloud audio upload. No browser required. Just tap your hotkey and speak.
+
+<p align="center">
+  <img src="site/assets/guide/input.webp" alt="Settings, General tab: launch and translate hotkeys, microphone, audio output and noise reduction" width="49%" />
+  <img src="site/assets/guide/translation.webp" alt="Settings, Translations tab: translation mode and AI provider presets" width="49%" />
+</p>
 
 ---
 

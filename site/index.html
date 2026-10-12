@@ -13,8 +13,17 @@
       property="og:description"
       content="Local-first voice dictation with instant AI translation. Your audio never leaves your computer."
     />
-    <meta property="og:image" content="https://eotsevych.github.io/RevFly/assets/icon.png" />
+    <meta property="og:image" content="https://eotsevych.github.io/RevFly/assets/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="RevFly: Speak in any language. Paste clean text anywhere. Free, open-source voice dictation."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://eotsevych.github.io/RevFly/assets/og.png" />
     <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://eotsevych.github.io/RevFly/" />
     <meta name="theme-color" content="#0b0b14" />
     <link rel="icon" href="favicon.ico" />
     <link rel="apple-touch-icon" href="assets/icon.png" />
@@ -109,22 +118,18 @@
               aria-label="Install from the terminal (macOS)"
             >
               <div class="install-tabs" role="tablist">
+                <button role="tab" aria-selected="true" data-cmd="brew">Homebrew</button>
                 <button
                   role="tab"
-                  aria-selected="true"
+                  aria-selected="false"
                   data-cmd="curl"
                   data-i18n="hero.tabTerminal"
                 >
                   Terminal
                 </button>
-                <button role="tab" aria-selected="false" data-cmd="brew">Homebrew</button>
               </div>
               <div class="install-cmd">
-                <code id="install-code"
-                  >curl -fsSL
-                  https://raw.githubusercontent.com/eotsevych/RevFly/main/scripts/install_mac.sh |
-                  bash</code
-                >
+                <code id="install-code">brew install --cask eotsevych/tap/revfly</code>
                 <button
                   class="copy"
                   type="button"
@@ -137,7 +142,7 @@
                 </button>
               </div>
               <p class="install-note" data-i18n="hero.installNote">
-                macOS one-liner: installs to Applications with no security prompt.
+                On a Mac: installs to Applications with no security prompt.
               </p>
             </div>
           </div>
@@ -1046,17 +1051,12 @@
             >
           </p>
           <div class="downloads">
-            <article class="dl" data-os="mac">
+            <article class="dl" data-os="mac" id="download-mac">
               <h3>macOS</h3>
               <p class="dl-req" data-i18n="dl.macReq">macOS 11+ · Apple Silicon &amp; Intel</p>
-              <a
-                class="btn btn-primary"
-                data-asset="mac-dmg"
-                href="https://github.com/eotsevych/RevFly/releases/latest"
-                data-i18n="dl.macBtn"
-                >Download .dmg</a
-              >
-              <p class="dl-alt" data-i18n="dl.macAlt">Or with no security prompt:</p>
+              <p class="dl-lead" data-i18n="dl.macBrew">
+                Install with Homebrew, no security prompt:
+              </p>
               <div class="mini-cmd">
                 <code id="cmd-brew">brew install --cask eotsevych/tap/revfly</code
                 ><button
@@ -1070,6 +1070,16 @@
                   Copy
                 </button>
               </div>
+              <p class="dl-alt">
+                <span data-i18n="dl.macAlt">Or download directly:</span>
+                <a
+                  data-asset="mac-dmg"
+                  href="https://github.com/eotsevych/RevFly/releases/latest"
+                  data-i18n="dl.dmg"
+                  >.dmg</a
+                >
+                <span data-i18n="dl.dmgNote">(macOS asks you to confirm on first launch)</span>
+              </p>
             </article>
             <article class="dl" data-os="windows">
               <h3>Windows</h3>
