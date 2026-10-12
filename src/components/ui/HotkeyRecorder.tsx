@@ -35,7 +35,7 @@ export default function HotkeyRecorder({ value, onChange, t, clearable }: Hotkey
   function handleKeyUp(e: React.KeyboardEvent) {
     if (!recording) return;
     e.preventDefault();
-    capture.current.keyup(e);
+    capture.current.keyup();
   }
 
   const display = formatDisplay(value);

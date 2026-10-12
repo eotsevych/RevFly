@@ -3,7 +3,16 @@ use std::sync::atomic::{AtomicU16, Ordering};
 #[allow(unused_imports)]
 use std::sync::Arc;
 
-pub fn hotkey_str_to_modifier_keycode(s: &str) -> Option<u16> {
+/// Bits of a modifier chord, as stored in a chord id (see `modifier_hotkey_id`).
+pub const CHORD_COMMAND: u16 = 1;
+pub const CHORD_CONTROL: u16 = 2;
+pub const CHORD_ALT: u16 = 4;
+pub const CHORD_SHIFT: u16 = 8;
+/// Marks an id as a chord of modifiers rather than a single keycode (keycodes are below 0x100).
+pub const CHORD: u16 = 0x100;
+
+/// The macOS keycode of a single-modifier hotkey such as `RightOption`.
+fn single_modifier_keycode(s: &str) -> Option<u16> {
     let clean = s.trim().to_lowercase().replace(' ', "");
     match clean.as_str() {
         "rightoption" | "rightalt" | "altright" | "optionright" => Some(61),
@@ -18,12 +27,39 @@ pub fn hotkey_str_to_modifier_keycode(s: &str) -> Option<u16> {
     }
 }
 
-/// Modifier keycodes for the main and translate hotkeys (0 = not a modifier-only key). The
-/// translate hotkey is dropped when it's the same key as the main one.
+/// The chord bit of a modifier name in a combo (`Alt`, `Shift`, ...), or None for any other key.
+fn chord_bit(part: &str) -> Option<u16> {
+    match part.trim().to_lowercase().as_str() {
+        "commandorcontrol" | "cmdorctrl" | "command" | "cmd" | "super" | "meta" => Some(CHORD_COMMAND),
+        "control" | "ctrl" => Some(CHORD_CONTROL),
+        "alt" | "option" => Some(CHORD_ALT),
+        "shift" => Some(CHORD_SHIFT),
+        _ => None,
+    }
+}
+
+/// Identifies a modifier-only hotkey, which the macOS event tap handles: a single modifier key
+/// (`RightOption`) gives its keycode, and two or more modifiers held together (`Alt+Shift`) give
+/// `CHORD` plus their bits. Key combos such as `Alt+Shift+K` give None.
+pub fn modifier_hotkey_id(s: &str) -> Option<u16> {
+    if let Some(keycode) = single_modifier_keycode(s) {
+        return Some(keycode);
+    }
+    let mut bits = 0;
+    let mut parts = 0;
+    for part in s.split('+') {
+        bits |= chord_bit(part)?;
+        parts += 1;
+    }
+    (parts >= 2 && bits.count_ones() >= 2).then_some(CHORD | bits)
+}
+
+/// Modifier hotkey ids for the main and translate hotkeys (0 = not a modifier-only hotkey). The
+/// translate hotkey is dropped when it's the same as the main one.
 #[allow(dead_code)]
-fn modifier_keycodes(hotkey: &str, translate_hotkey: &str) -> (u16, u16) {
-    let main = hotkey_str_to_modifier_keycode(hotkey).unwrap_or(0);
-    let translate = hotkey_str_to_modifier_keycode(translate_hotkey).unwrap_or(0);
+fn modifier_hotkey_ids(hotkey: &str, translate_hotkey: &str) -> (u16, u16) {
+    let main = modifier_hotkey_id(hotkey).unwrap_or(0);
+    let translate = modifier_hotkey_id(translate_hotkey).unwrap_or(0);
     (main, if translate == main { 0 } else { translate })
 }
 
@@ -33,23 +69,36 @@ mod tests {
 
     #[test]
     fn test_key_mappings() {
-        assert_eq!(hotkey_str_to_modifier_keycode("RightOption"), Some(61));
-        assert_eq!(hotkey_str_to_modifier_keycode("RightAlt"), Some(61));
-        assert_eq!(hotkey_str_to_modifier_keycode("AltRight"), Some(61));
-        assert_eq!(hotkey_str_to_modifier_keycode("RightControl"), Some(62));
-        assert_eq!(hotkey_str_to_modifier_keycode("RightCtrl"), Some(62));
-        assert_eq!(hotkey_str_to_modifier_keycode("ControlRight"), Some(62));
-        assert_eq!(hotkey_str_to_modifier_keycode("LeftOption"), Some(58));
-        assert_eq!(hotkey_str_to_modifier_keycode("LeftControl"), Some(59));
-        assert_eq!(hotkey_str_to_modifier_keycode("CommandOrControl+Shift+Space"), None);
+        assert_eq!(modifier_hotkey_id("RightOption"), Some(61));
+        assert_eq!(modifier_hotkey_id("RightAlt"), Some(61));
+        assert_eq!(modifier_hotkey_id("AltRight"), Some(61));
+        assert_eq!(modifier_hotkey_id("RightControl"), Some(62));
+        assert_eq!(modifier_hotkey_id("RightCtrl"), Some(62));
+        assert_eq!(modifier_hotkey_id("ControlRight"), Some(62));
+        assert_eq!(modifier_hotkey_id("LeftOption"), Some(58));
+        assert_eq!(modifier_hotkey_id("LeftControl"), Some(59));
+        assert_eq!(modifier_hotkey_id("CommandOrControl+Shift+Space"), None);
     }
 
     #[test]
-    fn test_modifier_keycodes() {
-        assert_eq!(modifier_keycodes("RightOption", "RightControl"), (61, 62));
-        assert_eq!(modifier_keycodes("RightOption", ""), (61, 0));
-        assert_eq!(modifier_keycodes("RightOption", "AltRight"), (61, 0));
-        assert_eq!(modifier_keycodes("Control+Shift+Space", "RightCommand"), (0, 54));
+    fn modifiers_held_together_are_a_chord() {
+        assert_eq!(modifier_hotkey_id("Alt+Shift"), Some(CHORD | CHORD_ALT | CHORD_SHIFT));
+        assert_eq!(
+            modifier_hotkey_id("CommandOrControl+Control"),
+            Some(CHORD | CHORD_COMMAND | CHORD_CONTROL)
+        );
+        assert_eq!(modifier_hotkey_id("Alt+Shift+K"), None);
+        assert_eq!(modifier_hotkey_id("Alt"), None);
+        assert_eq!(modifier_hotkey_id("Shift+Shift"), None);
+    }
+
+    #[test]
+    fn test_modifier_hotkey_ids() {
+        assert_eq!(modifier_hotkey_ids("RightOption", "RightControl"), (61, 62));
+        assert_eq!(modifier_hotkey_ids("RightOption", ""), (61, 0));
+        assert_eq!(modifier_hotkey_ids("RightOption", "AltRight"), (61, 0));
+        assert_eq!(modifier_hotkey_ids("Control+Shift+Space", "RightCommand"), (0, 54));
+        assert_eq!(modifier_hotkey_ids("Alt+Shift", "Shift+Alt"), (CHORD | CHORD_ALT | CHORD_SHIFT, 0));
     }
 }
 
@@ -193,7 +242,7 @@ pub mod macos {
         controller: Arc<AppController>,
         target_keycode: Arc<AtomicU16>,
         translate_keycode: Arc<AtomicU16>,
-        /// The hotkey currently held down (0 = none), so only its release ends hold-to-talk.
+        /// The hotkey id currently held down (0 = none), so only its release ends hold-to-talk.
         down_keycode: AtomicU16,
         tap_port: Mutex<Option<CFMachPortRef>>,
         last_down_time: Mutex<Option<Instant>>,
@@ -261,6 +310,24 @@ pub mod macos {
         }
     }
 
+    /// The chord id of the modifiers held in an event's flags (`CHORD` alone when none are).
+    fn held_chord(flags: u64) -> u16 {
+        let mut id = CHORD;
+        if flags & kCGEventFlagMaskCommand != 0 {
+            id |= CHORD_COMMAND;
+        }
+        if flags & kCGEventFlagMaskControl != 0 {
+            id |= CHORD_CONTROL;
+        }
+        if flags & kCGEventFlagMaskAlternate != 0 {
+            id |= CHORD_ALT;
+        }
+        if flags & kCGEventFlagMaskShift != 0 {
+            id |= CHORD_SHIFT;
+        }
+        id
+    }
+
     unsafe extern "C" fn event_tap_callback(
         _proxy: CGEventTapProxy,
         event_type: CGEventType,
@@ -300,6 +367,22 @@ pub mod macos {
         } else if event_type == kCGEventFlagsChanged {
             let target = state.target_keycode.load(Ordering::SeqCst);
             let translate = state.translate_keycode.load(Ordering::SeqCst);
+            let flags = CGEventGetFlags(event);
+
+            // A chord is down while exactly its modifiers are held, so Option+Shift+Command doesn't
+            // count as Option+Shift.
+            let held = held_chord(flags);
+            let down = state.down_keycode.load(Ordering::SeqCst);
+            if down & CHORD != 0 && held != down {
+                state.handle_modifier_up(down);
+            }
+            for (id, mode) in [(target, RecordingMode::Main), (translate, RecordingMode::Translate)] {
+                if id & CHORD != 0 && held == id {
+                    log::info!("Global modifier chord {:#x} pressed", id);
+                    state.handle_modifier_down(id, mode);
+                }
+            }
+
             let mode = if target != 0 && keycode == target {
                 Some(RecordingMode::Main)
             } else if translate != 0 && keycode == translate {
@@ -308,7 +391,6 @@ pub mod macos {
                 None
             };
             if let Some(mode) = mode {
-                let flags = CGEventGetFlags(event);
                 let is_down = match keycode {
                     61 | 58 => (flags & kCGEventFlagMaskAlternate) != 0,
                     62 | 59 => (flags & kCGEventFlagMaskControl) != 0,
@@ -337,7 +419,7 @@ pub mod macos {
 
     impl GlobalKeyListenerHandle {
         pub fn update_hotkeys(&self, hotkey_str: &str, translate_hotkey_str: &str) {
-            let (code, translate_code) = modifier_keycodes(hotkey_str, translate_hotkey_str);
+            let (code, translate_code) = modifier_hotkey_ids(hotkey_str, translate_hotkey_str);
             self.target_keycode.store(code, Ordering::SeqCst);
             self.translate_keycode.store(translate_code, Ordering::SeqCst);
             log::info!("Updated global modifier keycodes: main {}, translate {}", code, translate_code);
@@ -350,7 +432,7 @@ pub mod macos {
         initial_translate_hotkey: &str,
         app_handle: tauri::AppHandle,
     ) -> Arc<GlobalKeyListenerHandle> {
-        let (target_code, translate_code) = modifier_keycodes(initial_hotkey, initial_translate_hotkey);
+        let (target_code, translate_code) = modifier_hotkey_ids(initial_hotkey, initial_translate_hotkey);
         let target_keycode = Arc::new(AtomicU16::new(target_code));
         let translate_keycode = Arc::new(AtomicU16::new(translate_code));
         let handle = Arc::new(GlobalKeyListenerHandle {

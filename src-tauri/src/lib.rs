@@ -93,18 +93,24 @@ pub(crate) fn apply_hotkeys(app_handle: &AppHandle, state: &AppState, settings: 
 }
 
 /// (Re)registers the key-combo hotkeys (e.g. `Control+Shift+Space`) with the global-shortcut
-/// plugin. Modifier-only hotkeys (e.g. `RightOption`) don't parse as shortcuts; on macOS the event
-/// tap in global_key_listener.rs handles those.
+/// plugin. Modifier-only hotkeys (e.g. `RightOption`, `Alt+Shift`) don't parse as shortcuts; on
+/// macOS the event tap in global_key_listener.rs handles those.
 pub(crate) fn register_global_shortcuts(app_handle: &AppHandle, settings: &AppSettings) {
     let gs = app_handle.global_shortcut();
     let _ = gs.unregister_all();
-    let main = settings.hotkey.parse::<Shortcut>().ok();
+    let combo = |hotkey: &str| {
+        if global_key_listener::modifier_hotkey_id(hotkey).is_some() {
+            return None;
+        }
+        hotkey.parse::<Shortcut>().ok()
+    };
+    let main = combo(&settings.hotkey);
     if let Some(shortcut) = main {
         if let Err(e) = gs.register(shortcut) {
             log::warn!("Could not register hotkey {}: {}", settings.hotkey, e);
         }
     }
-    if let Ok(shortcut) = settings.active_translate_hotkey().parse::<Shortcut>() {
+    if let Some(shortcut) = combo(settings.active_translate_hotkey()) {
         if Some(shortcut) == main {
             log::warn!("Translate hotkey is the same as the main hotkey; ignoring it");
         } else if let Err(e) = gs.register(shortcut) {
@@ -128,7 +134,7 @@ fn shortcut_mode(shortcut: &Shortcut, settings: &AppSettings) -> RecordingMode {
 fn prompt_accessibility_for_modifier_hotkeys(settings: &AppSettings) {
     let uses_modifier = [settings.hotkey.as_str(), settings.active_translate_hotkey()]
         .iter()
-        .any(|h| global_key_listener::hotkey_str_to_modifier_keycode(h).is_some());
+        .any(|h| global_key_listener::modifier_hotkey_id(h).is_some());
     if uses_modifier && !global_key_listener::is_accessibility_trusted() {
         global_key_listener::request_accessibility_prompt();
     }
@@ -302,6 +308,7 @@ fn close_preferences_window(app_handle: AppHandle) {
     if let Some(win) = app_handle.get_webview_window("preferences") {
         let _ = win.hide();
     }
+    tray::sync_dock_icon(&app_handle, None);
 }
 
 #[tauri::command]
@@ -591,6 +598,14 @@ pub fn run() {
             updater::check_for_updates,
             updater::install_update,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                tray::reopen_from_dock(app);
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app, event);
+        });
 }

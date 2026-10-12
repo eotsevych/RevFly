@@ -812,7 +812,7 @@ function KeysStage({ p }: { p: Palette }) {
     };
     const onUp = (e: KeyboardEvent) => {
       e.preventDefault();
-      capture.keyup(e);
+      capture.keyup();
     };
     window.addEventListener("keydown", onDown);
     window.addEventListener("keyup", onUp);

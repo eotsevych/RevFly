@@ -30,58 +30,89 @@ const SINGLE_MODIFIERS: Record<string, string> = {
 
 type KeyLike = Pick<KeyboardEvent, "code" | "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">;
 
-const MODIFIER_KEYS = ["Meta", "Control", "Alt", "Shift"];
+/** Modifier names in the backend's order, keyed by what the modifier is called in a combo. */
+const MODIFIER_ORDER = IS_MAC
+  ? ["CommandOrControl", "Control", "Alt", "Shift"]
+  : ["CommandOrControl", "Super", "Alt", "Shift"];
 
-/** The key combination of a key press (`CommandOrControl+Shift+Space`), or null for a lone modifier. */
-function comboFromKeyEvent(e: KeyLike): string | null {
-  if (MODIFIER_KEYS.includes(e.key)) return null;
-  const parts: string[] = [];
-  if (IS_MAC) {
-    if (e.metaKey) parts.push("CommandOrControl");
-    if (e.ctrlKey) parts.push("Control");
-  } else {
-    if (e.ctrlKey) parts.push("CommandOrControl");
-    if (e.metaKey) parts.push("Super");
-  }
-  if (e.altKey) parts.push("Alt");
-  if (e.shiftKey) parts.push("Shift");
+/** The combo name of a modifier key (`AltLeft` → `Alt`), or null for any other key. */
+function modifierName(code: string): string | null {
+  if (code.startsWith("Meta")) return IS_MAC ? "CommandOrControl" : "Super";
+  if (code.startsWith("Control")) return IS_MAC ? "Control" : "CommandOrControl";
+  if (code.startsWith("Alt")) return "Alt";
+  if (code.startsWith("Shift")) return "Shift";
+  return null;
+}
+
+/** The modifiers an event says are held, which covers ones pressed before recording began. */
+function heldModifiers(e: KeyLike): string[] {
+  const names: string[] = [];
+  if (e.metaKey) names.push(IS_MAC ? "CommandOrControl" : "Super");
+  if (e.ctrlKey) names.push(IS_MAC ? "Control" : "CommandOrControl");
+  if (e.altKey) names.push("Alt");
+  if (e.shiftKey) names.push("Shift");
+  return names;
+}
+
+/** The backend name of a non-modifier key. */
+function keyName(e: KeyLike): string {
   // Letters and digits come from the physical key: with ⌥ held, macOS types "˚" for K.
   const physical = /^(?:Key([A-Z])|Digit(\d))$/.exec(e.code);
-  const key = physical
-    ? (physical[1] ?? physical[2])
-    : e.key === " "
-      ? "Space"
-      : e.key.length === 1
-        ? e.key.toUpperCase()
-        : e.key;
-  parts.push(key ?? e.key);
-  return parts.join("+");
+  if (physical) return physical[1] ?? physical[2] ?? e.key;
+  if (e.key === " ") return "Space";
+  return e.key.length === 1 ? e.key.toUpperCase() : e.key;
 }
 
 /**
- * Records a hotkey from key presses, in the backend's format ("RightOption",
- * "CommandOrControl+Shift+Space"). A modifier pressed alone and released alone is a
- * single-modifier hotkey (macOS only: it needs the event tap); a modifier held while another
- * key is pressed is part of a combo. Feed it every keydown and keyup while recording.
+ * Records a hotkey from key presses, in the backend's format. Hold keys down one after another,
+ * and the hotkey is everything held when the first key is released:
+ *
+ * - a modifier alone is a single-key hotkey ("RightOption"),
+ * - several modifiers are a chord ("Alt+Shift"),
+ * - modifiers plus another key are a combo ("CommandOrControl+Shift+Space").
+ *
+ * Modifier-only hotkeys need the macOS event tap, so elsewhere they are ignored. Feed it every
+ * keydown and keyup while recording.
  */
 export function createHotkeyCapture(onHotkey: (hotkey: string) => void) {
-  // The single-modifier hotkey that releasing the key would record.
-  let pending: string | null = null;
+  const modifiers = new Set<string>();
+  // The one modifier key pressed, by side ("AltRight"), while it's the only one.
+  let soloModifier: string | null = null;
+  let key: string | null = null;
+
+  const reset = () => {
+    modifiers.clear();
+    soloModifier = null;
+    key = null;
+  };
+
+  const finish = () => {
+    const mods = MODIFIER_ORDER.filter((name) => modifiers.has(name));
+    let hotkey: string | null = null;
+    if (key) hotkey = [...mods, key].join("+");
+    else if (IS_MAC && mods.length === 1 && soloModifier)
+      hotkey = SINGLE_MODIFIERS[soloModifier] ?? null;
+    else if (IS_MAC && mods.length > 1) hotkey = mods.join("+");
+    reset();
+    if (hotkey) onHotkey(hotkey);
+  };
+
   return {
     keydown(e: KeyLike) {
-      const combo = comboFromKeyEvent(e);
-      if (combo) {
-        pending = null;
-        onHotkey(combo);
-        return;
+      const held = heldModifiers(e);
+      const name = modifierName(e.code);
+      if (name) {
+        const firstPress = modifiers.size === 0 && !key;
+        soloModifier = firstPress && held.length <= 1 ? e.code : null;
+        modifiers.add(name);
+      } else {
+        soloModifier = null;
+        key = keyName(e);
       }
-      const held = [e.metaKey, e.ctrlKey, e.altKey, e.shiftKey].filter(Boolean).length;
-      // Only the first modifier, pressed on its own, can become a single-modifier hotkey.
-      pending = IS_MAC && held === 1 ? (SINGLE_MODIFIERS[e.code] ?? null) : null;
+      held.forEach((m) => modifiers.add(m));
     },
-    keyup(e: KeyLike) {
-      if (pending && SINGLE_MODIFIERS[e.code] === pending) onHotkey(pending);
-      pending = null;
+    keyup() {
+      if (modifiers.size > 0 || key) finish();
     },
   };
 }
