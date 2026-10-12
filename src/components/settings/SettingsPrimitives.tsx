@@ -48,7 +48,7 @@ export function Row({
   t,
   last,
 }: {
-  label: string;
+  label: React.ReactNode;
   hint?: string;
   children: React.ReactNode;
   t: Tokens;

@@ -78,7 +78,28 @@ export default function UpdatesSection({ t }: { t: Tokens }) {
   return (
     <Section title="Updates" t={t}>
       <Row
-        label={status ? `RevFly ${status.current_version}` : "RevFly"}
+        label={
+          <>
+            {status ? `RevFly ${status.current_version}` : "RevFly"}
+            <span
+              style={{
+                marginLeft: 8,
+                padding: "1px 6px",
+                borderRadius: 4,
+                border: `1px solid ${t.accent}55`,
+                background: `${t.accent}18`,
+                color: t.accent,
+                fontSize: 10,
+                fontWeight: 600,
+                letterSpacing: 0.4,
+                textTransform: "uppercase",
+                verticalAlign: "middle",
+              }}
+            >
+              Beta
+            </span>
+          </>
+        }
         hint={installError ?? statusText(status)}
         t={t}
         last={status?.state !== "downloading"}
