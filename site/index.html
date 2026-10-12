@@ -533,7 +533,7 @@
             <a href="#g-permissions"><span>01</span><b data-i18n="g1.short">Permissions</b></a>
             <a href="#g-input"><span>02</span><b data-i18n="g2.short">Hotkey &amp; mic</b></a>
             <a href="#g-model"><span>03</span><b data-i18n="g3.short">Speech model</b></a>
-            <a href="#g-chunking"><span>04</span><b data-i18n="g4.short">Long recordings</b></a>
+            <a href="#g-chunking"><span>04</span><b data-i18n="g4.short">Memory &amp; long recordings</b></a>
             <a href="#g-cleanup"><span>05</span><b data-i18n="g5.short">Clean-up</b></a>
             <a href="#g-translation"><span>06</span><b data-i18n="g6.short">Translation</b></a>
             <a href="#g-storage"><span>07</span><b data-i18n="g7.short">Storage</b></a>
@@ -583,7 +583,7 @@
                   height="1074"
                   loading="lazy"
                   data-i18n-attr="alt:g1.alt"
-                  alt="RevFly Settings, General tab: System Permissions with Accessibility granted, and Updates"
+                  alt="RevFly Settings, General tab: System Permissions with Accessibility granted, and Updates showing RevFly 1.0.0 Beta"
                 />
               </figure>
             </article>
@@ -592,7 +592,7 @@
             <article class="guide-step" id="g-input">
               <div class="guide-text">
                 <p class="guide-n">02 · <span data-i18n="tab.general">General</span></p>
-                <h3 data-i18n="g2.title">Hotkey, microphone and memory</h3>
+                <h3 data-i18n="g2.title">Hotkeys and microphone</h3>
                 <p class="guide-lead" data-i18n="g2.lead">
                   The Input section controls how you start a recording and what RevFly listens with.
                 </p>
@@ -616,7 +616,7 @@
                       target, like <b>EN</b>. Automatic translates anything that isn't in the target
                       language. Use another modifier key like <b>Right ⌃</b> on a Mac, or a key
                       combo on Windows and Linux. What you actually said is kept: open a translated
-                      recording with <b>Second try</b> in Logs to see and copy it.
+                      recording with <b>Second try</b> in History to see and copy it.
                     </dd>
                   </div>
                   <div>
@@ -641,11 +641,10 @@
                     </dd>
                   </div>
                   <div>
-                    <dt data-i18n="g2.o5">Idle timeout</dt>
+                    <dt data-i18n="g2.o5">Open at login</dt>
                     <dd data-i18n="g2.o5t">
-                      How long the speech model stays in memory after you finish (30 s by default).
-                      After that it's unloaded, so RevFly uses almost no RAM while you're not
-                      dictating. It loads again automatically the next time you record.
+                      In Behavior, below Input. RevFly starts when you log in, so the hotkey is
+                      always ready.
                     </dd>
                   </div>
                 </dl>
@@ -657,7 +656,7 @@
                   height="1074"
                   loading="lazy"
                   data-i18n-attr="alt:g2.alt"
-                  alt="Input section: launch hotkey, microphone input with Test Mic, audio output, noise reduction and idle timeout"
+                  alt="Input section: launch and translate hotkeys, microphone input with Test Mic, audio output and noise reduction"
                 />
               </figure>
             </article>
@@ -665,7 +664,7 @@
             <!-- 3. Model -->
             <article class="guide-step" id="g-model">
               <div class="guide-text">
-                <p class="guide-n">03 · <span data-i18n="tab.general">General</span></p>
+                <p class="guide-n">03 · <span data-i18n="tab.transcription">Transcription</span></p>
                 <h3 data-i18n="g3.title">Speech model and languages</h3>
                 <p class="guide-lead" data-i18n="g3.lead">
                   Recognition runs entirely on your computer. Pick the engine and tell it which
@@ -726,18 +725,35 @@
             <!-- 4. Chunking -->
             <article class="guide-step" id="g-chunking">
               <div class="guide-text">
-                <p class="guide-n">04 · <span data-i18n="tab.general">General</span></p>
-                <h3 data-i18n="g4.title">Long recordings: chunking</h3>
+                <p class="guide-n">04 · <span data-i18n="tab.transcription">Transcription</span></p>
+                <h3 data-i18n="g4.title">Memory and long recordings</h3>
                 <p class="guide-lead" data-i18n="g4.lead">
-                  Not every model can take a long conversation in one go. Parakeet, for example,
-                  handles about 4 minutes 50 seconds at a time. Chunking splits the recording at
-                  natural pauses so nothing is lost.
+                  Choose how the speech model uses memory, and how long recordings are split so
+                  nothing is lost.
                 </p>
                 <dl class="opts">
                   <div>
+                    <dt data-i18n="g4.o4">Idle timeout</dt>
+                    <dd data-i18n="g4.o4t">
+                      How long the speech model stays in memory after you finish (30 s by default).
+                      After that it's unloaded, so RevFly uses almost no RAM while you're not
+                      dictating. It loads again automatically the next time you record.
+                    </dd>
+                  </div>
+                  <div>
+                    <dt data-i18n="g4.o5">Load speech model</dt>
+                    <dd data-i18n="g4.o5t">
+                      <b>Faster</b> loads the model as soon as you start talking, so the text is
+                      ready the moment you stop. <b>Save memory</b> loads it after you stop and uses
+                      less RAM while you record.
+                    </dd>
+                  </div>
+                  <div>
                     <dt data-i18n="g4.o1">Audio chunking</dt>
                     <dd data-i18n="g4.o1t">
-                      Turn it on for long dictation. It's also faster: the parts you've already said
+                      Not every model can take a long conversation in one go: Parakeet handles about
+                      4 minutes 50 seconds at a time. Chunking splits the recording at natural
+                      pauses, so turn it on for long dictation. It's also faster: the parts you've already said
                       are transcribed while you keep talking, so the text is ready almost as soon as
                       you stop.
                     </dd>
@@ -764,7 +780,7 @@
                   height="1074"
                   loading="lazy"
                   data-i18n-attr="alt:g4.alt"
-                  alt="Audio Chunking and VAD section: chunking on, pause detection trigger, safety cut limit and overlap"
+                  alt="Transcription tab: Memory with idle timeout and model loading, then Audio Chunking and VAD with chunking on, pause detection trigger and safety cut limit"
                 />
               </figure>
             </article>
@@ -772,7 +788,7 @@
             <!-- 5. Clean-up -->
             <article class="guide-step" id="g-cleanup">
               <div class="guide-text">
-                <p class="guide-n">05 · <span data-i18n="tab.general">General</span></p>
+                <p class="guide-n">05 · <span data-i18n="tab.text">Text</span></p>
                 <h3 data-i18n="g5.title">Post-processing &amp; formatting</h3>
                 <p class="guide-lead" data-i18n="g5.lead">
                   Speech is messy. Normalization turns what you said into clean written text that
@@ -885,7 +901,7 @@
             <!-- 7. Storage -->
             <article class="guide-step" id="g-storage">
               <div class="guide-text">
-                <p class="guide-n">07 · <span data-i18n="tab.storage">Storage</span></p>
+                <p class="guide-n">07 · <span data-i18n="tab.history">History</span></p>
                 <h3 data-i18n="g7.title">History and storage</h3>
                 <p class="guide-lead" data-i18n="g7.lead">
                   Choose what RevFly keeps on your disk. Everything stays local.
@@ -922,7 +938,7 @@
                   height="1074"
                   loading="lazy"
                   data-i18n-attr="alt:g7.alt"
-                  alt="Storage tab: save format, storage cap, auto-purge and usage"
+                  alt="History tab: save format, storage cap and auto-purge"
                 />
               </figure>
             </article>
@@ -930,7 +946,7 @@
             <!-- 8. Logs -->
             <article class="guide-step" id="g-logs">
               <div class="guide-text">
-                <p class="guide-n">08 · <span data-i18n="tab.logs">Logs</span></p>
+                <p class="guide-n">08 · <span data-i18n="tab.history">History</span></p>
                 <h3 data-i18n="g8.title">Logs: see every step</h3>
                 <p class="guide-lead" data-i18n="g8.lead">
                   Each recording gets a timeline of what happened to it and how long each step took.
@@ -965,7 +981,7 @@
                   height="1074"
                   loading="lazy"
                   data-i18n-attr="alt:g8.alt"
-                  alt="Logs tab: recent recordings with timings, detected language and text"
+                  alt="History tab: session stats and recent recordings with timings, detected language and text"
                 />
               </figure>
             </article>
