@@ -5,10 +5,45 @@ use tauri::tray::{TrayIcon, TrayIconBuilder};
 use crate::audio::{list_input_devices, list_output_devices};
 use crate::settings::AppSettings;
 
+/// Windows that make RevFly behave like a regular app while they're open.
+const DOCK_WINDOWS: [&str; 2] = ["preferences", "onboarding"];
+
+/// RevFly lives in the menu bar, but while Settings or the welcome guide is open it shows in the Dock
+/// and Cmd+Tab like a normal app, so those windows are easy to get back to. `closing` names a window
+/// that is going away but may still be registered.
+pub fn sync_dock_icon(app: &AppHandle, closing: Option<&str>) {
+    #[cfg(target_os = "macos")]
+    {
+        let open = DOCK_WINDOWS.iter().filter(|label| Some(**label) != closing).any(|label| {
+            app.get_webview_window(label).is_some_and(|w| {
+                w.is_visible().unwrap_or(false) || w.is_minimized().unwrap_or(false)
+            })
+        });
+        let policy = if open {
+            tauri::ActivationPolicy::Regular
+        } else {
+            tauri::ActivationPolicy::Accessory
+        };
+        let _ = app.set_activation_policy(policy);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, closing);
+}
+
+/// Brings back Settings or the welcome guide when the Dock icon is clicked.
+pub fn reopen_from_dock(app: &AppHandle) {
+    if app.get_webview_window("onboarding").is_some() {
+        open_onboarding(app);
+    } else if app.get_webview_window("preferences").is_some() {
+        open_preferences(app);
+    }
+}
+
 pub fn open_preferences(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("preferences") {
         let _ = win.unminimize();
         let _ = win.show();
+        sync_dock_icon(app, None);
         let _ = win.set_focus();
     } else {
         let mut builder = WebviewWindowBuilder::new(
@@ -29,12 +64,15 @@ pub fn open_preferences(app: &AppHandle) {
         }
 
         if let Ok(win) = builder.build() {
+            sync_dock_icon(app, None);
+            let _ = win.set_focus();
             let win_clone = win.clone();
             win.on_window_event(move |event| {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
                     let _ = win_clone.hide();
                     crate::audio::stop_mic_test();
+                    sync_dock_icon(win_clone.app_handle(), None);
                 }
             });
         }
@@ -47,6 +85,7 @@ pub fn open_onboarding(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("onboarding") {
         let _ = win.unminimize();
         let _ = win.show();
+        sync_dock_icon(app, None);
         let _ = win.set_focus();
         return;
     }
@@ -64,12 +103,15 @@ pub fn open_onboarding(app: &AppHandle) {
 
     match builder.build() {
         Ok(win) => {
+            sync_dock_icon(app, None);
+            let _ = win.set_focus();
             let app = app.clone();
             win.on_window_event(move |event| {
                 if let tauri::WindowEvent::Destroyed = event {
                     crate::audio::stop_mic_test();
                     crate::app_controller::set_practice_mode(false);
                     crate::mark_onboarding_done(&app);
+                    sync_dock_icon(&app, Some("onboarding"));
                 }
             });
         }
