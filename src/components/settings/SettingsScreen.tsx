@@ -4,13 +4,16 @@ import { useResolvedTheme } from "@/lib/theme";
 import { SettingsProvider } from "@/components/settings/SettingsContext";
 import { useSettingsContext } from "@/components/settings/useSettingsContext";
 import GeneralTab from "@/components/settings/GeneralTab";
+import TranscriptionTab from "@/components/settings/TranscriptionTab";
+import TextTab from "@/components/settings/TextTab";
 import ThemeTab from "@/components/settings/ThemeTab";
 import TranslationsTab from "@/components/settings/TranslationsTab";
 import StorageTab from "@/components/settings/StorageTab";
 import LogsTab from "@/components/settings/LogsTab";
 import AudioLabTab, { type LabSourceTexts } from "@/components/settings/AudioLabTab";
 
-type TabId = "general" | "theme" | "translations" | "storage" | "logs" | "audio-labs";
+type TabId =
+  "general" | "transcription" | "text" | "translations" | "theme" | "history" | "audio-labs";
 
 interface TabItem {
   id: TabId;
@@ -35,13 +38,26 @@ const TABS: TabItem[] = [
     ),
   },
   {
-    id: "theme",
-    label: "Theme",
+    id: "transcription",
+    label: "Transcription",
     icon: (
       <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-        <circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1.2" />
         <path
-          d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41"
+          d="M2 7v2M5 4.5v7M8 2v12M11 4.5v7M14 7v2"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinecap="round"
+        />
+      </svg>
+    ),
+  },
+  {
+    id: "text",
+    label: "Text",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+        <path
+          d="M3 3.5h10M8 3.5V13M6 13h4"
           stroke="currentColor"
           strokeWidth="1.2"
           strokeLinecap="round"
@@ -71,23 +87,33 @@ const TABS: TabItem[] = [
     ),
   },
   {
-    id: "storage",
-    label: "Storage",
+    id: "theme",
+    label: "Theme",
     icon: (
       <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-        <ellipse cx="8" cy="4" rx="5" ry="2" stroke="currentColor" strokeWidth="1.2" />
-        <path d="M3 4v4c0 1.1 2.24 2 5 2s5-.9 5-2V4" stroke="currentColor" strokeWidth="1.2" />
-        <path d="M3 8v4c0 1.1 2.24 2 5 2s5-.9 5-2V8" stroke="currentColor" strokeWidth="1.2" />
+        <circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1.2" />
+        <path
+          d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinecap="round"
+        />
       </svg>
     ),
   },
   {
-    id: "logs",
-    label: "Logs",
+    id: "history",
+    label: "History",
     icon: (
       <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-        <rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.2" />
-        <path d="M5 6h6M5 9h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+        <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
+        <path
+          d="M8 4.5V8l2.5 1.5"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
       </svg>
     ),
   },
@@ -113,11 +139,12 @@ const TABS: TabItem[] = [
 ];
 
 const TAB_DESCRIPTIONS: Record<TabId, string> = {
-  general: "Input devices, behavior, and model configuration",
-  theme: "Visual style, accent color, and interface density",
+  general: "Permissions, updates, hotkeys, and audio devices",
+  transcription: "Speech model, memory use, and audio chunking",
+  text: "Cleanup of transcribed text and masking of confidential words",
   translations: "Configure your translation provider and credentials",
-  storage: "Manage saved recordings and transcripts",
-  logs: "Recent activity and performance metrics",
+  theme: "Visual style, accent color, and interface density",
+  history: "Recent activity, saved recordings, and retention",
   "audio-labs": "Test transcription accuracy and latency on sample audio",
 };
 
@@ -298,12 +325,20 @@ function SettingsInner() {
             key={activeTab}
           >
             {activeTab === "general" && <GeneralTab t={t} />}
+            {activeTab === "transcription" && <TranscriptionTab t={t} />}
+            {activeTab === "text" && <TextTab t={t} />}
             {activeTab === "theme" && (
               <ThemeTab t={t} accent={accent} onAccentChange={handleAccentChange} />
             )}
             {activeTab === "translations" && <TranslationsTab t={t} />}
-            {activeTab === "storage" && <StorageTab t={t} />}
-            {activeTab === "logs" && <LogsTab t={t} onOpenInAudioLab={handleOpenInAudioLab} />}
+            {activeTab === "history" && (
+              <>
+                <LogsTab t={t} onOpenInAudioLab={handleOpenInAudioLab} />
+                <div style={{ marginTop: 24 }}>
+                  <StorageTab t={t} />
+                </div>
+              </>
+            )}
             {activeTab === "audio-labs" && (
               <AudioLabTab t={t} initialAudio={labSelectedAudio} initialTexts={labTexts} />
             )}
