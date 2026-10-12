@@ -1377,7 +1377,7 @@ function OnboardingInner() {
     try: {
       title: "Give it a try",
       body: practice
-        ? `The speech model is still downloading, so this is a practice run. Press ${key}, say a sentence, press it again.${translateHint}`
+        ? `The speech model is still downloading, so this is a practice run. Press ${key}, say a sentence, press it again.${translateHint} Real recording unlocks when the download finishes.`
         : `Press ${key} (or the button), say a sentence, then press it again.${translateHint}`,
     },
   };
@@ -1401,6 +1401,16 @@ function OnboardingInner() {
   const busy = tryCtl.phase === "tx" || tryCtl.phase === "translate";
   // The button records for real, so it waits for the model; the hotkey still runs the practice.
   const talkOff = busy || practice;
+  // While it waits, the button shows why: the model download and how far along it is.
+  const waitLabel =
+    dl.phase === "downloading" || dl.phase === "starting"
+      ? `Downloading model ${dl.percent}%`
+      : dl.phase === "failed"
+        ? "Model download failed"
+        : dl.phase === "idle"
+          ? "Model not downloaded"
+          : "Checking model…";
+  const waiting = practice && !busy;
 
   return (
     <div
@@ -1568,23 +1578,32 @@ function OnboardingInner() {
             type="button"
             onClick={tryCtl.press}
             disabled={talkOff}
-            title={practice ? "Available once the speech model is downloaded" : undefined}
+            title={waiting ? "Press to talk works once the speech model is downloaded" : undefined}
             style={{
               display: "flex",
               alignItems: "center",
               gap: 8,
-              background: p.accentSoft,
+              background: waiting
+                ? `linear-gradient(90deg, ${p.accentSoftBorder} ${dl.percent}%, ${p.accentSoft} ${dl.percent}%)`
+                : p.accentSoft,
               border: `1px solid ${p.accentSoftBorder}`,
               color: p.accentText,
               borderRadius: 10,
               padding: "10px 14px",
               font: `500 14px ${SANS}`,
               cursor: talkOff ? "default" : "pointer",
-              opacity: talkOff ? 0.5 : 1,
+              opacity: busy ? 0.5 : 1,
+              fontVariantNumeric: "tabular-nums",
             }}
           >
-            {tryCtl.phase === "listen" ? "Press to finish" : "Press to talk"}
-            <span style={{ font: `600 11px ${MONO}`, opacity: 0.8 }}>{key}</span>
+            {waiting ? (
+              waitLabel
+            ) : (
+              <>
+                {tryCtl.phase === "listen" ? "Press to finish" : "Press to talk"}
+                <span style={{ font: `600 11px ${MONO}`, opacity: 0.8 }}>{key}</span>
+              </>
+            )}
           </button>
         )}
         <button
