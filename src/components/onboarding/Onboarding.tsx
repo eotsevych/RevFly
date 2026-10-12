@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useResolvedTheme } from "@/lib/theme";
-import { formatDisplay, hotkeyFromKeyEvent } from "@/lib/hotkey";
+import { createHotkeyCapture, formatDisplay } from "@/lib/hotkey";
 import { SettingsProvider } from "@/components/settings/SettingsContext";
 import { useSettingsContext } from "@/components/settings/useSettingsContext";
 import {
@@ -794,24 +794,31 @@ function KeysStage({ p }: { p: Palette }) {
   const saveRef = useRef(save);
   saveRef.current = save;
 
-  // While changing a hotkey: the next key press is the new hotkey, Esc cancels. The current
-  // hotkeys are held off meanwhile, so pressing one doesn't start a recording.
+  // While changing a hotkey: the next key press (or a modifier pressed and released alone) is
+  // the new hotkey, Esc cancels. The current hotkeys are held off meanwhile, so pressing one
+  // doesn't start a recording.
   useEffect(() => {
     if (!editing) return;
     setPracticeMode(true);
-    const onKey = (e: KeyboardEvent) => {
+    const capture = createHotkeyCapture((hotkey) => saveRef.current(editing, hotkey));
+    const onDown = (e: KeyboardEvent) => {
       e.preventDefault();
       if (e.key === "Escape") {
         setConflict(false);
         setEditing(null);
         return;
       }
-      const hotkey = hotkeyFromKeyEvent(e);
-      if (hotkey) saveRef.current(editing, hotkey);
+      capture.keydown(e);
     };
-    window.addEventListener("keydown", onKey);
+    const onUp = (e: KeyboardEvent) => {
+      e.preventDefault();
+      capture.keyup(e);
+    };
+    window.addEventListener("keydown", onDown);
+    window.addEventListener("keyup", onUp);
     return () => {
-      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onDown);
+      window.removeEventListener("keyup", onUp);
       setPracticeMode(false);
     };
   }, [editing]);

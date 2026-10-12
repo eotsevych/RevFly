@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Tokens } from "../../lib/tokens";
-import { formatDisplay, hotkeyFromKeyEvent } from "@/lib/hotkey";
+import { createHotkeyCapture, formatDisplay } from "@/lib/hotkey";
 
 interface HotkeyRecorderProps {
   value: string;
@@ -17,15 +17,25 @@ const COMBO_PRESET = "CommandOrControl+Shift+Space";
 export default function HotkeyRecorder({ value, onChange, t, clearable }: HotkeyRecorderProps) {
   const [recording, setRecording] = useState(false);
 
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const capture = useRef(
+    createHotkeyCapture((hotkey) => {
+      onChangeRef.current(hotkey);
+      setRecording(false);
+    }),
+  );
+
   function handleKeyDown(e: React.KeyboardEvent) {
     if (!recording) return;
     e.preventDefault();
+    capture.current.keydown(e);
+  }
 
-    const hotkey = hotkeyFromKeyEvent(e);
-    if (hotkey) {
-      onChange(hotkey);
-      setRecording(false);
-    }
+  function handleKeyUp(e: React.KeyboardEvent) {
+    if (!recording) return;
+    e.preventDefault();
+    capture.current.keyup(e);
   }
 
   const display = formatDisplay(value);
@@ -35,6 +45,7 @@ export default function HotkeyRecorder({ value, onChange, t, clearable }: Hotkey
       <button
         type="button"
         onKeyDown={handleKeyDown}
+        onKeyUp={handleKeyUp}
         onClick={() => {
           setRecording(true);
           // An optional hotkey keeps its value until a new key is pressed, so clicking away

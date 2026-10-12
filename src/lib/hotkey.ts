@@ -30,14 +30,11 @@ const SINGLE_MODIFIERS: Record<string, string> = {
 
 type KeyLike = Pick<KeyboardEvent, "code" | "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">;
 
-/**
- * The hotkey a key press stands for, in the backend's format ("RightOption",
- * "CommandOrControl+Shift+Space"), or null while only modifiers of a combo are held.
- * Single-modifier hotkeys rely on the macOS event tap; other platforms only support combos.
- */
-export function hotkeyFromKeyEvent(e: KeyLike): string | null {
-  if (IS_MAC && SINGLE_MODIFIERS[e.code]) return SINGLE_MODIFIERS[e.code] ?? null;
+const MODIFIER_KEYS = ["Meta", "Control", "Alt", "Shift"];
 
+/** The key combination of a key press (`CommandOrControl+Shift+Space`), or null for a lone modifier. */
+function comboFromKeyEvent(e: KeyLike): string | null {
+  if (MODIFIER_KEYS.includes(e.key)) return null;
   const parts: string[] = [];
   if (IS_MAC) {
     if (e.metaKey) parts.push("CommandOrControl");
@@ -48,8 +45,43 @@ export function hotkeyFromKeyEvent(e: KeyLike): string | null {
   }
   if (e.altKey) parts.push("Alt");
   if (e.shiftKey) parts.push("Shift");
-
-  if (["Meta", "Control", "Alt", "Shift"].includes(e.key)) return null;
-  parts.push(e.key === " " ? "Space" : e.key.length === 1 ? e.key.toUpperCase() : e.key);
+  // Letters and digits come from the physical key: with ⌥ held, macOS types "˚" for K.
+  const physical = /^(?:Key([A-Z])|Digit(\d))$/.exec(e.code);
+  const key = physical
+    ? (physical[1] ?? physical[2])
+    : e.key === " "
+      ? "Space"
+      : e.key.length === 1
+        ? e.key.toUpperCase()
+        : e.key;
+  parts.push(key ?? e.key);
   return parts.join("+");
+}
+
+/**
+ * Records a hotkey from key presses, in the backend's format ("RightOption",
+ * "CommandOrControl+Shift+Space"). A modifier pressed alone and released alone is a
+ * single-modifier hotkey (macOS only: it needs the event tap); a modifier held while another
+ * key is pressed is part of a combo. Feed it every keydown and keyup while recording.
+ */
+export function createHotkeyCapture(onHotkey: (hotkey: string) => void) {
+  // The single-modifier hotkey that releasing the key would record.
+  let pending: string | null = null;
+  return {
+    keydown(e: KeyLike) {
+      const combo = comboFromKeyEvent(e);
+      if (combo) {
+        pending = null;
+        onHotkey(combo);
+        return;
+      }
+      const held = [e.metaKey, e.ctrlKey, e.altKey, e.shiftKey].filter(Boolean).length;
+      // Only the first modifier, pressed on its own, can become a single-modifier hotkey.
+      pending = IS_MAC && held === 1 ? (SINGLE_MODIFIERS[e.code] ?? null) : null;
+    },
+    keyup(e: KeyLike) {
+      if (pending && SINGLE_MODIFIERS[e.code] === pending) onHotkey(pending);
+      pending = null;
+    },
+  };
 }
