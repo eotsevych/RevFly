@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   fetchSettings,
+  fitPillHeight,
   isTauri,
   saveWindowPosition,
   subscribeToAudioLevels,
@@ -236,6 +237,26 @@ export function VoicePill() {
   // Errors and mic warnings that explain what to fix are shown in full, in a pill that grows to fit them.
   const isLong = (state.state === "error" || state.state === "listening") && state.long === true;
 
+  // The long-message window starts at a fixed size; grow it to whatever the text needs.
+  const pillRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = pillRef.current;
+    if (!isLong || !el) return;
+    let sent = 0;
+    const fit = () => {
+      // The page's padding (p-2) on both sides, plus room for the pill's shadow.
+      const needed = Math.ceil(el.getBoundingClientRect().height) + 16 + 12;
+      if (needed !== sent) {
+        sent = needed;
+        void fitPillHeight(needed);
+      }
+    };
+    const observer = new ResizeObserver(fit);
+    observer.observe(el);
+    fit();
+    return () => observer.disconnect();
+  }, [isLong]);
+
   if (state.state === "idle") {
     return null;
   }
@@ -265,7 +286,14 @@ export function VoicePill() {
       style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
       className="w-full h-full min-h-screen flex items-center justify-center p-2 bg-transparent select-none overflow-hidden cursor-grab active:cursor-grabbing"
     >
-      <PillBody style={pillStyleOf(settings?.pill_style)} view={view} t={t} levels={audioLevels} />
+      <div ref={pillRef} className="flex w-full justify-center">
+        <PillBody
+          style={pillStyleOf(settings?.pill_style)}
+          view={view}
+          t={t}
+          levels={audioLevels}
+        />
+      </div>
     </main>
   );
 }

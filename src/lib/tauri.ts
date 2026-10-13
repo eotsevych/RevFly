@@ -348,6 +348,16 @@ export async function saveWindowPosition(x: number, y: number): Promise<boolean>
   }
 }
 
+/** Asks for the pill window to be resized to fit a long message of this height (CSS px). */
+export async function fitPillHeight(height: number): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    await invoke("fit_pill_height", { height });
+  } catch (err) {
+    console.error("Failed to fit the pill window:", err);
+  }
+}
+
 export async function triggerStartDragging(): Promise<void> {
   if (!isTauri()) return;
   try {

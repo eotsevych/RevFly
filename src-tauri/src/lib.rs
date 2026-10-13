@@ -319,6 +319,11 @@ fn set_launch_at_login(app_handle: AppHandle, enabled: bool) -> Result<(), Strin
 }
 
 #[tauri::command]
+fn fit_pill_height(app_handle: AppHandle, height: f64) {
+    app_controller::fit_long_pill(&app_handle, height);
+}
+
+#[tauri::command]
 fn close_preferences_window(app_handle: AppHandle) {
     audio::stop_mic_test();
     if let Some(win) = app_handle.get_webview_window("preferences") {
@@ -581,6 +586,7 @@ pub fn run() {
             set_audio_device,
             open_preferences_window,
             close_preferences_window,
+            fit_pill_height,
             save_window_position,
             start_dragging_window,
             get_transcription_logs,

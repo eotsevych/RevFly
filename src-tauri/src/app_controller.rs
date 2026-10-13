@@ -522,6 +522,18 @@ const LONG_ERROR_HOLD: Duration = Duration::from_secs(9);
 /// Pill window size while it shows a long error, and its normal size.
 const LONG_ERROR_WINDOW: (f64, f64) = (400.0, 150.0);
 const PILL_WINDOW: (f64, f64) = (340.0, 100.0);
+/// The tallest a long-message pill window may grow to fit its text.
+const LONG_ERROR_MAX_HEIGHT: f64 = 360.0;
+
+/// Grows (or shrinks) the long-message pill window to the height its content needs, so a
+/// message with a long device name or several sentences isn't cut off.
+pub(crate) fn fit_long_pill(app_handle: &AppHandle, content_height: f64) {
+    if !content_height.is_finite() {
+        return;
+    }
+    let height = content_height.clamp(LONG_ERROR_WINDOW.1, LONG_ERROR_MAX_HEIGHT);
+    set_pill_window_size(app_handle, (LONG_ERROR_WINDOW.0, height));
+}
 
 /// Title and explanation shown in the pill for a microphone problem.
 fn mic_problem_message(report: &crate::audio::MicReport) -> (&'static str, String) {
