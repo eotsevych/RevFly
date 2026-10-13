@@ -1,31 +1,123 @@
 import { useState } from "react";
+import type React from "react";
 import type { Tokens } from "../../lib/tokens";
+
+// ── Copy-to-clipboard icon button ──────────────────────────────────────────
+export function CopyButton({
+  text,
+  t,
+  title = "Copy",
+}: {
+  text: string;
+  t: Tokens;
+  title?: string;
+}) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const color = state === "copied" ? t.successColor : state === "failed" ? t.errorColor : t.textDim;
+  return (
+    <button
+      type="button"
+      title={state === "copied" ? "Copied" : state === "failed" ? "Couldn't copy" : title}
+      aria-label={title}
+      disabled={!text}
+      onClick={async (e) => {
+        e.stopPropagation();
+        try {
+          await navigator.clipboard.writeText(text);
+          setState("copied");
+        } catch {
+          setState("failed");
+        }
+        setTimeout(() => setState("idle"), 1500);
+      }}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 22,
+        height: 22,
+        flexShrink: 0,
+        padding: 0,
+        borderRadius: 5,
+        border: `1px solid ${t.border}`,
+        background: "transparent",
+        color,
+        cursor: text ? "pointer" : "default",
+        opacity: text ? 1 : 0.4,
+      }}
+    >
+      {state === "copied" ? (
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path
+            d="M3 8.5l3.2 3L13 4.5"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ) : (
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <rect
+            x="5"
+            y="5"
+            width="8.5"
+            height="8.5"
+            rx="1.6"
+            stroke="currentColor"
+            strokeWidth="1.4"
+          />
+          <path
+            d="M10.5 3.2V3a1.5 1.5 0 0 0-1.5-1.5H3.5A1.5 1.5 0 0 0 2 3v5.5A1.5 1.5 0 0 0 3.5 10h.2"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+          />
+        </svg>
+      )}
+    </button>
+  );
+}
 
 // ── Section block ──────────────────────────────────────────────────────────
 export function Section({
   title,
   children,
   t,
+  action,
 }: {
   title: string;
   children: React.ReactNode;
   t: Tokens;
+  /** Shown at the right of the title, e.g. a button that copies the whole section. */
+  action?: React.ReactNode;
 }) {
   return (
     <div style={{ marginBottom: 24 }}>
-      <p
+      <div
         style={{
-          fontSize: 11,
-          fontWeight: 600,
-          letterSpacing: "0.1em",
-          textTransform: "uppercase",
-          color: t.textDim,
-          fontFamily: "JetBrains Mono, monospace",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
           marginBottom: 8,
         }}
       >
-        {title}
-      </p>
+        <p
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+            color: t.textDim,
+            fontFamily: "JetBrains Mono, monospace",
+            margin: 0,
+          }}
+        >
+          {title}
+        </p>
+        {action}
+      </div>
       <div
         style={{
           background: t.surface,

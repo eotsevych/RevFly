@@ -7,6 +7,8 @@ import {
   type ChunkDiagnosticEvent,
 } from "@/lib/tauri";
 import type { LabSourceTexts } from "./AudioLabTab";
+import { CopyButton } from "./SettingsPrimitives";
+import { SELECTABLE } from "./selectable";
 
 interface LogsTabProps {
   t: Tokens;
@@ -333,7 +335,11 @@ export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
             return (
               <div
                 key={log.id}
-                onClick={() => setExpandedId(isExpanded ? null : log.id)}
+                onClick={() => {
+                  // Finishing a text selection is a click too; keep the row as it is then.
+                  if (window.getSelection()?.toString()) return;
+                  setExpandedId(isExpanded ? null : log.id);
+                }}
                 style={{
                   padding: "12px 14px",
                   borderBottom: i < displayList.length - 1 ? `1px solid ${t.border}` : "none",
@@ -403,6 +409,7 @@ export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
                   </div>
 
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <CopyButton text={log.finalText || log.rawText} t={t} title="Copy text" />
                     {/* Second Try Button */}
                     {onOpenInAudioLab && (
                       <button
@@ -499,6 +506,7 @@ export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
                     textOverflow: isExpanded ? "unset" : "ellipsis",
                     whiteSpace: isExpanded ? "pre-wrap" : "nowrap",
                     lineHeight: 1.4,
+                    ...(isExpanded ? SELECTABLE : {}),
                   }}
                 >
                   {log.text}
@@ -516,22 +524,47 @@ export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
                         border: `1px solid ${t.border}`,
                       }}
                     >
-                      <p
+                      <div
                         style={{
-                          fontSize: 10,
-                          fontWeight: 600,
-                          letterSpacing: "0.08em",
-                          textTransform: "uppercase",
-                          color: t.accent,
-                          fontFamily: "JetBrains Mono, monospace",
+                          display: "flex",
+                          alignItems: "flex-start",
+                          justifyContent: "space-between",
+                          gap: 8,
                           margin: "0 0 8px",
                         }}
                       >
-                        {log.whole_track
-                          ? "🎧 Whole Track: chunking off, recorded and transcribed as one continuous track"
-                          : `📦 Chunk Creation Details (${chunks.length} Created During Recording):`}
-                      </p>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <p
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 600,
+                            letterSpacing: "0.08em",
+                            textTransform: "uppercase",
+                            color: t.accent,
+                            fontFamily: "JetBrains Mono, monospace",
+                            margin: 0,
+                          }}
+                        >
+                          {log.whole_track
+                            ? "🎧 Whole Track: chunking off, recorded and transcribed as one continuous track"
+                            : `📦 Chunk Creation Details (${chunks.length} Created During Recording):`}
+                        </p>
+                        {chunks.length > 0 && (
+                          <CopyButton
+                            text={chunks
+                              .map(
+                                (ch) =>
+                                  `Chunk #${ch.chunk_index} (${ch.duration_sec.toFixed(2)}s) · Trigger: ${ch.trigger_reason}\n${ch.detail}` +
+                                  (ch.has_overlap ? `\nOverlap: ${ch.overlap_ms}ms` : ""),
+                              )
+                              .join("\n\n")}
+                            t={t}
+                            title="Copy chunk details"
+                          />
+                        )}
+                      </div>
+                      <div
+                        style={{ display: "flex", flexDirection: "column", gap: 6, ...SELECTABLE }}
+                      >
                         {chunks.map((ch) => (
                           <div
                             key={ch.chunk_index}
@@ -611,19 +644,32 @@ export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
                         fontSize: 11,
                       }}
                     >
-                      <p
+                      <div
                         style={{
-                          fontSize: 10,
-                          fontWeight: 600,
-                          letterSpacing: "0.08em",
-                          textTransform: "uppercase",
-                          color: "#58a6ff",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 8,
                           margin: "0 0 6px",
                         }}
                       >
-                        ⚡ Detailed Action Trace:
-                      </p>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                        <p
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 600,
+                            letterSpacing: "0.08em",
+                            textTransform: "uppercase",
+                            color: "#58a6ff",
+                            margin: 0,
+                          }}
+                        >
+                          ⚡ Detailed Action Trace:
+                        </p>
+                        <CopyButton text={actions.join("\n")} t={t} title="Copy action trace" />
+                      </div>
+                      <div
+                        style={{ display: "flex", flexDirection: "column", gap: 3, ...SELECTABLE }}
+                      >
                         {actions.map((act, actIdx) => (
                           <div key={actIdx} style={{ fontSize: 10, lineHeight: 1.4 }}>
                             <span

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Tokens } from "@/lib/tokens";
 import { errorMessage } from "@/lib/utils";
-import { Section, Row, FieldSelect } from "./SettingsPrimitives";
+import { Section, Row, FieldSelect, CopyButton } from "./SettingsPrimitives";
+import { SELECTABLE } from "./selectable";
 import { useSettingsContext } from "./useSettingsContext";
 import Toggle from "@/components/ui/Toggle";
 import Segmented from "@/components/ui/Segmented";
@@ -70,7 +71,6 @@ export default function AudioLabTab({
   const [result, setResult] = useState<LabExperimentResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rawUploadName, setRawUploadName] = useState<string | null>(null);
-  const [copied, setCopied] = useState<"spoken" | "translated" | "retranslated" | null>(null);
   const [trService, setTrService] = useState(
     (settings.translation_provider || "").toLowerCase().includes("custom") ? "Custom API" : "LLM",
   );
@@ -239,16 +239,6 @@ export default function AudioLabTab({
     }
   }
 
-  async function copyText(which: "spoken" | "translated" | "retranslated", text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(which);
-      setTimeout(() => setCopied((c) => (c === which ? null : c)), 1500);
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }
-
   // Under "This Recording" after Second Try; otherwise below this run's results.
   const translateAgainSection = (
     <Section title="Translate Again" t={t}>
@@ -328,23 +318,7 @@ export default function AudioLabTab({
               >
                 {trTarget} · {trResult.ms} ms
               </span>
-              <button
-                type="button"
-                onClick={() => void copyText("retranslated", trResult.text)}
-                style={{
-                  background: `${t.accent}14`,
-                  border: `1px solid ${t.accent}30`,
-                  borderRadius: 4,
-                  color: t.accent,
-                  padding: "2px 8px",
-                  fontSize: 11,
-                  fontWeight: 500,
-                  fontFamily: "Inter, sans-serif",
-                  cursor: "pointer",
-                }}
-              >
-                {copied === "retranslated" ? "Copied" : "Copy"}
-              </button>
+              <CopyButton text={trResult.text} t={t} title="Copy translation" />
             </div>
             <p
               style={{
@@ -354,7 +328,7 @@ export default function AudioLabTab({
                 fontFamily: "Inter, sans-serif",
                 lineHeight: 1.5,
                 whiteSpace: "pre-wrap",
-                userSelect: "text",
+                ...SELECTABLE,
               }}
             >
               {trResult.text}
@@ -375,6 +349,24 @@ export default function AudioLabTab({
       </div>
     </Section>
   );
+
+  const metrics = result
+    ? [
+        { label: "Inference", value: result.inference_time_ms + " ms" },
+        { label: "VAD cut", value: result.vad_cut_sec.toFixed(2) + "s" },
+        { label: "Speed", value: result.speed_factor.toFixed(1) + "\u00d7" },
+        {
+          label: "Duration",
+          value:
+            result.original_duration_sec.toFixed(1) +
+            "s \u2192 " +
+            result.processed_duration_sec.toFixed(1) +
+            "s",
+        },
+        { label: "Segments", value: String(result.segments.length) },
+        { label: "Needs review", value: result.requires_clarification ? "Yes" : "No" },
+      ]
+    : [];
 
   return (
     <div>
@@ -411,23 +403,7 @@ export default function AudioLabTab({
                   >
                     {label}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => void copyText(which, text)}
-                    style={{
-                      background: `${t.accent}14`,
-                      border: `1px solid ${t.accent}30`,
-                      borderRadius: 4,
-                      color: t.accent,
-                      padding: "2px 8px",
-                      fontSize: 11,
-                      fontWeight: 500,
-                      fontFamily: "Inter, sans-serif",
-                      cursor: "pointer",
-                    }}
-                  >
-                    {copied === which ? "Copied" : "Copy"}
-                  </button>
+                  <CopyButton text={text} t={t} title={`Copy ${label.toLowerCase()}`} />
                 </div>
                 <p
                   style={{
@@ -437,7 +413,7 @@ export default function AudioLabTab({
                     fontFamily: "Inter, sans-serif",
                     lineHeight: 1.5,
                     whiteSpace: "pre-wrap",
-                    userSelect: "text",
+                    ...SELECTABLE,
                   }}
                 >
                   {text}
@@ -663,7 +639,11 @@ export default function AudioLabTab({
 
       {result && phase === "done" && (
         <div>
-          <Section title="Raw Whisper" t={t}>
+          <Section
+            title="Raw Whisper"
+            t={t}
+            action={<CopyButton text={result.raw_text || ""} t={t} title="Copy raw transcript" />}
+          >
             <div style={{ padding: 12 }}>
               <p
                 style={{
@@ -672,6 +652,7 @@ export default function AudioLabTab({
                   fontFamily: "JetBrains Mono, monospace",
                   margin: "0 0 6px",
                   wordBreak: "break-all",
+                  ...SELECTABLE,
                 }}
               >
                 {result.raw_output}
@@ -685,13 +666,18 @@ export default function AudioLabTab({
                   whiteSpace: "pre-wrap",
                   borderTop: "1px solid " + t.border,
                   paddingTop: 8,
+                  ...SELECTABLE,
                 }}
               >
                 {result.raw_text || "(empty)"}
               </p>
             </div>
           </Section>
-          <Section title="Clean (Post-Processed)" t={t}>
+          <Section
+            title="Clean (Post-Processed)"
+            t={t}
+            action={<CopyButton text={result.clean_text || ""} t={t} title="Copy clean text" />}
+          >
             <div style={{ padding: 12 }}>
               <p
                 style={{
@@ -700,6 +686,7 @@ export default function AudioLabTab({
                   lineHeight: 1.7,
                   margin: 0,
                   whiteSpace: "pre-wrap",
+                  ...SELECTABLE,
                 }}
               >
                 {result.clean_text || "(post blanked it)"}
@@ -727,6 +714,7 @@ export default function AudioLabTab({
                         color: t.warnColor,
                         margin: "2px 0",
                         fontFamily: "JetBrains Mono, monospace",
+                        ...SELECTABLE,
                       }}
                     >
                       · {u}
@@ -747,23 +735,19 @@ export default function AudioLabTab({
               </p>
             </div>
           </Section>
-          <Section title="Metrics" t={t}>
+          <Section
+            title="Metrics"
+            t={t}
+            action={
+              <CopyButton
+                text={metrics.map((m) => `${m.label}: ${m.value}`).join("\n")}
+                t={t}
+                title="Copy metrics"
+              />
+            }
+          >
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)" }}>
-              {[
-                { label: "Inference", value: result.inference_time_ms + " ms" },
-                { label: "VAD cut", value: result.vad_cut_sec.toFixed(2) + "s" },
-                { label: "Speed", value: result.speed_factor.toFixed(1) + "\u00d7" },
-                {
-                  label: "Duration",
-                  value:
-                    result.original_duration_sec.toFixed(1) +
-                    "s \u2192 " +
-                    result.processed_duration_sec.toFixed(1) +
-                    "s",
-                },
-                { label: "Segments", value: String(result.segments.length) },
-                { label: "Needs review", value: result.requires_clarification ? "Yes" : "No" },
-              ].map((m, i) => (
+              {metrics.map((m, i) => (
                 <div
                   key={m.label}
                   style={{
@@ -773,7 +757,15 @@ export default function AudioLabTab({
                     borderBottom: i < 3 ? "1px solid " + t.border : "none",
                   }}
                 >
-                  <p style={{ fontSize: 14, fontWeight: 700, color: t.accent, margin: "0 0 2px" }}>
+                  <p
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 700,
+                      color: t.accent,
+                      margin: "0 0 2px",
+                      ...SELECTABLE,
+                    }}
+                  >
                     {m.value}
                   </p>
                   <p
@@ -793,7 +785,22 @@ export default function AudioLabTab({
             </div>
           </Section>
           {result.segments?.length > 0 && (
-            <Section title="Segments" t={t}>
+            <Section
+              title="Segments"
+              t={t}
+              action={
+                <CopyButton
+                  text={result.segments
+                    .map(
+                      (s) =>
+                        `[${(s.start_ms / 1000).toFixed(2)}–${(s.end_ms / 1000).toFixed(2)}s] ${s.text.trim()}`,
+                    )
+                    .join("\n")}
+                  t={t}
+                  title="Copy all segments"
+                />
+              }
+            >
               <div style={{ padding: 8, maxHeight: 160, overflow: "auto" }}>
                 {result.segments.slice(0, 20).map((s, i) => (
                   <p
@@ -803,6 +810,7 @@ export default function AudioLabTab({
                       color: t.textMuted,
                       fontFamily: "JetBrains Mono, monospace",
                       margin: "4px 0",
+                      ...SELECTABLE,
                     }}
                   >
                     [{(s.start_ms / 1000).toFixed(2)}–{(s.end_ms / 1000).toFixed(2)}s ·{" "}
