@@ -306,6 +306,45 @@ struct TranslationRoute {
     model: String,
 }
 
+/// True for an endpoint on this computer (Ollama, LM Studio), which needs no API key.
+fn is_local_endpoint(url: &str) -> bool {
+    let url = url.to_lowercase();
+    ["localhost", "127.0.0.1", "0.0.0.0", "[::1]"].iter().any(|host| url.contains(host))
+}
+
+/// The translation settings that are still empty, e.g. `["API key"]`. It checks only that the
+/// fields are filled in; whether the service is reachable is found out when it's called.
+fn missing_translation_settings(settings: &AppSettings) -> Vec<&'static str> {
+    let route = TranslationRoute::from_settings(settings);
+    let (url, model) = if route.is_custom {
+        // An empty Custom API model is shown and used as gpt-4o-mini.
+        (settings.custom_api_url.trim(), route.model.as_str())
+    } else {
+        (settings.llm_endpoint.trim(), settings.llm_model.trim())
+    };
+    let key = if route.is_custom { settings.custom_api_key.trim() } else { route.key.as_str() };
+    let mut missing = Vec::new();
+    if url.is_empty() {
+        missing.push("endpoint URL");
+    }
+    if key.is_empty() && !is_local_endpoint(url) {
+        missing.push("API key");
+    }
+    if model.is_empty() {
+        missing.push("model name");
+    }
+    missing
+}
+
+/// "the API key", "the API key and model name", "the endpoint URL, API key and model name".
+fn list_missing(missing: &[&str]) -> String {
+    match missing {
+        [] => String::new(),
+        [one] => format!("the {one}"),
+        [rest @ .., last] => format!("the {} and {}", rest.join(", "), last),
+    }
+}
+
 impl TranslationRoute {
     fn from_settings(settings: &AppSettings) -> Self {
         let is_custom = settings.translation_provider.to_lowercase().contains("custom");
@@ -1366,6 +1405,31 @@ impl AppController {
         let pressed = Instant::now();
         let _starting = self.start_gate.lock().unwrap();
         self.session_id.fetch_add(1, Ordering::SeqCst);
+
+        // A recording that will be translated needs the translation settings filled in. Say so
+        // now, before anything is recorded, instead of after the user has finished talking.
+        {
+            let settings = self.get_settings();
+            let mode = *self.recording_mode.lock().unwrap();
+            let missing = missing_translation_settings(&settings);
+            if !mode.transcribe_only(&settings) && !missing.is_empty() {
+                let what = list_missing(&missing);
+                log_stage_event(
+                    &get_data_dir(),
+                    "REC_BLOCKED",
+                    &format!("Recording requested by {} ({:?} mode) not started: translation is missing {}", trigger, mode, what),
+                );
+                let subtitle = if mode == RecordingMode::Translate {
+                    format!("Add {what} in Settings → Translations. Nothing was recorded; the launch hotkey still dictates without translating.")
+                } else {
+                    format!("Automatic translation needs {what} in Settings → Translations. Nothing was recorded. To dictate without translating, set When to translate to Off.")
+                };
+                show_main_window(&self.app_handle, &settings);
+                let session = self.session_id.load(Ordering::SeqCst);
+                show_long_error(&self.app_handle, &self.session_id, session, "Translation Not Set Up", &subtitle);
+                return Ok(());
+            }
+        }
         {
             let mut phase = self.phase.lock().unwrap();
             *phase = AssistantPhase::Listening;
@@ -2181,19 +2245,7 @@ impl AppController {
 
             let route = TranslationRoute::from_settings(&settings);
 
-            let can_translate = if is_no_trans {
-                false
-            } else if is_custom {
-                !settings.custom_api_url.trim().is_empty()
-            } else if is_llm {
-                if route.endpoint.contains("localhost") || route.endpoint.contains("127.0.0.1") {
-                    true
-                } else {
-                    !route.key.is_empty()
-                }
-            } else {
-                false
-            };
+            let can_translate = !is_no_trans && (is_custom || is_llm) && missing_translation_settings(&settings).is_empty();
 
             // The translate hotkey translates whatever was spoken; only automatic translation is
             // limited to the spoken language set in settings.
@@ -2567,7 +2619,7 @@ impl AppController {
 
 #[cfg(test)]
 mod tests {
-    use super::{capitalize, is_digital_silence, mic_problem_message, TranslationRoute};
+    use super::{capitalize, is_digital_silence, list_missing, mic_problem_message, missing_translation_settings, TranslationRoute};
     use crate::settings::AppSettings;
 
     #[test]
@@ -2605,6 +2657,57 @@ mod tests {
         s.llm_model = "test-model".into();
         let err = TranslationRoute::from_settings(&s).translate(&s, "Привіт").await.unwrap_err();
         assert!(!err.is_empty());
+    }
+
+    #[test]
+    fn cloud_translation_needs_a_key_and_model() {
+        let mut s = AppSettings::default();
+        s.translation_provider = "LLM".into();
+        s.llm_endpoint = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions".into();
+        s.llm_api_key = String::new();
+        s.api_key = String::new();
+        s.local_llm_api_key = String::new();
+        s.llm_model = "gemini-3.6-flash".into();
+        assert_eq!(missing_translation_settings(&s), vec!["API key"]);
+        s.llm_model = " ".into();
+        assert_eq!(missing_translation_settings(&s), vec!["API key", "model name"]);
+        s.llm_api_key = "key".into();
+        s.llm_model = "gemini-3.6-flash".into();
+        assert!(missing_translation_settings(&s).is_empty());
+    }
+
+    #[test]
+    fn local_translation_needs_no_key() {
+        let mut s = AppSettings::default();
+        s.translation_provider = "LLM".into();
+        s.llm_endpoint = "http://localhost:11434/v1/chat/completions".into();
+        s.llm_api_key = String::new();
+        s.api_key = String::new();
+        s.local_llm_api_key = String::new();
+        s.llm_model = "llama3.2".into();
+        assert!(missing_translation_settings(&s).is_empty());
+        s.llm_endpoint = String::new();
+        assert_eq!(missing_translation_settings(&s), vec!["endpoint URL", "API key"]);
+    }
+
+    #[test]
+    fn custom_api_needs_url_and_key() {
+        let mut s = AppSettings::default();
+        s.translation_provider = "Custom API".into();
+        s.custom_api_url = String::new();
+        s.custom_api_key = String::new();
+        s.custom_api_model = String::new();
+        assert_eq!(missing_translation_settings(&s), vec!["endpoint URL", "API key"]);
+        s.custom_api_url = "https://api.openai.com/v1/chat/completions".into();
+        s.custom_api_key = "sk".into();
+        assert!(missing_translation_settings(&s).is_empty(), "an empty model falls back to gpt-4o-mini");
+    }
+
+    #[test]
+    fn missing_fields_read_as_a_list() {
+        assert_eq!(list_missing(&["API key"]), "the API key");
+        assert_eq!(list_missing(&["API key", "model name"]), "the API key and model name");
+        assert_eq!(list_missing(&["endpoint URL", "API key", "model name"]), "the endpoint URL, API key and model name");
     }
 
     #[test]
