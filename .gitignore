@@ -59,3 +59,6 @@ pnpm-debug.log*
 # Local tooling output
 brag-output/
 .agents/
+.claude/skills/brag-slim
+skills-lock.json
+store-shots/
