@@ -1,6 +1,6 @@
 [package]
 name = "revfly"
-version = "1.0.2"
+version = "1.0.3"
 description = "RevFly Desktop Assistant"
 authors = ["RevFly Team"]
 edition = "2021"
