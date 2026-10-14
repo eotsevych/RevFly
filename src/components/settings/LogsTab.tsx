@@ -183,6 +183,12 @@ export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
         spokenText: l.spoken_text || null,
         finalText: (l.final_text || "").trim(),
         audioFile: l.audio_filename,
+        failure: l.transcription_error
+          ? ("transcription" as const)
+          : l.translation_error
+            ? ("translation" as const)
+            : null,
+        failureReason: l.transcription_error || l.translation_error || null,
         audioDurationSec: l.audio_duration_sec,
         vadTrimmedSec: l.vad_trimmed_sec,
         vadCutSec: l.vad_silence_removed_sec,
@@ -406,6 +412,23 @@ export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
                         ? "whole track"
                         : `${chunks.length} ${chunks.length === 1 ? "chunk" : "chunks"}`}
                     </span>
+                    {log.failure && (
+                      <span
+                        title={log.failureReason ?? undefined}
+                        style={{
+                          fontSize: 10,
+                          padding: "1px 6px",
+                          borderRadius: 4,
+                          background: `${t.errorColor}14`,
+                          color: t.errorColor,
+                          fontFamily: "JetBrains Mono, monospace",
+                        }}
+                      >
+                        {log.failure === "transcription"
+                          ? "transcription failed"
+                          : "translation failed"}
+                      </span>
+                    )}
                   </div>
 
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -417,16 +440,20 @@ export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
                         onClick={(e) => {
                           e.stopPropagation();
                           // A translated recording shows both texts; any other shows what was said.
-                          onOpenInAudioLab(
-                            log.audioFile || "latest_recording.wav",
-                            log.spokenText
-                              ? { spoken: log.spokenText, translated: log.finalText || null }
-                              : log.finalText
-                                ? { spoken: log.finalText, translated: null }
-                                : undefined,
-                          );
+                          // The log id lets Audio Lab save a fixed result back to this entry.
+                          onOpenInAudioLab(log.audioFile || "latest_recording.wav", {
+                            spoken: log.spokenText || log.finalText || null,
+                            translated: log.spokenText ? log.finalText || null : null,
+                            logId: log.id,
+                            failure: log.failure,
+                            failureReason: log.failureReason,
+                          });
                         }}
-                        title="Open in Audio Lab for second try re-test"
+                        title={
+                          log.failure
+                            ? `Retry the failed ${log.failure} in Audio Lab and save the result here`
+                            : "Open in Audio Lab for second try re-test"
+                        }
                         style={{
                           display: "inline-flex",
                           alignItems: "center",
@@ -443,7 +470,7 @@ export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
                         }}
                       >
                         <span>🧪</span>
-                        <span>Second Try</span>
+                        <span>{log.failure ? "Retry in Audio Lab" : "Second Try"}</span>
                       </button>
                     )}
 

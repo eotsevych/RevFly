@@ -11,6 +11,7 @@ import {
   triggerRunLabExperiment,
   triggerSaveLabCustomAudio,
   triggerLabTranslate,
+  triggerLabSaveResult,
   type LabTranslation,
   isTauri,
   type LabAudioItem,
@@ -37,8 +38,17 @@ const TARGET_LANGUAGES = [
   "Russian",
 ].map((l) => ({ value: l, label: l }));
 
-/** What a recording opened with Second Try said, and its translation if it was translated. */
-export type LabSourceTexts = { spoken: string; translated: string | null };
+/** What a recording opened from Logs said (none if transcription failed), its translation if it
+ * was translated, and the Logs entry a fixed result can be saved to. */
+export type LabSourceTexts = {
+  spoken: string | null;
+  translated: string | null;
+  logId?: number;
+  failure?: "transcription" | "translation" | null;
+  failureReason?: string | null;
+};
+
+type SaveKind = "transcription" | "translation";
 
 export default function AudioLabTab({
   t,
@@ -49,7 +59,7 @@ export default function AudioLabTab({
   initialAudio?: string | null;
   initialTexts?: LabSourceTexts | null;
 }) {
-  const { models, settings } = useSettingsContext();
+  const { models, settings, refreshLogs } = useSettingsContext();
   const [items, setItems] = useState<LabAudioItem[]>([]);
   const [selected, setSelected] = useState<string>(initialAudio || "");
   const [model, setModel] = useState(settings.model_name || "ggml-medium-q5_0.bin");
@@ -79,6 +89,10 @@ export default function AudioLabTab({
   const [trPhase, setTrPhase] = useState<"idle" | "running" | "done" | "error">("idle");
   const [trResult, setTrResult] = useState<LabTranslation | null>(null);
   const [trError, setTrError] = useState<string | null>(null);
+  // Text last saved to the Logs entry, per kind, so the button shows "Saved" until it changes.
+  const [saved, setSaved] = useState<Partial<Record<SaveKind, string>>>({});
+  const [saving, setSaving] = useState<SaveKind | null>(null);
+  const [saveError, setSaveError] = useState<{ kind: SaveKind; message: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const availableModels =
@@ -214,16 +228,63 @@ export default function AudioLabTab({
 
   // Translate Again works on what was said (from Second Try) or on this run's transcript.
   const spokenText = sourceTexts?.spoken ?? null;
-  const sourceRows: ["spoken" | "translated", string, string][] = sourceTexts
-    ? [
-        ["spoken", "As spoken", sourceTexts.spoken],
-        ...(sourceTexts.translated
-          ? [["translated", "Translated", sourceTexts.translated] as ["translated", string, string]]
-          : []),
-      ]
-    : [];
+  const sourceRows: ["spoken" | "translated", string, string][] = [];
+  if (sourceTexts?.spoken) sourceRows.push(["spoken", "As spoken", sourceTexts.spoken]);
+  if (sourceTexts?.translated)
+    sourceRows.push(["translated", "Translated", sourceTexts.translated]);
+  const logId = sourceTexts?.logId ?? null;
   const resultText = phase === "done" ? result?.clean_text?.trim() || null : null;
   const trSource = trFrom === "result" && resultText ? resultText : (spokenText ?? resultText);
+
+  /** Saves `text` to the Logs entry this recording was opened from, and to its history row. */
+  async function saveResult(kind: SaveKind, text: string, source?: string | null) {
+    if (logId === null) return;
+    setSaving(kind);
+    setSaveError(null);
+    try {
+      await triggerLabSaveResult(logId, kind, text, source);
+      setSaved((prev) => ({ ...prev, [kind]: text }));
+      await refreshLogs();
+    } catch (err) {
+      setSaveError({ kind, message: errorMessage(err) });
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  /** "Save to history" for a result of the recording opened from Logs. */
+  function saveButton(kind: SaveKind, text: string, source?: string | null) {
+    const done = saved[kind] === text;
+    const busy = saving === kind;
+    return (
+      <button
+        type="button"
+        onClick={() => void saveResult(kind, text, source)}
+        disabled={done || busy}
+        title={`Replace this recording's ${kind === "translation" ? "translation" : "text"} in Logs and History`}
+        style={{
+          padding: "3px 9px",
+          borderRadius: 6,
+          border: `1px solid ${t.accent}40`,
+          background: done ? "transparent" : `${t.accent}14`,
+          color: done ? t.textDim : t.accent,
+          fontSize: 11,
+          fontWeight: 600,
+          fontFamily: "Inter, sans-serif",
+          cursor: done || busy ? "default" : "pointer",
+        }}
+      >
+        {done ? "Saved" : busy ? "Saving…" : "Save to history"}
+      </button>
+    );
+  }
+
+  const saveErrorText = (kind: SaveKind) =>
+    saveError?.kind === kind && (
+      <p style={{ margin: "0 0 8px", fontSize: 12, color: t.errorColor, lineHeight: 1.5 }}>
+        {saveError.message}
+      </p>
+    );
 
   async function translateAgain() {
     if (!trSource) return;
@@ -289,6 +350,7 @@ export default function AudioLabTab({
         {trError && (
           <p style={{ margin: 0, fontSize: 12, color: t.errorColor, lineHeight: 1.5 }}>{trError}</p>
         )}
+        {saveErrorText("translation")}
         {trResult && (
           <div
             style={{
@@ -318,7 +380,10 @@ export default function AudioLabTab({
               >
                 {trTarget} · {trResult.ms} ms
               </span>
-              <CopyButton text={trResult.text} t={t} title="Copy translation" />
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {logId !== null && saveButton("translation", trResult.text, trSource)}
+                <CopyButton text={trResult.text} t={t} title="Copy translation" />
+              </div>
             </div>
             <p
               style={{
@@ -373,6 +438,36 @@ export default function AudioLabTab({
       {sourceTexts && (
         <Section title="This Recording" t={t}>
           <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+            {sourceTexts.failure && (
+              <div
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  background: `${t.errorColor}10`,
+                  border: `1px solid ${t.errorColor}40`,
+                  fontSize: 12,
+                  lineHeight: 1.5,
+                  color: t.text,
+                }}
+              >
+                <b style={{ color: t.errorColor }}>
+                  {sourceTexts.failure === "transcription"
+                    ? "Transcription failed"
+                    : "Translation failed"}
+                </b>
+                {sourceTexts.failureReason && (
+                  <span style={{ color: t.textDim, ...SELECTABLE }}>
+                    {" "}
+                    · {sourceTexts.failureReason}
+                  </span>
+                )}
+                <p style={{ margin: "6px 0 0", color: t.textMuted }}>
+                  {sourceTexts.failure === "transcription"
+                    ? "Run the experiment below on this recording, then save the transcript to history."
+                    : "Translate it again below, then save the translation to history."}
+                </p>
+              </div>
+            )}
             {sourceRows.map(([which, label, text]) => (
               <div
                 key={which}
@@ -676,9 +771,18 @@ export default function AudioLabTab({
           <Section
             title="Clean (Post-Processed)"
             t={t}
-            action={<CopyButton text={result.clean_text || ""} t={t} title="Copy clean text" />}
+            action={
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {logId !== null &&
+                  sourceTexts?.failure === "transcription" &&
+                  resultText &&
+                  saveButton("transcription", resultText)}
+                <CopyButton text={result.clean_text || ""} t={t} title="Copy clean text" />
+              </div>
+            }
           >
             <div style={{ padding: 12 }}>
+              {saveErrorText("transcription")}
               <p
                 style={{
                   fontSize: 13,

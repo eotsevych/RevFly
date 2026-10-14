@@ -64,6 +64,12 @@ pub struct TranscriptionDiagnosticLog {
     pub whole_track: bool,
     #[serde(default)]
     pub action_logs: Vec<String>,
+    /// Row of this recording in the history database; none in private mode or when nothing was saved.
+    #[serde(default)]
+    pub history_id: Option<i64>,
+    /// Why transcription failed, when it did. Audio Lab can retry it from the whole recording.
+    #[serde(default)]
+    pub transcription_error: Option<String>,
 }
 
 impl TranscriptionDiagnosticLog {
@@ -182,6 +188,18 @@ impl PipelineLogManager {
                 remove_session_audio(data_dir, dropped.audio_filename.as_deref());
             }
         }
+    }
+
+    /// Changes the log entry with `id` and returns it as changed; `None` once it has left the log.
+    pub fn update_log(
+        &self,
+        id: u64,
+        change: impl FnOnce(&mut TranscriptionDiagnosticLog),
+    ) -> Option<TranscriptionDiagnosticLog> {
+        let mut list = self.logs.lock().unwrap();
+        let log = list.iter_mut().find(|l| l.id == id)?;
+        change(log);
+        Some(log.clone())
     }
 
     pub fn get_logs(&self, limit: usize) -> Vec<TranscriptionDiagnosticLog> {

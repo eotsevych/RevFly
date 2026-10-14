@@ -134,6 +134,21 @@ impl HistoryManager {
         Ok(())
     }
 
+    /// Sets the text of a recording whose transcription failed. It wasn't translated, so the
+    /// translated text is the same.
+    pub fn update_transcription(&self, id: i64, text: &str) -> Result<(), String> {
+        if id <= 0 {
+            return Ok(()); // private mode: nothing was saved
+        }
+        let conn = self.db_conn.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE history SET raw_text = ?1, translated_text = ?1 WHERE id = ?2",
+            params![text, id],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     pub fn get_records(&self, limit: usize) -> Result<Vec<HistoryRecord>, String> {
         let conn = self.db_conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn

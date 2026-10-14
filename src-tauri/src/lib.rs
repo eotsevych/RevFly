@@ -432,6 +432,17 @@ async fn lab_translate(
 }
 
 #[tauri::command]
+fn lab_save_result(
+    state: State<'_, AppState>,
+    log_id: u64,
+    kind: String,
+    text: String,
+    source: Option<String>,
+) -> Result<(), String> {
+    state.controller.lab_save_result(log_id, &kind, text, source)
+}
+
+#[tauri::command]
 fn save_lab_custom_audio(
     state: State<'_, AppState>,
     base64_wav: String,
@@ -612,6 +623,7 @@ pub fn run() {
             list_lab_audio_files,
             run_lab_experiment,
             lab_translate,
+            lab_save_result,
             save_lab_custom_audio,
             get_hardware_profile,
             post_process_transcript,

@@ -522,6 +522,8 @@ export interface TranscriptionDiagnosticLog {
   translation_skipped: boolean;
   translation_skip_reason: string;
   translation_ms: number;
+  /** Why translation failed, when it did; final_text is then the spoken text. */
+  translation_error?: string | null;
   final_text: string;
   /** The text in the spoken language, when final_text is its translation. */
   spoken_text?: string | null;
@@ -535,6 +537,8 @@ export interface TranscriptionDiagnosticLog {
   chunk_events?: ChunkDiagnosticEvent[];
   whole_track?: boolean;
   action_logs?: string[];
+  /** Why transcription failed, when it did. */
+  transcription_error?: string | null;
 }
 
 export interface ModelCatalogItem {
@@ -694,6 +698,18 @@ export async function triggerLabTranslate(
 ): Promise<LabTranslation> {
   if (!isTauri()) throw new Error("Translation works only in the desktop app.");
   return await invoke<LabTranslation>("lab_translate", { text, provider, targetLang });
+}
+
+/** Saves an Audio Lab result to a Logs entry and its history row: a transcript of a recording
+ * whose transcription failed, or a translation of `source`. Throws when it can't be saved. */
+export async function triggerLabSaveResult(
+  logId: number,
+  kind: "transcription" | "translation",
+  text: string,
+  source?: string | null,
+): Promise<void> {
+  if (!isTauri()) throw new Error("Saving works only in the desktop app.");
+  await invoke("lab_save_result", { logId, kind, text, source: source ?? null });
 }
 
 export interface LabExperimentResult {

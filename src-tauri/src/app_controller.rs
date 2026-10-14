@@ -730,7 +730,7 @@ fn keep_failed_recording(
     reason: &str,
 ) {
     let marker = format!("[{}]", reason);
-    let _ = history.add_entry(
+    let history_id = history.add_entry(
         &marker,
         &marker,
         "unknown",
@@ -740,6 +740,7 @@ fn keep_failed_recording(
         &settings.storage_mode,
         settings.storage_cap_mb,
     );
+    let history_id = history_id.ok().filter(|id| *id > 0);
     let (chunks, mut actions) = chunk_diagnostics(
         settings.audio_chunking,
         duration_sec,
@@ -780,6 +781,8 @@ fn keep_failed_recording(
         chunk_events: chunks,
         whole_track: !settings.audio_chunking,
         action_logs: actions,
+        history_id,
+        transcription_error: Some(reason.to_string()),
     };
     logger.add_log(log.clone(), data_dir);
     let _ = app_handle.emit("transcription-diagnostic-log", &log);
@@ -1138,6 +1141,60 @@ impl AppController {
                 Err(format!("{} failed: {}", route.label(), e))
             }
         }
+    }
+
+    /// Saves an Audio Lab result to the Logs entry `log_id` and its history row: a transcript
+    /// for a recording whose transcription failed (`kind` "transcription"), or a translation of
+    /// `source` (`kind` "translation"). A saved translation also ends the tray's retry for it.
+    pub fn lab_save_result(&self, log_id: u64, kind: &str, text: String, source: Option<String>) -> Result<(), String> {
+        let text = text.trim().to_string();
+        if text.is_empty() {
+            return Err("There is no text to save".to_string());
+        }
+        let translation = match kind {
+            "translation" => true,
+            "transcription" => false,
+            other => return Err(format!("Unknown result kind: {}", other)),
+        };
+        let log = self
+            .pipeline_logger
+            .update_log(log_id, |log| {
+                if translation {
+                    let spoken = source
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .or_else(|| log.spoken_text.clone())
+                        .unwrap_or_else(|| log.final_text.clone());
+                    log.spoken_text = Some(spoken);
+                    log.translation_error = None;
+                    log.action_logs.push("[AUDIO LAB] Translation saved from Audio Lab".to_string());
+                } else {
+                    log.raw_text = text.clone();
+                    log.transcription_error = None;
+                    log.action_logs.push("[AUDIO LAB] Transcript saved from Audio Lab".to_string());
+                }
+                log.final_text = text.clone();
+            })
+            .ok_or_else(|| "This recording is no longer in Logs".to_string())?;
+
+        if let Some(history_id) = log.history_id {
+            if translation {
+                self.history.update_translation(history_id, &text)?;
+                let mut pending = self.pending_retry.lock().unwrap();
+                if pending.as_ref().is_some_and(|p| p.history_id == history_id) {
+                    *pending = None;
+                    crate::tray::set_retry_item(None);
+                }
+            } else {
+                self.history.update_transcription(history_id, &text)?;
+            }
+        }
+        log_stage_event(
+            &get_data_dir(),
+            "LAB_SAVE",
+            &format!("Audio Lab: saved a {} to log #{}: \"{}\"", kind, log_id, text),
+        );
+        Ok(())
     }
 
     pub fn save_lab_custom_audio(&self, base64_wav: String) -> Result<String, String> {
@@ -2177,6 +2234,8 @@ impl AppController {
                     chunk_events: chunks,
                     whole_track: !settings.audio_chunking,
                     action_logs: actions,
+                    history_id: None,
+                    transcription_error: None,
                 };
                 perf.set_outcome("empty");
                 pipeline_logger_arc.add_log(empty_log.clone(), &data_dir);
@@ -2643,6 +2702,8 @@ impl AppController {
                 chunk_events: chunks,
                 whole_track: !settings.audio_chunking,
                 action_logs: actions,
+                history_id: (history_id > 0).then_some(history_id),
+                transcription_error: None,
             };
 
             pipeline_logger_arc.add_log(log_entry.clone(), &get_data_dir());
