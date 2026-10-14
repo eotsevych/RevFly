@@ -106,6 +106,26 @@ document.querySelectorAll(".copy").forEach((button) => {
   });
 });
 
+// ── Download counts ──────────────────────────────────────────────────────────
+// Counts clicks on download links and copies of the install commands as GoatCounter events, so
+// the stats show which platform and package people choose. No cookies, nothing personal.
+function trackDownload(name) {
+  window.goatcounter?.count?.({ path: `download-${name}`, title: name, event: true });
+}
+document.addEventListener("click", (e) => {
+  const el = e.target.closest(
+    "[data-asset], #hero-download, [data-copy-target], a[href^='https://apps.microsoft.com']",
+  );
+  if (!el) return;
+  if (el.dataset.asset) trackDownload(el.dataset.asset);
+  else if (el.id === "hero-download") trackDownload(`hero-${os || "other"}`);
+  else if (el.dataset.copyTarget === "cmd-brew") trackDownload("mac-brew");
+  else if (el.dataset.copyTarget) {
+    const tab = document.querySelector(".install-tabs [aria-selected=true]");
+    trackDownload(`mac-${tab?.dataset.cmd === "curl" ? "terminal" : "brew"}`);
+  } else trackDownload("win-store");
+});
+
 // ── Install tabs (Terminal / Homebrew) ───────────────────────────────────────
 const installCode = document.getElementById("install-code");
 document.querySelectorAll(".install-tabs [role=tab]").forEach((tab) => {
