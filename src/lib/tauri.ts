@@ -11,7 +11,6 @@ export interface BackendSettings {
   api_key: string;
   source_lang: string;
   target_lang: string;
-  skip_languages: string;
   hotkey: string;
   /** When dictation is translated: never, only with `translate_hotkey`, or automatically by the
    * launch hotkey whenever the speech isn't in the target language. */

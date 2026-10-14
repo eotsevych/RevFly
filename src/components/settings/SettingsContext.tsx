@@ -20,7 +20,6 @@ const defaultSettings: BackendSettings = {
   api_key: "",
   source_lang: "Auto",
   target_lang: "English",
-  skip_languages: "English",
   hotkey: "CommandOrControl+Shift+Space",
   translation_mode: "hotkey",
   translate_hotkey: "",

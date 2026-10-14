@@ -7,7 +7,6 @@ pub struct AppSettings {
     pub api_key: String,
     pub source_lang: String,
     pub target_lang: String,
-    pub skip_languages: String,
     pub hotkey: String,
     /// When dictation is translated: "off" (never), "hotkey" (only recordings started with
     /// `translate_hotkey`; the main hotkey never translates) or "auto" (the main hotkey translates
@@ -218,7 +217,6 @@ impl Default for AppSettings {
             api_key: String::new(),
             source_lang: "Auto".to_string(),
             target_lang: "English".to_string(),
-            skip_languages: "English".to_string(),
             #[cfg(target_os = "macos")]
             hotkey: "RightOption".to_string(),
             #[cfg(not(target_os = "macos"))]

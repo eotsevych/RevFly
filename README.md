@@ -53,7 +53,8 @@ No cloud audio upload. No browser required. Just tap your hotkey and speak.
 
 ### 4. 0.0001s Instant Skip Engine
 - **Instant Language Check**: Checks the recognized language locally before calling the network.
-- **Zero-Latency Bypass**: If you speak your target language (e.g. English) or any excluded language, translation is bypassed in **0.0001 seconds** with zero API calls.
+- **Zero-Latency Bypass**: If you already speak your target language (e.g. English), or you set a specific **Spoken language** and speak a different one, translation is bypassed in **0.0001 seconds** with zero API calls.
+- **Excluded Languages**: Languages you don't speak but that sound close to yours (for example Russian for Ukrainian speakers). If Whisper detects one by mistake, RevFly transcribes the speech again in your language.
 
 ### 5. Multi-Provider AI Translation
 - **Google Gemini**: Fast, fluent translation powered by `gemini-3.6-flash`.
