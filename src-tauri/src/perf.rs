@@ -88,6 +88,8 @@ pub struct PerfRun {
     pub recording_sec: f32,
     pub audio_sec: f32,
     pub speech_sec: f32,
+    /// VAD found no speech and kept the whole recording, so `speech_sec` is the full audio.
+    pub vad_no_speech: bool,
     /// Time the model itself spent on inference (from the model); the rest of the `inference`
     /// lap was spent waiting for the model to load or for its lock.
     pub inference_ms: Option<u64>,
@@ -114,6 +116,7 @@ impl PerfRun {
             recording_sec: 0.0,
             audio_sec: 0.0,
             speech_sec: 0.0,
+            vad_no_speech: false,
             inference_ms: None,
             threads: None,
             translation: None,
@@ -190,6 +193,7 @@ impl PerfRun {
             "recording_sec": round1(self.recording_sec),
             "audio_sec": round1(self.audio_sec),
             "speech_sec": round1(self.speech_sec),
+            "vad_no_speech": self.vad_no_speech,
             "translation": self.translation,
             "text_chars": self.text_chars,
             "app_uptime_sec": uptime_sec(),

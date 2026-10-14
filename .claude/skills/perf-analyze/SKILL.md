@@ -42,6 +42,9 @@ to a different log. Default: all data, with extra attention to the last 24 hours
 - `stages_ms`: laps, in pipeline order: `stop_capture` (recorder flush + denoise), `audio_prep` (leveling +
   WAV), `vad`, `save_audio`, `model_ready`, `inference`, `post_process` (cleanup + language
   detection), `translation`, `paste`, `history_db`, `finalize`. Their sum is `total_ms`.
+- `vad_no_speech` (since 1.0.6): Silero found no speech and the whole recording went to the model,
+  so `speech_sec` is the full audio. Such runs usually end `empty`; the report counts how many
+  still gave text. The pipeline log's `[VAD]` line says "no speech found" for them.
 - `speed_factor`: seconds of speech per second of inference. Higher is better. A falling trend at
   similar `speech_sec` is the clearest sign of real degradation.
 - `model_wait_ms`: part of the `inference` lap spent waiting for the model to load. Large values

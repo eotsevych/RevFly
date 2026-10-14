@@ -1825,12 +1825,13 @@ impl AppController {
 
             // Step 1: Silero VAD silence trimming with 400ms padding
             let vad_res = trim_silence(&raw_samples, 16000);
-            log_stage_event(&data_dir, "VAD", &format!("VAD completed in {} ms: original {:.2} s → trimmed {:.2} s (cut {:.2} s silence)", vad_res.duration_ms, vad_res.original_duration_sec, vad_res.trimmed_duration_sec, vad_res.silence_removed_sec));
+            log_stage_event(&data_dir, "VAD", &format!("VAD completed in {} ms: original {:.2} s → trimmed {:.2} s (cut {:.2} s silence){}", vad_res.duration_ms, vad_res.original_duration_sec, vad_res.trimmed_duration_sec, vad_res.silence_removed_sec, if vad_res.no_speech { "; no speech found, kept the whole recording" } else { "" }));
 
             // Save trimmed (VAD) audio to latest_vad_trimmed.wav for debugging
             let latest_vad_wav = data_dir.join("latest_vad_trimmed.wav");
             let _ = crate::history::write_wav_file(&latest_vad_wav, &vad_res.samples, 16000);
             perf.speech_sec = vad_res.trimmed_duration_sec;
+            perf.vad_no_speech = vad_res.no_speech;
             perf.lap("vad");
 
             if is_cancelled() {

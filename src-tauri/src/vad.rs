@@ -12,6 +12,8 @@ pub struct VadResult {
     pub trimmed_duration_sec: f32,
     pub silence_removed_sec: f32,
     pub duration_ms: u64,
+    /// Silero found no speech, so the whole recording was kept. False when VAD couldn't run.
+    pub no_speech: bool,
 }
 
 /// Trims silence from 16 kHz mono audio using Silero VAD.
@@ -31,6 +33,7 @@ pub fn trim_silence(samples: &[f32], sample_rate: u32) -> VadResult {
             trimmed_duration_sec: 0.0,
             silence_removed_sec: 0.0,
             duration_ms: t0.elapsed().as_millis() as u64,
+            no_speech: false,
         };
     }
 
@@ -47,6 +50,7 @@ pub fn trim_silence(samples: &[f32], sample_rate: u32) -> VadResult {
                 trimmed_duration_sec: original_dur,
                 silence_removed_sec: 0.0,
                 duration_ms: ms,
+                no_speech: false,
             };
         }
     };
@@ -64,13 +68,15 @@ pub fn trim_silence(samples: &[f32], sample_rate: u32) -> VadResult {
                 trimmed_duration_sec: original_dur,
                 silence_removed_sec: 0.0,
                 duration_ms: ms,
+                no_speech: false,
             };
         }
     };
 
     let segments = get_timestamps_from_probs_with_config(&probs, samples.len(), timestamp_config(sample_rate));
 
-    let trimmed = if segments.is_empty() {
+    let no_speech = segments.is_empty();
+    let trimmed = if no_speech {
         log::info!("Silero VAD detected no active speech, preserving full buffer as fallback.");
         samples.to_vec()
     } else {
@@ -100,6 +106,7 @@ pub fn trim_silence(samples: &[f32], sample_rate: u32) -> VadResult {
         trimmed_duration_sec: trimmed_dur,
         silence_removed_sec: silence_removed,
         duration_ms: ms,
+        no_speech,
     }
 }
 

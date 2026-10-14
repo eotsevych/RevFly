@@ -50,6 +50,10 @@ def main():
     for r in runs:
         outcomes[r["outcome"]] += 1
     print(f"{len(runs)} dictations, {len(beats)} heartbeats  |  " + ", ".join(f"{k}: {v}" for k, v in sorted(outcomes.items())))
+    no_speech = [r for r in runs if r.get("vad_no_speech")]
+    if no_speech:
+        texted = sum(1 for r in no_speech if r["outcome"] == "ok")
+        print(f"VAD found no speech in {len(no_speech)} (kept the whole recording); {texted} of them still gave text")
 
     ok = [r for r in runs if r["outcome"] in ("ok", "translation_failed")]
     # serde_json writes stages_ms keys sorted, so restore the pipeline order.
