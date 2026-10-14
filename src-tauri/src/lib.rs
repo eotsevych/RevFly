@@ -156,6 +156,12 @@ fn retry_translation(state: State<'_, AppState>) -> Result<(), String> {
     state.controller.retry_translation()
 }
 
+/// A microphone picked in the pill when the chosen one isn't connected.
+#[tauri::command]
+fn choose_microphone(state: State<'_, AppState>, name: String) -> Result<(), String> {
+    state.controller.choose_microphone(&name)
+}
+
 #[tauri::command]
 fn get_history(
     state: State<'_, AppState>,
@@ -541,6 +547,12 @@ pub fn run() {
                     if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event.payload()) {
                         let state = payload.get("state").and_then(|v| v.as_str()).unwrap_or("idle");
                         fullscreen_pill::on_state_changed(&app_handle, state);
+                        // Errors and mic warnings are heard too, for when nobody is looking at the pill.
+                        let warning = payload.get("warning").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let sounds_on = app_handle.try_state::<AppState>().is_some_and(|s| s.controller.get_settings().sound_error);
+                        if (state == "error" || warning) && sounds_on {
+                            sound::play_sound(sound::AppSound::Error);
+                        }
                     }
                 });
             }
@@ -572,6 +584,7 @@ pub fn run() {
             toggle_recording,
             cancel_recording,
             retry_translation,
+            choose_microphone,
             check_accessibility,
             request_accessibility,
             open_accessibility_settings,

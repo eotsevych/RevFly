@@ -449,6 +449,20 @@ pub fn report_mic_problem(app_handle: &AppHandle, report: crate::audio::MicRepor
     }
 }
 
+/// Entry point for the audio thread; no speech since the recording started, for `after`.
+pub fn report_no_speech(app_handle: &AppHandle, after: Duration) {
+    if let Some(state) = app_handle.try_state::<crate::AppState>() {
+        state.controller.on_no_speech(after);
+    }
+}
+
+/// Entry point for the audio thread; speech arrived after the no-speech warning.
+pub fn report_speech_heard(app_handle: &AppHandle) {
+    if let Some(state) = app_handle.try_state::<crate::AppState>() {
+        state.controller.on_speech_heard();
+    }
+}
+
 /// Entry point for the audio thread; audio is flowing again after a mid-recording dropout.
 pub fn report_mic_recovered(app_handle: &AppHandle, switched_to: Option<String>) {
     if let Some(state) = app_handle.try_state::<crate::AppState>() {
@@ -558,6 +572,8 @@ fn mic_dropout_message(report: &crate::audio::MicReport) -> (&'static str, Strin
 const MIC_SETTING: &str = "Settings → General → Microphone input";
 /// How long an error that needs reading stays on screen.
 const LONG_ERROR_HOLD: Duration = Duration::from_secs(9);
+/// How long the pill waits for a pick when the chosen microphone isn't connected.
+const MIC_CHOICE_HOLD: Duration = Duration::from_secs(30);
 /// Pill window size while it shows a long error, and its normal size.
 const LONG_ERROR_WINDOW: (f64, f64) = (400.0, 150.0);
 const PILL_WINDOW: (f64, f64) = (340.0, 100.0);
@@ -613,7 +629,7 @@ fn set_pill_window_size(app_handle: &AppHandle, (width, height): (f64, f64)) {
     let _ = app_handle.run_on_main_thread(move || {
         if let Some(win) = app.get_webview_window("main") {
             let _ = win.set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }));
-            crate::fullscreen_pill::sync_frame();
+            crate::fullscreen_pill::sync_frame(width, height);
         }
     });
 }
@@ -631,12 +647,17 @@ fn show_long_error(app_handle: &AppHandle, session_id: &Arc<AtomicU64>, session:
 
 /// `show_long_error` with a full pill state payload (e.g. one that offers a Retry button).
 fn show_long_error_payload(app_handle: &AppHandle, session_id: &Arc<AtomicU64>, session: u64, payload: serde_json::Value) {
+    show_long_message(app_handle, session_id, session, payload, LONG_ERROR_HOLD);
+}
+
+/// Shows a long pill state for `hold`, then hides it unless a new session has started meanwhile.
+fn show_long_message(app_handle: &AppHandle, session_id: &Arc<AtomicU64>, session: u64, payload: serde_json::Value, hold: Duration) {
     set_pill_window_size(app_handle, LONG_ERROR_WINDOW);
     let _ = app_handle.emit("assistant-state-changed", payload);
     let app = app_handle.clone();
     let session_id = Arc::clone(session_id);
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(LONG_ERROR_HOLD).await;
+        tokio::time::sleep(hold).await;
         if session_id.load(Ordering::SeqCst) != session {
             return;
         }
@@ -1191,7 +1212,19 @@ impl AppController {
                 &format!("Recording cancelled by the mic check after {:.2} s (started by {})", start.at.elapsed().as_secs_f32(), start.trigger),
             );
         }
-        show_long_error(&self.app_handle, &self.session_id, session, title, &subtitle);
+        // Offer the other connected mics right in the pill, so switching doesn't need Settings.
+        let devices: Vec<String> = crate::audio::list_input_devices().into_iter().filter(|d| *d != report.device).collect();
+        if devices.is_empty() {
+            show_long_error(&self.app_handle, &self.session_id, session, title, &subtitle);
+            return;
+        }
+        show_long_message(
+            &self.app_handle,
+            &self.session_id,
+            session,
+            serde_json::json!({ "state": "error", "title": title, "subtitle": subtitle, "long": true, "devices": devices }),
+            MIC_CHOICE_HOLD,
+        );
     }
 
     /// The microphone failed after real audio arrived. Keep recording, so what was said before is still
@@ -1219,6 +1252,43 @@ impl AppController {
         let _ = self.app_handle.emit(
             "assistant-state-changed",
             serde_json::json!({ "state": "listening", "title": title, "subtitle": subtitle, "warning": true, "mic": mic, "long": true }),
+        );
+    }
+
+    /// Nothing that sounds like speech since the recording started: most often a muted mic, which
+    /// still sends a faint noise floor. Keep recording (the user may just be thinking) but warn,
+    /// with the error sound, until speech arrives or the user stops.
+    pub fn on_no_speech(&self, after: Duration) {
+        if *self.phase.lock().unwrap() != AssistantPhase::Listening {
+            return;
+        }
+        let secs = after.as_secs();
+        log_stage_event(&get_data_dir(), "NO_SPEECH", &format!("No speech heard in the first {} s of the recording; warned the user", secs));
+        set_pill_window_size(&self.app_handle, LONG_ERROR_WINDOW);
+        let _ = self.app_handle.emit(
+            "assistant-state-changed",
+            serde_json::json!({
+                "state": "listening",
+                "title": "No Speech Heard",
+                "subtitle": format!("Nothing heard for {secs} s. Is your mic muted? Keep talking, or press the hotkey to stop."),
+                "warning": true,
+                "mic": "down",
+                "long": true,
+            }),
+        );
+    }
+
+    /// Speech arrived after the no-speech warning: back to the normal listening pill.
+    pub fn on_speech_heard(&self) {
+        if *self.phase.lock().unwrap() != AssistantPhase::Listening {
+            return;
+        }
+        log_stage_event(&get_data_dir(), "SPEECH_HEARD", "Speech heard after the no-speech warning");
+        set_pill_window_size(&self.app_handle, PILL_WINDOW);
+        let mode = self.recording_mode.lock().unwrap().pill_mode(&self.get_settings());
+        let _ = self.app_handle.emit(
+            "assistant-state-changed",
+            serde_json::json!({ "state": "listening", "title": "Listening…", "subtitle": null, "mode": mode }),
         );
     }
 
@@ -1429,6 +1499,12 @@ impl AppController {
                 show_long_error(&self.app_handle, &self.session_id, session, "Translation Not Set Up", &subtitle);
                 return Ok(());
             }
+            // Recording from the system default instead of the chosen mic often catches nothing (a
+            // Bluetooth headset in call mode, a muted laptop mic), so ask which mic to use instead.
+            if let Some(missing) = crate::audio::missing_input_device(settings.input_device.as_deref()) {
+                self.offer_mic_choice(trigger, mode, &missing, &settings);
+                return Ok(());
+            }
         }
         {
             let mut phase = self.phase.lock().unwrap();
@@ -1458,18 +1534,25 @@ impl AppController {
 
         // 2. Immediately show the pill window on screen
         show_main_window(&self.app_handle, &settings);
+        // Runs right after the show above on the main thread, so it records how long a busy
+        // system kept the pill off screen.
+        let _ = self.app_handle.run_on_main_thread(move || {
+            log_stage_event(&get_data_dir(), "PILL_SHOWN", &format!("Pill shown {} ms after the key press", pressed.elapsed().as_millis()));
+        });
 
         // 3. Open the microphone first, so speech right after the key press is captured. (Playing
         // the chime to completion first lost 1.5-2.5 s of speech on Bluetooth headsets.)
         let mic_open_started = Instant::now();
+        crate::audio::set_no_speech_alert(settings.no_speech_alert_sec);
         let stream = self.recorder.start_recording(self.app_handle.clone(), settings.input_device.clone());
         let mic_open_ms = mic_open_started.elapsed().as_millis();
 
         // 4. Then the chime, without waiting for it. It starts after capture is already open, so
         // playback and capture are never opened at the same instant (some combo USB/Bluetooth
         // headsets stall when they are).
-        if stream.is_ok() && settings.sound_effect {
+        if stream.is_ok() && settings.sound_start {
             crate::sound::play_sound(crate::sound::AppSound::StartRecording);
+            self.recorder.mark_start_chime(crate::sound::duration(crate::sound::AppSound::StartRecording));
         }
 
         if let Ok(info) = &stream {
@@ -1604,7 +1687,7 @@ impl AppController {
 
         // Stop earcon plays on key release; the recorder discards audio captured after this point,
         // so the chime is not transcribed.
-        if settings.sound_effect {
+        if settings.sound_stop {
             crate::sound::play_sound(crate::sound::AppSound::StopRecording);
         }
 
@@ -2602,6 +2685,54 @@ impl AppController {
             settings.output_device = opt_name;
         }
         self.save_settings(settings)
+    }
+
+    /// The chosen microphone isn't connected: nothing is recorded; the pill lists the connected
+    /// mics instead of silently recording from the system default.
+    fn offer_mic_choice(&self, trigger: &str, mode: RecordingMode, missing: &str, settings: &AppSettings) {
+        let devices = crate::audio::list_input_devices();
+        log_stage_event(
+            &get_data_dir(),
+            "REC_BLOCKED",
+            &format!(
+                "Recording requested by {} ({:?} mode) not started: chosen microphone \"{}\" isn't connected; asked which to use (connected: {})",
+                trigger,
+                mode,
+                missing,
+                if devices.is_empty() { "none".to_string() } else { devices.join(", ") }
+            ),
+        );
+        let subtitle = if devices.is_empty() {
+            format!("\"{missing}\" isn't connected, and no other microphone is. Connect one, then press the hotkey again.")
+        } else {
+            format!("\"{missing}\" isn't connected. Pick a microphone to record with; it becomes your microphone in Settings.")
+        };
+        show_main_window(&self.app_handle, settings);
+        let session = self.session_id.load(Ordering::SeqCst);
+        show_long_message(
+            &self.app_handle,
+            &self.session_id,
+            session,
+            serde_json::json!({
+                "state": "error",
+                "title": "Microphone Not Found",
+                "subtitle": subtitle,
+                "long": true,
+                "devices": devices,
+            }),
+            MIC_CHOICE_HOLD,
+        );
+    }
+
+    /// A microphone picked in the pill after the chosen one wasn't found: saves it, then records
+    /// what the hotkey press asked for.
+    pub fn choose_microphone(&self, name: &str) -> Result<(), String> {
+        self.set_audio_device("input", name)?;
+        log_stage_event(&get_data_dir(), "MIC_CHOSEN", &format!("Microphone \"{}\" picked in the pill and saved", name));
+        if *self.phase.lock().unwrap() != AssistantPhase::Idle {
+            return Ok(());
+        }
+        self.start_listening("microphone pick in the pill")
     }
 
     pub fn set_target_lang(&self, lang: &str) -> Result<(), String> {

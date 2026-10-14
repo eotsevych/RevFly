@@ -68,14 +68,7 @@ pub fn trim_silence(samples: &[f32], sample_rate: u32) -> VadResult {
         }
     };
 
-    let mut config = TimestampConfig::default();
-    config.sampling_rate = sample_rate as usize;
-    config.speech_pad_ms = 400; // Keep 400ms margin before voice start and after voice end
-    config.threshold = 0.25;    // Sensitive threshold to capture soft speech and whispers
-    config.min_speech_duration_ms = 80;
-    config.min_silence_duration_ms = 400;
-
-    let segments = get_timestamps_from_probs_with_config(&probs, samples.len(), config);
+    let segments = get_timestamps_from_probs_with_config(&probs, samples.len(), timestamp_config(sample_rate));
 
     let trimmed = if segments.is_empty() {
         log::info!("Silero VAD detected no active speech, preserving full buffer as fallback.");
@@ -108,4 +101,29 @@ pub fn trim_silence(samples: &[f32], sample_rate: u32) -> VadResult {
         silence_removed_sec: silence_removed,
         duration_ms: ms,
     }
+}
+
+fn timestamp_config(sample_rate: u32) -> TimestampConfig {
+    let mut config = TimestampConfig::default();
+    config.sampling_rate = sample_rate as usize;
+    config.speech_pad_ms = 400; // Keep 400ms margin before voice start and after voice end
+    config.threshold = 0.25;    // Sensitive threshold to capture soft speech and whispers
+    config.min_speech_duration_ms = 80;
+    config.min_silence_duration_ms = 400;
+    config
+}
+
+/// Whether 16 kHz mono audio contains any speech, judged like `trim_silence`. Says yes when the
+/// VAD can't run, so a failure never raises a false "no speech" alarm.
+pub fn has_speech(samples: &[f32]) -> bool {
+    if samples.is_empty() {
+        return false;
+    }
+    let Ok(mut vad) = SileroVad::new() else {
+        return true;
+    };
+    let Ok(probs) = vad.forward_audio(samples) else {
+        return true;
+    };
+    !get_timestamps_from_probs_with_config(&probs, samples.len(), timestamp_config(16000)).is_empty()
 }

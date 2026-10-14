@@ -18,7 +18,9 @@ export interface BackendSettings {
   translation_mode?: TranslationMode;
   /** Second hotkey that records and always translates; used in "hotkey" mode. Empty = not set. */
   translate_hotkey?: string;
-  sound_effect: boolean;
+  sound_start: boolean;
+  sound_stop: boolean;
+  sound_error: boolean;
   auto_paste: boolean;
   show_hints?: boolean;
   storage_mode: string;
@@ -33,6 +35,8 @@ export interface BackendSettings {
   /** Whether the first-run welcome guide was finished or closed. */
   onboarding_done?: boolean;
   model_idle_unload_sec?: number;
+  /** Seconds without speech from the start of a recording before the pill warns; 0 = off. */
+  no_speech_alert_sec?: number;
   /** When the speech model loads for a recording: while talking (faster) or after (saves RAM). */
   model_load_mode?: "on_start" | "on_stop";
   window_x?: number | null;
@@ -138,6 +142,8 @@ export interface AssistantStateEvent {
   long?: boolean;
   /** A failed translation that can be sent again: the pill shows a Retry button. */
   retry?: boolean;
+  /** The chosen microphone isn't connected: the pill lists these connected mics to pick from. */
+  devices?: string[];
   /** While listening: the microphone stopped delivering audio; title and subtitle explain it. */
   warning?: boolean;
   /** While listening: the mic is being reopened, or reopening didn't bring sound back. */
@@ -185,6 +191,16 @@ export async function triggerRetryTranslation(): Promise<string | null> {
     return null;
   } catch (err) {
     return String(err);
+  }
+}
+
+/** Saves the microphone picked in the pill and starts the recording the hotkey asked for. */
+export async function chooseMicrophone(name: string): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    await invoke("choose_microphone", { name });
+  } catch (err) {
+    console.error("Failed to choose microphone:", err);
   }
 }
 

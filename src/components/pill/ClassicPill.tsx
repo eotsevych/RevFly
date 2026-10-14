@@ -1,5 +1,10 @@
 import type React from "react";
-import { triggerRetryTranslation, type AudioLevels } from "@/lib/tauri";
+import {
+  chooseMicrophone,
+  triggerCancelRecording,
+  triggerRetryTranslation,
+  type AudioLevels,
+} from "@/lib/tauri";
 import type { Tokens } from "@/lib/tokens";
 import { StateIndicator } from "./Indicators";
 import { TRANSLATE_ACCENT, formatTimer, languageCode, type PillView } from "./view";
@@ -151,6 +156,69 @@ export function ClassicPill({
           >
             ↻ Retry translation
           </button>
+        )}
+
+        {/* The chosen mic isn't connected: pick another. A native <select>, so its options open
+            in a system menu outside the pill and a long device list never grows the pill. */}
+        {view.devices && (
+          <div className="flex items-center gap-2" style={{ marginTop: 8 }}>
+            <select
+              aria-label="Microphone"
+              value=""
+              onChange={(e) => {
+                if (e.target.value) void chooseMicrophone(e.target.value);
+              }}
+              style={
+                {
+                  WebkitAppRegion: "no-drag",
+                  appearance: "none",
+                  flex: 1,
+                  minWidth: 0,
+                  padding: "5px 28px 5px 12px",
+                  borderRadius: 10,
+                  border: `1px solid ${accent}55`,
+                  backgroundColor: `${accent}12`,
+                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888' stroke-width='1.5'/%3E%3C/svg%3E")`,
+                  backgroundRepeat: "no-repeat",
+                  backgroundPosition: "right 10px center",
+                  color: t.text,
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: 12.5,
+                  fontWeight: 500,
+                  textOverflow: "ellipsis",
+                  cursor: "pointer",
+                } as React.CSSProperties
+              }
+            >
+              <option value="" disabled>
+                Choose a microphone…
+              </option>
+              {view.devices.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => void triggerCancelRecording()}
+              style={
+                {
+                  WebkitAppRegion: "no-drag",
+                  flexShrink: 0,
+                  padding: "2px 4px",
+                  border: "none",
+                  background: "none",
+                  color: t.textMuted,
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: 12,
+                  cursor: "pointer",
+                } as React.CSSProperties
+              }
+            >
+              Cancel
+            </button>
+          </div>
         )}
       </div>
 

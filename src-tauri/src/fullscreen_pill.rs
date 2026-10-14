@@ -155,14 +155,15 @@ mod mac {
     }
 
     /// Gives the panel the pill window's new size after a resize (e.g. for long errors), keeping
-    /// the panel's top-left corner where it is since the user may have dragged it.
-    pub fn sync_frame() {
+    /// the panel's top-left corner where it is since the user may have dragged it. The size is
+    /// passed in rather than read from the window: the window applies a resize asynchronously, so
+    /// its frame still has the previous size here.
+    pub fn sync_frame(width: f64, height: f64) {
         with_host(|host| unsafe {
-            if let Some((ns_window, _)) = host.adopted {
+            if host.adopted.is_some() {
                 let panel = frame_of(host.panel);
-                let size = frame_of(ns_window);
                 let top = panel.y + panel.h;
-                set_frame(host.panel, NSRect { x: panel.x, y: top - size.h, w: size.w, h: size.h });
+                set_frame(host.panel, NSRect { x: panel.x, y: top - height, w: width, h: height });
             }
         });
     }
@@ -211,10 +212,12 @@ pub(crate) fn adopt(win: &tauri::WebviewWindow) {
     let _ = win;
 }
 
-/// Call on the main thread after resizing the pill window.
-pub(crate) fn sync_frame() {
+/// Call on the main thread after resizing the pill window to `width` x `height` (logical points).
+pub(crate) fn sync_frame(width: f64, height: f64) {
     #[cfg(target_os = "macos")]
-    mac::sync_frame();
+    mac::sync_frame(width, height);
+    #[cfg(not(target_os = "macos"))]
+    let _ = (width, height);
 }
 
 /// Drags the panel if it's hosting the pill; returns false if the pill window should be dragged.

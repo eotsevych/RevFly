@@ -18,11 +18,24 @@ pub struct AppSettings {
     /// mode. Empty = not set.
     #[serde(default)]
     pub translate_hotkey: String,
-    pub sound_effect: bool,
+    /// Chime when recording starts. Settings saved before the three sound toggles had one
+    /// `sound_effect` switch; `load` copies it into all three.
+    #[serde(default = "default_true")]
+    pub sound_start: bool,
+    /// Chime when recording stops.
+    #[serde(default = "default_true")]
+    pub sound_stop: bool,
+    /// Sound for errors and mic warnings, so they're noticed without looking at the pill.
+    #[serde(default = "default_true")]
+    pub sound_error: bool,
     pub auto_paste: bool,
     /// Shows how to finish a recording on the pill while listening.
     #[serde(default = "default_true")]
     pub show_hints: bool,
+    /// Seconds a recording may go without any speech from its start before the pill warns (with
+    /// the error sound) that the mic may be muted. 0 = off.
+    #[serde(default = "default_no_speech_alert_sec")]
+    pub no_speech_alert_sec: u64,
     pub storage_mode: String, // "text_only" | "text_audio" | "private"
     pub storage_cap_mb: u64,  // 100, 250, 500, 1000
     pub retention_days: u32,  // 7, 14, 30, 0 (0 = Never)
@@ -191,6 +204,10 @@ fn default_idle_unload_sec() -> u64 {
     30
 }
 
+fn default_no_speech_alert_sec() -> u64 {
+    5
+}
+
 fn default_model_load_mode() -> String {
     "on_start".to_string()
 }
@@ -208,9 +225,12 @@ impl Default for AppSettings {
             hotkey: "Control+Shift+Space".to_string(),
             translation_mode: "hotkey".to_string(),
             translate_hotkey: String::new(),
-            sound_effect: true,
+            sound_start: true,
+            sound_stop: true,
+            sound_error: true,
             auto_paste: true,
             show_hints: true,
+            no_speech_alert_sec: default_no_speech_alert_sec(),
             storage_mode: "text_only".to_string(),
             storage_cap_mb: 500,
             retention_days: 30,
@@ -283,6 +303,22 @@ pub fn get_data_dir() -> PathBuf {
     }
 }
 
+/// Settings saved before 1.0.5 had one `sound_effect` switch for every sound; it becomes the
+/// value of all three sound toggles. Returns whether anything changed.
+fn split_sound_toggle(json: &mut serde_json::Value) -> bool {
+    let Some(obj) = json.as_object_mut() else {
+        return false;
+    };
+    let Some(old) = obj.remove("sound_effect") else {
+        return false;
+    };
+    let on = old.as_bool().unwrap_or(true);
+    for key in ["sound_start", "sound_stop", "sound_error"] {
+        obj.entry(key).or_insert(serde_json::Value::Bool(on));
+    }
+    true
+}
+
 impl AppSettings {
     pub fn translation_off(&self) -> bool {
         self.translation_mode == "off"
@@ -332,8 +368,12 @@ impl AppSettings {
 
         if settings_path.exists() {
             if let Ok(content) = fs::read_to_string(&settings_path) {
-                if let Ok(mut settings) = serde_json::from_str::<AppSettings>(&content) {
-                    if settings.migrate() {
+                let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&content) else {
+                    return Self::default();
+                };
+                let split_sounds = split_sound_toggle(&mut json);
+                if let Ok(mut settings) = serde_json::from_value::<AppSettings>(json) {
+                    if settings.migrate() | split_sounds {
                         let _ = settings.save();
                     }
                     return settings;
@@ -389,6 +429,22 @@ mod tests {
         assert_eq!(auto.translation_provider, "Custom API");
 
         assert!(!auto.migrate(), "already migrated");
+    }
+
+    #[test]
+    fn the_old_sound_switch_sets_all_three_sounds() {
+        for on in [true, false] {
+            let mut saved = serde_json::to_value(AppSettings::default()).unwrap();
+            let obj = saved.as_object_mut().unwrap();
+            for key in ["sound_start", "sound_stop", "sound_error"] {
+                obj.remove(key);
+            }
+            obj.insert("sound_effect".into(), serde_json::Value::Bool(on));
+            assert!(super::split_sound_toggle(&mut saved));
+            let s: AppSettings = serde_json::from_value(saved.clone()).unwrap();
+            assert_eq!((s.sound_start, s.sound_stop, s.sound_error), (on, on, on));
+            assert!(!super::split_sound_toggle(&mut saved), "already split");
+        }
     }
 
     #[test]

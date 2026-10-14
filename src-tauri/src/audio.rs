@@ -85,27 +85,42 @@ pub fn resolve_input_device(device_name: Option<&str>) -> Option<cpal::Device> {
 fn resolve_input_device_reporting_fallback(device_name: Option<&str>) -> Option<(cpal::Device, Option<String>)> {
     let host = cpal::default_host();
     let mut missing = None;
-    if let Some(target) = device_name {
-        let clean = target.trim();
-        if clean != "Default" && clean != "System default" && clean != "System Default" && !clean.is_empty() {
-            if let Ok(devs) = host.devices() {
-                for d in devs {
-                    if let Ok(name) = d.name() {
-                        if name.trim() == clean {
-                            return Some((d, None));
-                        }
-                    }
-                }
-            }
-            if let Ok(mut devs) = host.input_devices() {
-                if let Some(found) = devs.find(|d| d.name().map(|n| n.trim() == clean).unwrap_or(false)) {
-                    return Some((found, None));
-                }
-            }
-            missing = Some(clean.to_string());
+    if let Some(clean) = chosen_input_name(device_name) {
+        if let Some(found) = find_input_device(&host, clean) {
+            return Some((found, None));
         }
+        missing = Some(clean.to_string());
     }
     host.default_input_device().map(|d| (d, missing))
+}
+
+/// The microphone the user picked by name, or None when the setting means the system default.
+fn chosen_input_name(device_name: Option<&str>) -> Option<&str> {
+    let clean = device_name?.trim();
+    if clean == "Default" || clean == "System default" || clean == "System Default" || clean.is_empty() {
+        return None;
+    }
+    Some(clean)
+}
+
+fn find_input_device(host: &cpal::Host, name: &str) -> Option<cpal::Device> {
+    if let Ok(devs) = host.devices() {
+        for d in devs {
+            if d.name().map(|n| n.trim() == name).unwrap_or(false) {
+                return Some(d);
+            }
+        }
+    }
+    host.input_devices().ok()?.find(|d| d.name().map(|n| n.trim() == name).unwrap_or(false))
+}
+
+/// The chosen microphone's name when one is picked (not the system default) but isn't connected.
+pub fn missing_input_device(device_name: Option<&str>) -> Option<String> {
+    let clean = chosen_input_name(device_name)?;
+    match find_input_device(&cpal::default_host(), clean) {
+        Some(_) => None,
+        None => Some(clean.to_string()),
+    }
 }
 
 /// Seconds of recording after which the microphone must have delivered real audio.
@@ -271,6 +286,71 @@ impl MicHealth {
         };
         self.dropout = Some(problem);
         Some(MicEvent::Problem(problem))
+    }
+}
+
+/// Seconds a fresh recording may go without speech before the user is warned; 0 = off.
+static NO_SPEECH_ALERT_SECS: AtomicU64 = AtomicU64::new(0);
+
+/// Sets the no-speech alert for the recordings started from now on (0 turns it off).
+pub fn set_no_speech_alert(secs: u64) {
+    NO_SPEECH_ALERT_SECS.store(secs, Ordering::Relaxed);
+}
+
+/// How often the speech watch runs the VAD, and how much already checked audio each run re-reads
+/// so a word cut by the previous run's end is still recognised.
+const SPEECH_CHECK_EVERY: Duration = Duration::from_secs(1);
+const SPEECH_CHECK_OVERLAP: usize = 8000; // 0.5 s at 16 kHz
+
+/// What the speech watch noticed.
+#[derive(Debug, PartialEq, Eq)]
+enum SpeechEvent {
+    /// No speech since the recording started, for the alert time.
+    NotHeard,
+    /// Speech arrived after the warning was shown.
+    HeardAfterWarning,
+}
+
+/// Watches a fresh recording for speech, to warn when none is heard (usually a muted mic that
+/// still sends a faint noise floor, which the mic health check can't tell from a quiet room).
+struct SpeechWatch {
+    after: Duration,
+    started: Instant,
+    next_check: Instant,
+    /// Buffer position of the stream's first sample, and up to where audio has been checked.
+    start_len: usize,
+    checked_to: usize,
+    warned: bool,
+}
+
+impl SpeechWatch {
+    fn new(started: Instant, after: Duration, start_len: usize) -> Self {
+        Self { after, started, next_check: started + SPEECH_CHECK_EVERY, start_len, checked_to: start_len, warned: false }
+    }
+
+    /// Checks the audio since the last run, once per `SPEECH_CHECK_EVERY`. Returns what changed,
+    /// and whether watching is over (speech was heard).
+    fn poll(&mut self, buffer: &Mutex<Vec<f32>>, now: Instant, has_speech: impl Fn(&[f32]) -> bool) -> (Option<SpeechEvent>, bool) {
+        if now < self.next_check {
+            return (None, false);
+        }
+        self.next_check = now + SPEECH_CHECK_EVERY;
+        let chunk = match buffer.lock() {
+            Ok(b) => {
+                let from = self.checked_to.saturating_sub(SPEECH_CHECK_OVERLAP).max(self.start_len).min(b.len());
+                self.checked_to = b.len();
+                b[from..].to_vec()
+            }
+            Err(_) => return (None, false),
+        };
+        if has_speech(&chunk) {
+            return (self.warned.then_some(SpeechEvent::HeardAfterWarning), true);
+        }
+        if !self.warned && now.duration_since(self.started) >= self.after {
+            self.warned = true;
+            return (Some(SpeechEvent::NotHeard), false);
+        }
+        (None, false)
     }
 }
 
@@ -548,6 +628,9 @@ pub struct AudioRecorder {
     is_recording: Arc<AtomicBool>,
     /// Moment the user asked to stop; audio captured after it is dropped.
     stop_at: Arc<Mutex<StopMark>>,
+    /// When the start chime has died away, if it played; its tones are removed from the audio
+    /// captured until then.
+    chime_until: Arc<Mutex<Option<Instant>>>,
 }
 
 impl AudioRecorder {
@@ -557,6 +640,8 @@ impl AudioRecorder {
         let is_rec_thread = Arc::clone(&is_recording);
         let stop_at = Arc::new(Mutex::new(StopMark::default()));
         let stop_at_thread = Arc::clone(&stop_at);
+        let chime_until = Arc::new(Mutex::new(None::<Instant>));
+        let chime_until_thread = Arc::clone(&chime_until);
         let reopen_tx = cmd_tx.clone();
 
         // Dedicated audio recording thread so cpal::Stream stays on one thread
@@ -572,6 +657,9 @@ impl AudioRecorder {
             // stale monitor or Reopen request is ignored.
             let generation = Arc::new(AtomicU64::new(0));
             let mut current: Option<(AppHandle, Option<String>)> = None;
+            // When the stream delivering the buffer's first sample started (the start chime's
+            // window in the buffer is measured from here).
+            let mut capture_started: Option<Instant> = None;
             let mut restarts = 0u32;
 
             while let Ok(cmd) = cmd_rx.recv() {
@@ -592,6 +680,9 @@ impl AudioRecorder {
                         }
                         if let Ok(mut s) = stop_at_thread.lock() {
                             *s = StopMark::default();
+                        }
+                        if let Ok(mut c) = chime_until_thread.lock() {
+                            *c = None;
                         }
 
                         // Mark recording active before starting stream so initial audio buffers are captured immediately
@@ -622,6 +713,7 @@ impl AudioRecorder {
                         match &res {
                             Ok(info) => {
                                 native_rate = info.sample_rate;
+                                capture_started = Some(Instant::now());
                                 log::info!(
                                     "Microphone stream \"{}\" opened in {} ms at {} Hz, {} ch",
                                     info.device,
@@ -649,11 +741,17 @@ impl AudioRecorder {
                         if let Some(stream) = active_stream.take() {
                             let _ = stream.pause();
                         }
-                        let speech = buffer.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
+                        let mut speech = buffer.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
                         let stats = CaptureStats::measure(&speech);
                         // At 16 kHz the speech buffer already is the native audio.
                         let native = native_buffer.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
-                        let native = if native_rate == 16000 || !native_valid { Vec::new() } else { native };
+                        let mut native = if native_rate == 16000 || !native_valid { Vec::new() } else { native };
+                        let chime_until = chime_until_thread.lock().ok().and_then(|mut c| c.take());
+                        if let (Some(until), Some(started)) = (chime_until, capture_started.take()) {
+                            let window = until.saturating_duration_since(started).as_secs_f64();
+                            remove_start_chime(&mut speech, 16000, (window * 16000.0) as usize);
+                            remove_start_chime(&mut native, native_rate, (window * native_rate as f64) as usize);
+                        }
                         let processing_started = Instant::now();
                         let mut captured = CapturedAudio::new(speech, native, native_rate, denoise);
                         captured.stats = stats;
@@ -758,6 +856,15 @@ impl AudioRecorder {
             cmd_tx,
             is_recording,
             stop_at,
+            chime_until,
+        }
+    }
+
+    /// The start chime is playing now: its tones are removed from the audio captured until it has
+    /// died away (open speakers feed it back into the mic).
+    pub fn mark_start_chime(&self, chime: Duration) {
+        if let Ok(mut c) = self.chime_until.lock() {
+            *c = Some(Instant::now() + chime + START_CHIME_TAIL);
         }
     }
 
@@ -929,6 +1036,11 @@ fn start_stream_inner(
     // and the microphone health check: real audio must arrive within MIC_CHECK_AFTER and keep coming.
     let is_rec_monitor = Arc::clone(&is_rec);
     let buf_monitor = Arc::clone(&buffer);
+    // A stream reopened mid-recording doesn't restart the no-speech alert.
+    let no_speech_after = match NO_SPEECH_ALERT_SECS.load(Ordering::Relaxed) {
+        secs if secs > 0 && control.resumed_from.is_none() => Some(Duration::from_secs(secs)),
+        _ => None,
+    };
     thread::spawn(move || {
         let analyzer = SpectrumAnalyzer::new();
         let mut window = vec![0.0f32; SPECTRUM_WINDOW];
@@ -939,6 +1051,7 @@ fn start_stream_inner(
             None => MicHealth::new(Instant::now()),
         };
         let is_current = || control.generation.load(Ordering::SeqCst) == control.id;
+        let mut speech = no_speech_after.map(|after| SpeechWatch::new(Instant::now(), after, last_len));
 
         while is_rec_monitor.load(Ordering::Relaxed) && is_current() {
             thread::sleep(Duration::from_millis(40));
@@ -989,12 +1102,84 @@ fn start_stream_inner(
                 _ => {}
             }
 
+            if let Some(watch) = speech.as_mut() {
+                let (event, done) = watch.poll(&buf_monitor, Instant::now(), crate::vad::has_speech);
+                if is_rec_monitor.load(Ordering::Relaxed) && is_current() {
+                    match event {
+                        Some(SpeechEvent::NotHeard) => crate::app_controller::report_no_speech(&app_handle, watch.after),
+                        Some(SpeechEvent::HeardAfterWarning) => crate::app_controller::report_speech_heard(&app_handle),
+                        None => {}
+                    }
+                }
+                if done {
+                    speech = None;
+                }
+            }
+
             let levels = if has_new_audio { analyzer.analyze(&window) } else { AudioLevels::silent() };
             let _ = app_handle.emit("audio-level", levels);
         }
     });
 
     Ok(stream_info)
+}
+
+/// Added to the start chime's length: output latency plus the room's echo.
+const START_CHIME_TAIL: Duration = Duration::from_millis(250);
+/// How sharply the start chime's tones are notched: about 60-280 Hz wide, so speech keeps nearly
+/// everything around them.
+const CHIME_NOTCH_Q: f32 = 12.0;
+/// Fade from notched back to untouched audio after the chime window, so no click is heard.
+const CHIME_FADE_SEC: f64 = 0.05;
+
+/// Notches the start chime's tones out of the first `window` samples, then fades back to the
+/// untouched audio. Speech captured meanwhile is kept: only narrow bands around the tones go.
+pub fn remove_start_chime(samples: &mut [f32], sample_rate: u32, window: usize) {
+    if samples.is_empty() || window == 0 || sample_rate == 0 {
+        return;
+    }
+    let fade = (CHIME_FADE_SEC * sample_rate as f64) as usize;
+    let end = (window + fade).min(samples.len());
+    let mut notches: Vec<Biquad> = crate::sound::START_CHIME_TONES
+        .iter()
+        .filter(|&&hz| hz < sample_rate as f32 * 0.45)
+        .map(|&hz| Biquad::notch(hz, sample_rate, CHIME_NOTCH_Q))
+        .collect();
+    for (i, sample) in samples[..end].iter_mut().enumerate() {
+        let filtered = notches.iter_mut().fold(*sample, |x, notch| notch.process(x));
+        let wet = if i < window { 1.0 } else { 1.0 - (i - window) as f32 / fade.max(1) as f32 };
+        *sample = filtered * wet + *sample * (1.0 - wet);
+    }
+}
+
+/// A second-order IIR filter (RBJ cookbook), direct form I.
+struct Biquad {
+    b: [f32; 3],
+    a: [f32; 2],
+    x: [f32; 2],
+    y: [f32; 2],
+}
+
+impl Biquad {
+    fn notch(hz: f32, sample_rate: u32, q: f32) -> Self {
+        let w0 = 2.0 * std::f32::consts::PI * hz / sample_rate as f32;
+        let alpha = w0.sin() / (2.0 * q);
+        let a0 = 1.0 + alpha;
+        let cos = w0.cos();
+        Self {
+            b: [1.0 / a0, -2.0 * cos / a0, 1.0 / a0],
+            a: [-2.0 * cos / a0, (1.0 - alpha) / a0],
+            x: [0.0; 2],
+            y: [0.0; 2],
+        }
+    }
+
+    fn process(&mut self, x: f32) -> f32 {
+        let y = self.b[0] * x + self.b[1] * self.x[0] + self.b[2] * self.x[1] - self.a[0] * self.y[0] - self.a[1] * self.y[1];
+        self.x = [x, self.x[0]];
+        self.y = [y, self.y[0]];
+        y
+    }
 }
 
 /// Number of leading frames in this callback that were captured before the user pressed stop.
@@ -1254,6 +1439,91 @@ impl SpectrumAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sine(hz: f32, rate: u32, secs: f32, amplitude: f32) -> Vec<f32> {
+        (0..(rate as f32 * secs) as usize)
+            .map(|i| amplitude * (2.0 * std::f32::consts::PI * hz * i as f32 / rate as f32).sin())
+            .collect()
+    }
+
+    fn rms(s: &[f32]) -> f32 {
+        (s.iter().map(|x| x * x).sum::<f32>() / s.len().max(1) as f32).sqrt()
+    }
+
+    #[test]
+    fn start_chime_tones_are_removed_and_voice_is_kept() {
+        let rate = 16000;
+        let window = rate as usize / 2;
+        for &tone in &crate::sound::START_CHIME_TONES {
+            let mut chime = sine(tone, rate, 1.0, 0.3);
+            remove_start_chime(&mut chime, rate, window);
+            // Skip the filter's first 50 ms while it settles.
+            let after = rms(&chime[800..window]) / rms(&sine(tone, rate, 0.5, 0.3)[800..]);
+            assert!(after < 0.1, "{tone} Hz left at {after}");
+        }
+        // A voice pitch and a vowel formant away from the tones pass nearly untouched.
+        for voice in [150.0, 500.0, 2000.0] {
+            let original = sine(voice, rate, 1.0, 0.3);
+            let mut kept = original.clone();
+            remove_start_chime(&mut kept, rate, window);
+            let ratio = rms(&kept[800..window]) / rms(&original[800..window]);
+            assert!(ratio > 0.85, "{voice} Hz kept only {ratio}");
+        }
+    }
+
+    #[test]
+    fn audio_after_the_chime_window_is_untouched() {
+        let rate = 48000;
+        let original = sine(878.0, rate, 1.0, 0.3);
+        let mut out = original.clone();
+        let window = rate as usize / 4;
+        remove_start_chime(&mut out, rate, window);
+        let fade_end = window + (CHIME_FADE_SEC * rate as f64) as usize;
+        assert_eq!(out[fade_end..], original[fade_end..]);
+    }
+
+    #[test]
+    fn speech_watch_warns_once_then_clears_when_speech_arrives() {
+        let t0 = Instant::now();
+        let buffer = Mutex::new(vec![0.0f32; 16000]);
+        let mut watch = SpeechWatch::new(t0, Duration::from_secs(5), 0);
+        let quiet = |_: &[f32]| false;
+        assert_eq!(watch.poll(&buffer, ms(t0, 500), quiet), (None, false), "not due yet");
+        assert_eq!(watch.poll(&buffer, ms(t0, 1000), quiet), (None, false), "before the alert time");
+        assert_eq!(watch.poll(&buffer, ms(t0, 5000), quiet), (Some(SpeechEvent::NotHeard), false));
+        assert_eq!(watch.poll(&buffer, ms(t0, 6000), quiet), (None, false), "warns only once");
+        assert_eq!(watch.poll(&buffer, ms(t0, 7000), |_| true), (Some(SpeechEvent::HeardAfterWarning), true));
+    }
+
+    #[test]
+    fn speech_watch_stops_quietly_when_speech_comes_first() {
+        let t0 = Instant::now();
+        let buffer = Mutex::new(vec![0.0f32; 16000]);
+        let mut watch = SpeechWatch::new(t0, Duration::from_secs(5), 0);
+        assert_eq!(watch.poll(&buffer, ms(t0, 1000), |_| true), (None, true));
+    }
+
+    #[test]
+    fn speech_watch_rereads_a_little_already_checked_audio() {
+        let t0 = Instant::now();
+        let buffer = Mutex::new(vec![0.0f32; 20000]);
+        let mut watch = SpeechWatch::new(t0, Duration::from_secs(5), 4000);
+        let seen = std::cell::Cell::new(0);
+        watch.poll(&buffer, ms(t0, 1000), |c: &[f32]| { seen.set(c.len()); false });
+        assert_eq!(seen.get(), 16000, "only this stream's audio");
+        buffer.lock().unwrap().extend(vec![0.0f32; 16000]);
+        watch.poll(&buffer, ms(t0, 2000), |c: &[f32]| { seen.set(c.len()); false });
+        assert_eq!(seen.get(), 16000 + SPEECH_CHECK_OVERLAP);
+    }
+
+    #[test]
+    fn default_microphone_settings_name_no_device() {
+        for setting in [None, Some(""), Some("  "), Some("Default"), Some("System default"), Some("System Default")] {
+            assert_eq!(chosen_input_name(setting), None, "{setting:?}");
+            assert_eq!(missing_input_device(setting), None, "{setting:?}");
+        }
+        assert_eq!(chosen_input_name(Some(" HATOR Signify ")), Some("HATOR Signify"));
+    }
 
     fn tone(hz: f32, amplitude: f32) -> Vec<f32> {
         (0..SPECTRUM_WINDOW)

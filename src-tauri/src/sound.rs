@@ -8,6 +8,8 @@ use std::time::Duration;
 pub enum AppSound {
     StartRecording,
     StopRecording,
+    /// Something went wrong (an error in the pill, a mic warning), for when nobody is looking.
+    Error,
 }
 
 /// Mono samples of an earcon, decoded once from the embedded WAV.
@@ -39,16 +41,48 @@ fn decode_wav(bytes: &[u8]) -> Earcon {
 fn earcon(sound: AppSound) -> &'static Earcon {
     static START: OnceLock<Earcon> = OnceLock::new();
     static STOP: OnceLock<Earcon> = OnceLock::new();
+    static ERROR: OnceLock<Earcon> = OnceLock::new();
     match sound {
         AppSound::StartRecording => START.get_or_init(|| decode_wav(include_bytes!("../sounds/start_recording.wav"))),
         AppSound::StopRecording => STOP.get_or_init(|| decode_wav(include_bytes!("../sounds/transcription_complete.wav"))),
+        AppSound::Error => ERROR.get_or_init(error_earcon),
     }
+}
+
+/// Two falling tones, E5 then B4: unlike the start and stop chimes, and about as loud.
+fn error_earcon() -> Earcon {
+    const RATE: u32 = 44100;
+    const AMPLITUDE: f32 = 0.15;
+    let ramp = (0.008 * RATE as f32) as usize;
+    let mut samples = Vec::new();
+    for (hz, ms) in [(659.25_f32, 140_u32), (493.88, 220)] {
+        let n = (RATE * ms / 1000) as usize;
+        for i in 0..n {
+            // Short fades at both ends so the tones don't click.
+            let env = (i.min(n - i) as f32 / ramp as f32).min(1.0);
+            let t = i as f32 / RATE as f32;
+            samples.push(AMPLITUDE * env * (2.0 * std::f32::consts::PI * hz * t).sin());
+        }
+        samples.extend(std::iter::repeat(0.0).take((0.04 * RATE as f32) as usize));
+    }
+    Earcon { samples, sample_rate: RATE }
+}
+
+/// The start chime's tones and overtones (Hz), measured from start_recording.wav. Speakers feed the
+/// chime back into the just-opened mic; `audio::remove_start_chime` notches these out.
+pub const START_CHIME_TONES: [f32; 7] = [878.0, 1107.0, 1318.0, 1760.0, 2218.0, 2639.0, 3326.0];
+
+/// How long an earcon plays.
+pub fn duration(sound: AppSound) -> Duration {
+    let clip = earcon(sound);
+    Duration::from_secs_f64(clip.samples.len() as f64 / clip.sample_rate.max(1) as f64)
 }
 
 /// Decodes the earcons ahead of time so the first key press plays without delay.
 pub fn preload() {
     earcon(AppSound::StartRecording);
     earcon(AppSound::StopRecording);
+    earcon(AppSound::Error);
 }
 
 /// Plays an earcon asynchronously, in-process, through the default output device.

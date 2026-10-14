@@ -182,7 +182,7 @@ export function VoicePill() {
   }, [state.state]);
 
   const handleMouseDown = async (e: React.MouseEvent) => {
-    if (e.button === 0 && !(e.target as HTMLElement).closest("button")) {
+    if (e.button === 0 && !(e.target as HTMLElement).closest("button, select")) {
       await triggerStartDragging();
     }
   };
@@ -255,7 +255,9 @@ export function VoicePill() {
     observer.observe(el);
     fit();
     return () => observer.disconnect();
-  }, [isLong]);
+    // Every new message refits: showing the pill again resets the window to its base size even
+    // when the content (and so its observed size) is unchanged.
+  }, [isLong, state]);
 
   if (state.state === "idle") {
     return null;
@@ -277,6 +279,7 @@ export function VoicePill() {
     micDown: state.mic,
     long: isLong,
     retry: state.state === "error" && state.retry === true,
+    devices: state.state === "error" ? state.devices : undefined,
   };
 
   return (

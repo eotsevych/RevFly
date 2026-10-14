@@ -6,6 +6,14 @@ import Segmented from "@/components/ui/Segmented";
 import { Section, Row, FieldSelect } from "./SettingsPrimitives";
 import { useSettingsContext } from "./useSettingsContext";
 import UpdatesSection from "./UpdatesSection";
+
+/** Seconds without speech from the start of a recording before the pill warns; "0" = off. */
+const NO_SPEECH_ALERT_OPTIONS = [
+  { value: "0", label: "Off" },
+  { value: "5", label: "5 s" },
+  { value: "10", label: "10 s" },
+  { value: "15", label: "15 s" },
+];
 import {
   startMicTest,
   stopMicTest,
@@ -208,7 +216,10 @@ export default function GeneralTab({ t }: { t: Tokens }) {
     const base = inputDevices.map((d) => ({ value: d, label: d }));
     const sel = (settings.input_device || "").trim();
     if (sel && sel !== "Default" && !inputDevices.includes(sel)) {
-      base.unshift({ value: sel, label: sel + " (unavailable — will fallback to Default)" });
+      base.unshift({
+        value: sel,
+        label: sel + " (not connected — the pill asks which mic to use)",
+      });
     }
     return [{ value: "", label: "System Default" }, ...base];
   })();
@@ -565,12 +576,24 @@ export default function GeneralTab({ t }: { t: Tokens }) {
           label="Noise reduction"
           hint="Removes fans, hum and room noise from each recording (RNNoise)"
           t={t}
-          last
         >
           <Segmented
             options={NOISE_REDUCTION_OPTIONS}
             value={settings.noise_reduction ?? "off"}
             onChange={(v) => updateSettings({ noise_reduction: v })}
+            t={t}
+          />
+        </Row>
+        <Row
+          label="No-speech alert"
+          hint="Warn, with a sound, when a recording hears no speech this long after it starts (often a muted mic)"
+          t={t}
+          last
+        >
+          <Segmented
+            options={NO_SPEECH_ALERT_OPTIONS}
+            value={String(settings.no_speech_alert_sec ?? 5)}
+            onChange={(v) => updateSettings({ no_speech_alert_sec: Number(v) })}
             t={t}
           />
         </Row>
@@ -585,10 +608,28 @@ export default function GeneralTab({ t }: { t: Tokens }) {
         >
           <Toggle value={launchAtLogin} onChange={toggleLaunchAtLogin} accent={t.accent} />
         </Row>
-        <Row label="Sound feedback" hint="Play audio cues on recording state changes" t={t}>
+        <Row label="Start sound" hint="Chime when recording starts — you can talk" t={t}>
           <Toggle
-            value={settings.sound_effect}
-            onChange={(v) => updateSettings({ sound_effect: v })}
+            value={settings.sound_start}
+            onChange={(v) => updateSettings({ sound_start: v })}
+            accent={t.accent}
+          />
+        </Row>
+        <Row label="Stop sound" hint="Chime when recording stops" t={t}>
+          <Toggle
+            value={settings.sound_stop}
+            onChange={(v) => updateSettings({ sound_stop: v })}
+            accent={t.accent}
+          />
+        </Row>
+        <Row
+          label="Error sound"
+          hint="Alert on errors and mic warnings, so you hear them without looking"
+          t={t}
+        >
+          <Toggle
+            value={settings.sound_error}
+            onChange={(v) => updateSettings({ sound_error: v })}
             accent={t.accent}
           />
         </Row>

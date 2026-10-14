@@ -496,7 +496,7 @@ export function PillBody({
   levels?: AudioLevels | undefined;
 }) {
   // Anything that has to be read or clicked gets the full pill, whatever the style.
-  if (style === "classic" || view.long || view.micWarning || view.retry)
+  if (style === "classic" || view.long || view.micWarning || view.retry || view.devices)
     return <ClassicPill view={view} t={t} levels={levels} />;
   switch (style) {
     case "compact":

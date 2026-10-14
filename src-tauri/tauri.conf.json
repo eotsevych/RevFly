@@ -27,7 +27,8 @@
         "skipTaskbar": true,
         "center": true,
         "focus": false,
-        "focusable": false
+        "focusable": false,
+        "backgroundThrottling": "disabled"
       }
     ],
     "security": {

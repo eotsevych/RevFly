@@ -26,6 +26,8 @@ export interface PillView {
   long: boolean;
   /** A failed translation with a Retry button: always shown in the Classic pill. */
   retry: boolean;
+  /** The chosen microphone isn't connected: these connected mics are offered instead. */
+  devices?: string[] | undefined;
 }
 
 /** The pill designs offered in Settings → Theme, largest first. */
