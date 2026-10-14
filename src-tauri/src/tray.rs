@@ -162,11 +162,11 @@ static EJECT_ITEM: std::sync::OnceLock<tauri::menu::MenuItem<tauri::Wry>> = std:
 static TOGGLE_ITEM: std::sync::OnceLock<tauri::menu::MenuItem<tauri::Wry>> = std::sync::OnceLock::new();
 static UPDATE_ITEM: std::sync::OnceLock<tauri::menu::MenuItem<tauri::Wry>> = std::sync::OnceLock::new();
 static RETRY_ITEM: std::sync::OnceLock<tauri::menu::MenuItem<tauri::Wry>> = std::sync::OnceLock::new();
-/// The tray menu, so "Retry Last Translation" can be added and removed.
+/// The tray menu, so "Retry Failed Translation" can be added and removed.
 static TRAY_MENU: std::sync::OnceLock<Menu<tauri::Wry>> = std::sync::OnceLock::new();
-/// Whether "Retry Last Translation" is in the menu right now.
+/// Whether "Retry Failed Translation" is in the menu right now.
 static RETRY_SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// Menu position of "Retry Last Translation": right after "Start Recording".
+/// Menu position of "Retry Failed Translation": right after "Start Recording".
 const RETRY_POSITION: usize = 4;
 /// Translation submenu items with the setting value each stands for ("mode:off", "provider:LLM").
 static TRANSLATION_ITEMS: std::sync::OnceLock<Vec<(String, CheckMenuItem<tauri::Wry>)>> = std::sync::OnceLock::new();
@@ -231,15 +231,39 @@ pub fn sync_translation_menu(settings: &AppSettings) {
     }
 }
 
-/// Shows "Retry Last Translation" while a failed translation is waiting to be retried.
-pub fn set_retry_item(enabled: bool) {
+/// Longest start of the failed text shown in the retry item, in characters.
+const RETRY_SNIPPET_CHARS: usize = 30;
+
+/// Label of the retry item, naming what will be retried:
+/// `Retry Failed Translation (Ukrainian → English): "Привіт, як справи…"`.
+pub fn retry_label(from_lang: &str, to_lang: &str, text: &str) -> String {
+    let from = crate::translate::format_lang_name(from_lang);
+    let to = crate::translate::format_lang_name(to_lang);
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if text.is_empty() {
+        return format!("Retry Failed Translation ({} → {})", from, to);
+    }
+    let mut snippet: String = text.chars().take(RETRY_SNIPPET_CHARS).collect();
+    if text.chars().count() > RETRY_SNIPPET_CHARS {
+        snippet = format!("{}…", snippet.trim_end());
+    }
+    format!("Retry Failed Translation ({} → {}): \"{}\"", from, to, snippet)
+}
+
+/// Shows the retry item with `label` while a failed translation is waiting to be retried;
+/// `None` removes it.
+pub fn set_retry_item(label: Option<&str>) {
     let (Some(item), Some(menu)) = (RETRY_ITEM.get(), TRAY_MENU.get()) else {
         return;
     };
-    if RETRY_SHOWN.swap(enabled, std::sync::atomic::Ordering::SeqCst) == enabled {
+    if let Some(label) = label {
+        let _ = item.set_text(label);
+    }
+    let shown = label.is_some();
+    if RETRY_SHOWN.swap(shown, std::sync::atomic::Ordering::SeqCst) == shown {
         return;
     }
-    let _ = if enabled { menu.insert(item, RETRY_POSITION) } else { menu.remove(item) };
+    let _ = if shown { menu.insert(item, RETRY_POSITION) } else { menu.remove(item) };
 }
 
 pub fn is_recording() -> bool {
@@ -296,7 +320,7 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
     let toggle_item = MenuItem::with_id(app, "toggle_recording", "Start Recording", true, None::<&str>)?;
     let _ = TOGGLE_ITEM.set(toggle_item.clone());
     // In the menu only while the last translation failed and can be sent again (see set_retry_item).
-    let retry_item = MenuItem::with_id(app, "retry_translation", "Retry Last Translation", true, None::<&str>)?;
+    let retry_item = MenuItem::with_id(app, "retry_translation", "Retry Failed Translation", true, None::<&str>)?;
     let _ = RETRY_ITEM.set(retry_item.clone());
     let sep1 = PredefinedMenuItem::separator(app)?;
 
@@ -490,4 +514,24 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
     let _ = tray.set_title(Some(""));
 
     Ok(tray)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::retry_label;
+
+    #[test]
+    fn retry_label_names_languages_and_text() {
+        assert_eq!(
+            retry_label("uk", "English", "Привіт"),
+            "Retry Failed Translation (Ukrainian → English): \"Привіт\""
+        );
+        assert_eq!(retry_label("de", "en", "  "), "Retry Failed Translation (German → English)");
+    }
+
+    #[test]
+    fn retry_label_shortens_long_text() {
+        let label = retry_label("uk", "en", "Привіт, як справи?\nЦе дуже довгий текст для меню");
+        assert_eq!(label, "Retry Failed Translation (Ukrainian → English): \"Привіт, як справи? Це дуже дов…\"");
+    }
 }

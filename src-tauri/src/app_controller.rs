@@ -1394,7 +1394,7 @@ impl AppController {
                         log::warn!("Could not update history with the retried translation: {}", e);
                     }
                     *pending_retry_arc.lock().unwrap() = None;
-                    crate::tray::set_retry_item(false);
+                    crate::tray::set_retry_item(None);
                     let _ = app_handle.emit(
                         "assistant-state-changed",
                         serde_json::json!({
@@ -2549,8 +2549,11 @@ impl AppController {
                 history_id,
             });
             let can_retry = pending.is_some();
+            let retry_label = pending
+                .as_ref()
+                .map(|p| crate::tray::retry_label(&p.from_lang, &settings.target_lang, &p.text));
             *pending_retry_arc.lock().unwrap() = pending;
-            crate::tray::set_retry_item(can_retry);
+            crate::tray::set_retry_item(retry_label.as_deref());
 
             if translation_failed {
                 let what_was_pasted = if settings.auto_paste { "pasted" } else { "copied" };

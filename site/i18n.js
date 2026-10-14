@@ -227,7 +227,7 @@ window.REVFLY_I18N = {
       "Будь-який REST-сервіс перекладу. Деякі мають безкоштовні тарифи, як-от Google Cloud Translation.",
     "g6.o4": "Якщо не вдалося",
     "g6.o4t":
-      "Плашка покаже причину й кнопку <b>Retry translation</b>. У меню трею також є <b>Retry Last Translation</b>, тож повторювати сказане не доведеться.",
+      "Плашка покаже причину й кнопку <b>Retry translation</b>. У меню трею також є <b>Retry Failed Translation</b>, тож повторювати сказане не доведеться.",
     "g6.alt":
       "Вкладка Translations: режим перекладу й пресети LLM для Gemini, Ollama, LM Studio та OpenAI",
     "g6.alt2": "Пресети шаблону запиту й редактор власного шаблону",

@@ -1,6 +1,6 @@
 # Plan: Separate translation hotkey and retry in Audio Lab
 
-Status: part 1 (translation hotkey) implemented 2026-10-05; parts 2–3 proposed
+Status: part 1 (translation hotkey) implemented 2026-10-05; part 3 (tray label) implemented 2026-10-14; part 2 proposed
 
 ## Background: what "Retry Last Translation" does today
 
