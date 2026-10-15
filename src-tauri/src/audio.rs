@@ -631,6 +631,8 @@ pub struct AudioRecorder {
     /// When the start chime has died away, if it played; its tones are removed from the audio
     /// captured until then.
     chime_until: Arc<Mutex<Option<Instant>>>,
+    /// This recording's audio at 16 kHz, filled by the stream callback. Cleared on every start.
+    buffer: Arc<Mutex<Vec<f32>>>,
 }
 
 impl AudioRecorder {
@@ -643,11 +645,13 @@ impl AudioRecorder {
         let chime_until = Arc::new(Mutex::new(None::<Instant>));
         let chime_until_thread = Arc::clone(&chime_until);
         let reopen_tx = cmd_tx.clone();
+        let buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
+        let buffer_thread = Arc::clone(&buffer);
 
         // Dedicated audio recording thread so cpal::Stream stays on one thread
         thread::spawn(move || {
             let mut active_stream: Option<cpal::Stream> = None;
-            let buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
+            let buffer = buffer_thread;
             let native_buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
             let mut native_rate = 16000;
             // A reopened stream at another rate makes the full-bandwidth copy inconsistent; playback
@@ -857,7 +861,21 @@ impl AudioRecorder {
             is_recording,
             stop_at,
             chime_until,
+            buffer,
         }
+    }
+
+    /// Waits for the microphone's first audio of the recording just started, up to `max`, and says
+    /// how long it took. None on timeout or when the recording ended first.
+    pub fn wait_for_first_audio(&self, max: Duration) -> Option<Duration> {
+        let started = Instant::now();
+        while started.elapsed() < max && self.is_recording() {
+            if self.buffer.lock().map(|b| !b.is_empty()).unwrap_or(false) {
+                return Some(started.elapsed());
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        None
     }
 
     /// The start chime is playing now: its tones are removed from the audio captured until it has

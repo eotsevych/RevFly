@@ -575,6 +575,8 @@ fn mic_dropout_message(report: &crate::audio::MicReport) -> (&'static str, Strin
 const MIC_SETTING: &str = "Settings → General → Microphone input";
 /// How long an error that needs reading stays on screen.
 const LONG_ERROR_HOLD: Duration = Duration::from_secs(9);
+/// How long the start chime waits for the mic's first audio before playing anyway.
+const START_CHIME_MAX_WAIT: Duration = Duration::from_millis(1500);
 /// How long the pill waits for a pick when the chosen microphone isn't connected.
 const MIC_CHOICE_HOLD: Duration = Duration::from_secs(30);
 /// Pill window size while it shows a long error, and its normal size.
@@ -1616,12 +1618,27 @@ impl AppController {
         let stream = self.recorder.start_recording(self.app_handle.clone(), settings.input_device.clone());
         let mic_open_ms = mic_open_started.elapsed().as_millis();
 
-        // 4. Then the chime, without waiting for it. It starts after capture is already open, so
-        // playback and capture are never opened at the same instant (some combo USB/Bluetooth
-        // headsets stall when they are).
+        // 4. Then the chime, once the mic delivers its first audio. Playback and capture are never
+        // opened at the same instant (some combo USB/Bluetooth headsets stall when they are), and
+        // Bluetooth headsets have finished switching to their call profile, which swallowed a
+        // chime played while it was under way.
         if stream.is_ok() && settings.sound_start {
-            crate::sound::play_sound(crate::sound::AppSound::StartRecording);
-            self.recorder.mark_start_chime(crate::sound::duration(crate::sound::AppSound::StartRecording));
+            let recorder = Arc::clone(&self.recorder);
+            let session_id = Arc::clone(&self.session_id);
+            let session = session_id.load(Ordering::SeqCst);
+            std::thread::spawn(move || {
+                let waited = recorder.wait_for_first_audio(START_CHIME_MAX_WAIT);
+                if session_id.load(Ordering::SeqCst) != session || !recorder.is_recording() {
+                    return;
+                }
+                crate::sound::play_sound(crate::sound::AppSound::StartRecording);
+                recorder.mark_start_chime(crate::sound::duration(crate::sound::AppSound::StartRecording));
+                let detail = match waited {
+                    Some(d) => format!("Start chime played when the first audio arrived, {} ms after the mic opened", d.as_millis()),
+                    None => format!("Start chime played without audio from the mic after {} ms", START_CHIME_MAX_WAIT.as_millis()),
+                };
+                log_stage_event(&get_data_dir(), "START_CHIME", &detail);
+            });
         }
 
         if let Ok(info) = &stream {
