@@ -45,6 +45,9 @@ to a different log. Default: all data, with extra attention to the last 24 hours
 - `vad_no_speech` (since 1.0.6): Silero found no speech and the whole recording went to the model,
   so `speech_sec` is the full audio. Such runs usually end `empty`; the report counts how many
   still gave text. The pipeline log's `[VAD]` line says "no speech found" for them.
+- `input_device`, `input_rate_hz` (since 1.0.6): the microphone that recorded and its rate. A
+  Bluetooth headset in call mode records at 16 or 24 kHz. The report's "By input device" table
+  counts every outcome per mic, so a mic that often hears nothing shows up as `empty` runs.
 - `speed_factor`: seconds of speech per second of inference. Higher is better. A falling trend at
   similar `speech_sec` is the clearest sign of real degradation.
 - `model_wait_ms`: part of the `inference` lap spent waiting for the model to load. Large values

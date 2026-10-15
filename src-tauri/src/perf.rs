@@ -86,6 +86,8 @@ pub struct PerfRun {
     pub model: String,
     pub model_load_mode: String,
     pub recording_sec: f32,
+    /// The microphone that recorded, and its sample rate.
+    pub input_device: Option<(String, u32)>,
     pub audio_sec: f32,
     pub speech_sec: f32,
     /// VAD found no speech and kept the whole recording, so `speech_sec` is the full audio.
@@ -114,6 +116,7 @@ impl PerfRun {
             model: String::new(),
             model_load_mode: String::new(),
             recording_sec: 0.0,
+            input_device: None,
             audio_sec: 0.0,
             speech_sec: 0.0,
             vad_no_speech: false,
@@ -193,6 +196,8 @@ impl PerfRun {
             "recording_sec": round1(self.recording_sec),
             "audio_sec": round1(self.audio_sec),
             "speech_sec": round1(self.speech_sec),
+            "input_device": self.input_device.as_ref().map(|(name, _)| name),
+            "input_rate_hz": self.input_device.as_ref().map(|(_, rate)| rate),
             "vad_no_speech": self.vad_no_speech,
             "translation": self.translation,
             "text_chars": self.text_chars,

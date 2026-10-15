@@ -95,6 +95,22 @@ def main():
     grouped("By Low Power Mode", lambda r: r["context"].get("low_power_mode"))
     grouped("By model load mode", lambda r: r.get("model_load_mode") or "-")
 
+    # All outcomes, not only ok runs: a mic that hears nothing shows up as empty runs.
+    by_device = defaultdict(list)
+    for r in runs:
+        if r.get("input_device"):
+            by_device[r["input_device"]].append(r)
+    if by_device:
+        rows = []
+        for name, rs in sorted(by_device.items(), key=lambda kv: -len(kv[1])):
+            fine = [r for r in rs if r["outcome"] in ("ok", "translation_failed")]
+            rates = sorted({r.get("input_rate_hz") for r in rs if r.get("input_rate_hz")})
+            rows.append([name, len(rs), sum(r["outcome"] == "ok" for r in rs),
+                         sum(r["outcome"] == "empty" for r in rs),
+                         median(r["speed_factor"] for r in fine if r.get("speed_factor")) if fine else None,
+                         "/".join(str(x) for x in rates) or None])
+        table("By input device (since 1.0.6; all outcomes)", ["device", "n", "ok", "empty", "speed", "rate Hz"], rows)
+
     if beats:
         table("App memory between dictations (heartbeats, first / last / max)", ["", "first", "last", "max"], [
             ["app RAM MB", beats[0]["app_rss_mb"], beats[-1]["app_rss_mb"], max(b["app_rss_mb"] for b in beats)],

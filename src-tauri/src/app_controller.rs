@@ -510,6 +510,9 @@ impl RecordingMode {
 pub(crate) struct RecordingStart {
     at: Instant,
     trigger: &'static str,
+    /// The microphone recording, and its sample rate.
+    device: String,
+    sample_rate: u32,
 }
 
 /// Captured audio shorter than the wall-clock recording by more than this means audio was dropped.
@@ -968,7 +971,16 @@ impl AppController {
         self.settings.lock().unwrap().clone()
     }
 
+    /// Saves settings changed outside the Settings window (the pill, the tray) and sends them to
+    /// the Settings window, so it shows them and doesn't save its older copy over them.
     pub fn save_settings(&self, new_settings: AppSettings) -> Result<(), String> {
+        self.save_settings_from_window(new_settings.clone())?;
+        let _ = self.app_handle.emit("settings-changed", &new_settings);
+        Ok(())
+    }
+
+    /// Saves settings the Settings window sent; it already shows them.
+    pub fn save_settings_from_window(&self, new_settings: AppSettings) -> Result<(), String> {
         let old_model = { self.settings.lock().unwrap().model_name.clone() };
         new_settings.save()?;
         {
@@ -1633,7 +1645,12 @@ impl AppController {
                     mic_open_ms
                 ),
             );
-            *self.recording_start.lock().unwrap() = Some(RecordingStart { at: Instant::now(), trigger });
+            *self.recording_start.lock().unwrap() = Some(RecordingStart {
+                at: Instant::now(),
+                trigger,
+                device: info.device.clone(),
+                sample_rate: info.sample_rate,
+            });
         }
         if let Err(e) = stream {
             log_stage_event(&get_data_dir(), "REC_START_FAILED", &format!("Recording requested by {} failed: {}", trigger, e));
@@ -1748,13 +1765,20 @@ impl AppController {
             crate::sound::play_sound(crate::sound::AppSound::StopRecording);
         }
 
-        let recording_sec = self.recording_start.lock().unwrap().as_ref().map(|s| s.at.elapsed().as_secs_f32()).unwrap_or(0.0);
+        let (recording_sec, input_device) = self
+            .recording_start
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|s| (s.at.elapsed().as_secs_f32(), Some((s.device.clone(), s.sample_rate))))
+            .unwrap_or((0.0, None));
         let stop_started = Instant::now();
         let captured = self.recorder.stop_recording(crate::denoise::strength_wet(&settings.noise_reduction));
         let mut perf = crate::perf::PerfRun::start(stop_started.elapsed().as_millis() as u64);
         perf.model = settings.model_name.clone();
         perf.model_load_mode = settings.model_load_mode.clone();
         perf.recording_sec = recording_sec;
+        perf.input_device = input_device;
         log_recording_stop(&self.recording_start, trigger, &captured.stats);
 
         let app_handle = self.app_handle.clone();

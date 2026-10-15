@@ -592,6 +592,20 @@ export async function triggerDownloadSpecificModel(modelName: string): Promise<s
   }
 }
 
+/** Settings saved outside the Settings window, e.g. a microphone picked in the pill or a tray
+ * menu choice. */
+export async function subscribeToSettingsChanges(
+  callback: (settings: BackendSettings) => void,
+): Promise<UnlistenFn | null> {
+  if (!isTauri()) return null;
+  try {
+    return await listen<BackendSettings>("settings-changed", (event) => callback(event.payload));
+  } catch (err) {
+    console.error("Failed to listen to settings changes:", err);
+    return null;
+  }
+}
+
 export async function subscribeToDiagnosticLogs(
   callback: (payload: TranscriptionDiagnosticLog) => void,
 ): Promise<UnlistenFn | null> {

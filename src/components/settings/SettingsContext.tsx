@@ -7,6 +7,7 @@ import {
   isTauri,
   persistSettings,
   subscribeToDiagnosticLogs,
+  subscribeToSettingsChanges,
   subscribeToModelDownload,
   type BackendSettings,
   type ModelCatalogItem,
@@ -150,12 +151,17 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setLogs((prev) => [newLog, ...prev.slice(0, 49)]);
     });
 
+    // 7. Show settings changed elsewhere (pill, tray). Otherwise the next change here would save
+    // this window's older copy over them.
+    const unlistenSettings = subscribeToSettingsChanges((s) => setSettings(s));
+
     return () => {
       clearInterval(devicePoll);
       window.removeEventListener("focus", pollDevices);
       document.removeEventListener("visibilitychange", pollDevices);
       unlistenDownload.then((fn) => fn?.());
       unlistenLogs.then((fn) => fn?.());
+      unlistenSettings.then((fn) => fn?.());
     };
   }, []);
 

@@ -73,7 +73,7 @@ fn save_settings(
     let old_settings = state.controller.get_settings();
     // A Settings window opened before the welcome guide finished still holds `false`.
     new_settings.onboarding_done |= old_settings.onboarding_done;
-    state.controller.save_settings(new_settings.clone())?;
+    state.controller.save_settings_from_window(new_settings.clone())?;
 
     // Update global hotkeys if changed (the translate hotkey is only active in its mode)
     if old_settings.hotkey != new_settings.hotkey
