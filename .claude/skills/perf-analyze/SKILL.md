@@ -48,6 +48,12 @@ to a different log. Default: all data, with extra attention to the last 24 hours
 - `input_device`, `input_rate_hz` (since 1.0.6): the microphone that recorded and its rate. A
   Bluetooth headset in call mode records at 16 or 24 kHz. The report's "By input device" table
   counts every outcome per mic, so a mic that often hears nothing shows up as `empty` runs.
+- `translation`: the service that translated ("LLM", "Custom API", "Apple"; null when skipped).
+  Lines written after 1.0.6 also have `translation_ms` (time in the service), `translation_in_chars` /
+  `translation_out_chars` (0 out when it failed) and `translation_pair` ("uk → en", Apple only).
+  Apple's on-device translation takes tens of ms per sentence with the Fast model and about half a
+  second with Best quality; its first call after launch also starts the `revfly-translate` helper
+  and loads the model (2-3 s), which RevFly does while the user is still talking.
 - `speed_factor`: seconds of speech per second of inference. Higher is better. A falling trend at
   similar `speech_sec` is the clearest sign of real degradation.
 - `model_wait_ms`: part of the `inference` lap spent waiting for the model to load. Large values

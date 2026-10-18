@@ -80,8 +80,18 @@ pub struct AppSettings {
     pub annotate_ambiguity: bool,
     #[serde(default = "default_true")]
     pub normalize_structured_values: bool,
+    /// "LLM", "Custom API" or "Apple" (Apple's on-device Translation, macOS 26+).
     #[serde(default = "default_translation_provider")]
     pub translation_provider: String,
+    /// With the Apple provider: the service ("LLM" or "Custom API") that translates instead when
+    /// Apple Translation fails, e.g. for a language pair that isn't downloaded. Empty = none; the
+    /// spoken text is pasted as with any failed translation.
+    #[serde(default)]
+    pub apple_fallback_provider: String,
+    /// Apple Translation model to use when both are downloaded (macOS 26.4+): "fast" (tens of ms
+    /// per sentence) or "quality" (better wording, about half a second per sentence).
+    #[serde(default = "default_apple_translation_model")]
+    pub apple_translation_model: String,
     #[serde(default = "default_device_backend")]
     pub device_backend: String,
     #[serde(default = "default_pause_ms")]
@@ -183,6 +193,10 @@ fn default_device_backend() -> String {
     "auto".to_string()
 }
 
+fn default_apple_translation_model() -> String {
+    "fast".to_string()
+}
+
 fn default_translation_provider() -> String {
     "LLM".to_string()
 }
@@ -252,6 +266,8 @@ impl Default for AppSettings {
             annotate_ambiguity: true,
             normalize_structured_values: true,
             translation_provider: "LLM".to_string(),
+            apple_fallback_provider: String::new(),
+            apple_translation_model: default_apple_translation_model(),
             device_backend: "auto".to_string(),
             chunk_pause_ms: 500,
             chunk_safety_sec: 10,

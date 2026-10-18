@@ -61,6 +61,7 @@ No cloud audio upload. No browser required. Just tap your hotkey and speak.
 - **Google Gemini**: Fast, fluent translation powered by `gemini-3.6-flash`.
 - **Local LLMs**: Connects to local AI models via Ollama or LM Studio (e.g. `llama3.2`, `mistral`).
 - **Custom Endpoints**: Compatible with any OpenAI-style REST API endpoint with custom system prompt templates.
+- **Apple Native**: macOS 26 and later. Uses Apple's built-in Translation framework, the engine behind the Translate app: no API key, no cost, works offline, and nothing leaves your Mac. Each language pair is downloaded once, from **Settings** → **Translations** → **Language packs** (or System Settings › General › Language & Region › Translation Languages). The **Fast** model translates a sentence in tens of milliseconds; **Best quality** takes about half a second. Apple translates as-is, so keep an LLM for "translate and also rephrase". If Apple Translation fails (for example, a pair that isn't downloaded), RevFly pastes what you said, or translates with your LLM provider if you choose that as the fallback. On older macOS the option is shown but disabled.
 
 ### 6. Automatic Text Normalization
 - **Cleaner Transcripts**: Removes verbal stuttering, duplicate words, and spoken filler phrases ("um", "uh", "you know", "like").
@@ -111,7 +112,7 @@ No cloud audio upload. No browser required. Just tap your hotkey and speak.
 [ Confidentiality Masker ] ── (Hides emails, cards, and custom secrets)
          │
          ▼
-[ AI Translation Engine ] ── (Google Gemini / Local Ollama / Custom API)
+[ AI Translation Engine ] ── (Google Gemini / Local Ollama / Custom API / Apple on-device)
          │
          ▼
 [ Auto-Paste (Cmd+V / Ctrl+V) ] + [ Local SQLite History ]
@@ -161,6 +162,7 @@ All installers are published on [GitHub Releases](https://github.com/eotsevych/R
 - Node.js or [Bun](https://bun.sh)
 - Rust & Cargo (1.77.2+)
 - CMake and Clang (for the Whisper build)
+- macOS only: Xcode or the Command Line Tools with the **macOS 26 SDK** (Xcode 26+), for the Apple Translation helper. `src-tauri/build.rs` builds it with `scripts/build_apple_translate.sh` (Swift, universal arm64 + x86_64) and bundles it next to the app as `revfly-translate`. With an older SDK the build still works, but the Apple provider reports that it isn't included; set `REVFLY_REQUIRE_APPLE_TRANSLATE=1` to fail the build instead (release builds do). `scripts/test_apple_translate.sh` smoke-tests the helper.
 - Linux only: the system packages listed in `scripts/build_linux.sh`
 
 ### Run in Development

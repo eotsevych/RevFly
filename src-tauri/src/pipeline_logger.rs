@@ -41,6 +41,10 @@ pub struct TranscriptionDiagnosticLog {
     /// Why translation failed (provider, model and error), when it did; the spoken text was used instead.
     #[serde(default)]
     pub translation_error: Option<String>,
+    /// The service that translated, e.g. "Apple Translation (on-device) uk → en" or "LLM
+    /// gemini-3.6-flash at …". None when translation was skipped.
+    #[serde(default)]
+    pub translation_provider: Option<String>,
     pub final_text: String,
     /// The text in the spoken language (after cleanup and masking), when `final_text` is its
     /// translation. Shown in Audio Lab's second try.
@@ -83,7 +87,7 @@ impl TranscriptionDiagnosticLog {
         let trans_str = if self.translation_skipped {
             format!("0 ms (SKIPPED: {})", self.translation_skip_reason)
         } else {
-            format!("{} ms (Gemini API)", self.translation_ms)
+            format!("{} ms ({})", self.translation_ms, self.translation_provider.as_deref().unwrap_or("translation service"))
         };
 
         format!(
@@ -132,7 +136,7 @@ impl TranscriptionDiagnosticLog {
 
         if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_file) {
             let line = format!(
-                "[{}] id={} total_ms={} audio={:.2}s vad_ms={} vad_cut={:.2}s whisper_ms={} model={} speed={:.1}x lang={} trans_ms={} text=\"{}\"\n",
+                "[{}] id={} total_ms={} audio={:.2}s vad_ms={} vad_cut={:.2}s whisper_ms={} model={} speed={:.1}x lang={} trans_ms={} trans_via=\"{}\" text=\"{}\"\n",
                 self.timestamp,
                 self.id,
                 self.total_pipeline_ms,
@@ -144,6 +148,7 @@ impl TranscriptionDiagnosticLog {
                 self.whisper_speed_factor,
                 self.detected_lang,
                 self.translation_ms,
+                self.translation_provider.as_deref().unwrap_or("-"),
                 self.final_text.replace('\n', " ")
             );
             let _ = file.write_all(line.as_bytes());

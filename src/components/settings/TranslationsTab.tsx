@@ -1,6 +1,11 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import type { Tokens } from "@/lib/tokens";
-import type { TranslationMode } from "@/lib/tauri";
+import {
+  fetchAppleTranslationInfo,
+  type AppleTranslationInfo,
+  type TranslationMode,
+} from "@/lib/tauri";
+import AppleTranslationPanel from "./AppleTranslationPanel";
 import {
   Section,
   FormLabel,
@@ -63,7 +68,7 @@ const MODES: { value: TranslationMode; label: string; desc: string }[] = [
   },
 ];
 
-// Which service translates: LLM (both local & cloud) or a custom API
+// Which service translates: LLM (both local & cloud), a custom API, or Apple's on-device engine
 const PROVIDERS = [
   {
     value: "LLM",
@@ -74,6 +79,11 @@ const PROVIDERS = [
     value: "Custom API",
     label: "Custom API",
     desc: "Custom REST translation endpoint",
+  },
+  {
+    value: "Apple",
+    label: "Apple Native",
+    desc: "Built into macOS. Free, offline, private. Download languages below",
   },
 ] as const;
 
@@ -135,7 +145,20 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
   const translationMode: TranslationMode = settings.translation_mode ?? "hotkey";
   const translationOff = translationMode === "off";
   const rawProvider = settings.translation_provider || "LLM";
-  const activeProvider = rawProvider.toLowerCase().includes("custom") ? "Custom API" : "LLM";
+  const activeProvider =
+    rawProvider.toLowerCase() === "apple"
+      ? "Apple"
+      : rawProvider.toLowerCase().includes("custom")
+        ? "Custom API"
+        : "LLM";
+
+  // Apple's provider needs macOS 26; elsewhere its card is disabled and says why.
+  const [appleInfo, setAppleInfo] = useState<AppleTranslationInfo | null>(null);
+  useEffect(() => {
+    fetchAppleTranslationInfo()
+      .then(setAppleInfo)
+      .catch(() => setAppleInfo(null));
+  }, []);
 
   const setProvider = (p: string) => {
     updateSettings({ translation_provider: p });
@@ -168,15 +191,18 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
     p: { value: string; label: string; desc: string },
     active: boolean,
     onClick: () => void,
+    disabled = false,
   ) => (
     <button
       key={p.value}
       type="button"
       onClick={onClick}
+      disabled={disabled}
       style={{
         padding: "14px 14px",
         borderRadius: 10,
-        cursor: "pointer",
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.55 : 1,
         background: active ? `${t.accent}18` : t.inputBg,
         border: `1px solid ${active ? `${t.accent}66` : t.border}`,
         textAlign: "left",
@@ -265,9 +291,18 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
       {!translationOff && (
         <Section title="Translation Service" t={t}>
           <div
-            style={{ padding: 12, display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}
+            style={{ padding: 12, display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}
           >
-            {PROVIDERS.map((p) => card(p, activeProvider === p.value, () => setProvider(p.value)))}
+            {PROVIDERS.map((p) => {
+              const unavailable = p.value === "Apple" && !appleInfo?.available;
+              const shown = unavailable && appleInfo?.reason ? { ...p, desc: appleInfo.reason } : p;
+              return card(
+                shown,
+                activeProvider === p.value,
+                () => setProvider(p.value),
+                unavailable && activeProvider !== "Apple",
+              );
+            })}
           </div>
         </Section>
       )}
@@ -278,11 +313,31 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
           title={
             activeProvider === "LLM"
               ? "LLM Provider Configuration (Local & Cloud)"
-              : "Custom API Configuration"
+              : activeProvider === "Apple"
+                ? "Apple Native Translation"
+                : "Custom API Configuration"
           }
           t={t}
         >
           <div style={{ padding: 16 }}>
+            {activeProvider === "Apple" &&
+              (appleInfo && !appleInfo.available ? (
+                <p
+                  style={{
+                    fontSize: 12,
+                    color: t.warnColor,
+                    fontFamily: "Inter, sans-serif",
+                    lineHeight: 1.5,
+                    margin: 0,
+                  }}
+                >
+                  {appleInfo.reason} Recordings that need translation won't start until you choose
+                  another service.
+                </p>
+              ) : (
+                <AppleTranslationPanel t={t} />
+              ))}
+
             {/* Combined LLM Mode (Both Local & Cloud) */}
             {activeProvider === "LLM" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -518,8 +573,8 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
         </Section>
       )}
 
-      {/* ── Prompt Template Configuration ── */}
-      {!translationOff && (
+      {/* ── Prompt Template Configuration (Apple's engine takes no prompt) ── */}
+      {!translationOff && activeProvider !== "Apple" && (
         <Section title="Prompt Template (LLM Instructions)" t={t}>
           <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
             <div>

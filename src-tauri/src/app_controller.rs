@@ -301,9 +301,22 @@ const TRANSLATION_TIMEOUT: Duration = Duration::from_secs(20);
 /// the "Retry translation" action so both send text the same way.
 struct TranslationRoute {
     is_custom: bool,
+    /// Apple's on-device Translation (see `apple_translate`); the LLM fields are then unused.
+    is_apple: bool,
     endpoint: String,
     key: String,
     model: String,
+}
+
+/// A finished translation and the service that produced it.
+struct Translated {
+    text: String,
+    /// Service for logs, like `TranslationRoute::describe`; the fallback's when it answered.
+    via: String,
+    /// Short service name for the pill and the performance log: "LLM", "Custom API" or "Apple".
+    label: &'static str,
+    /// Languages as codes, e.g. "uk → en" (Apple only; LLMs are given names in the prompt).
+    pair: Option<String>,
 }
 
 /// True for an endpoint on this computer (Ollama, LM Studio), which needs no API key.
@@ -313,9 +326,13 @@ fn is_local_endpoint(url: &str) -> bool {
 }
 
 /// The translation settings that are still empty, e.g. `["API key"]`. It checks only that the
-/// fields are filled in; whether the service is reachable is found out when it's called.
+/// fields are filled in; whether the service is reachable is found out when it's called. Apple's
+/// provider has no fields; see `apple_setup_problem`.
 fn missing_translation_settings(settings: &AppSettings) -> Vec<&'static str> {
     let route = TranslationRoute::from_settings(settings);
+    if route.is_apple {
+        return Vec::new();
+    }
     let (url, model) = if route.is_custom {
         // An empty Custom API model is shown and used as gpt-4o-mini.
         (settings.custom_api_url.trim(), route.model.as_str())
@@ -336,6 +353,17 @@ fn missing_translation_settings(settings: &AppSettings) -> Vec<&'static str> {
     missing
 }
 
+/// With the Apple provider: what is known to keep this recording from being translated (an old
+/// macOS, a language pair Apple doesn't support), unless a fallback service is
+/// set up to translate instead. `None` for the other providers.
+fn apple_setup_problem(settings: &AppSettings) -> Option<String> {
+    let route = TranslationRoute::from_settings(settings);
+    if !route.is_apple || route.fallback(settings).is_some() {
+        return None;
+    }
+    crate::apple_translate::setup_problem(&settings.source_lang, &settings.target_lang)
+}
+
 /// "the API key", "the API key and model name", "the endpoint URL, API key and model name".
 fn list_missing(missing: &[&str]) -> String {
     match missing {
@@ -347,7 +375,8 @@ fn list_missing(missing: &[&str]) -> String {
 
 impl TranslationRoute {
     fn from_settings(settings: &AppSettings) -> Self {
-        let is_custom = settings.translation_provider.to_lowercase().contains("custom");
+        let is_apple = crate::apple_translate::is_apple(&settings.translation_provider);
+        let is_custom = !is_apple && settings.translation_provider.to_lowercase().contains("custom");
         let endpoint = if !settings.llm_endpoint.trim().is_empty() {
             settings.llm_endpoint.trim().to_string()
         } else if !settings.local_llm_url.trim().is_empty() {
@@ -377,20 +406,100 @@ impl TranslationRoute {
         } else {
             "gemini-3.6-flash".to_string()
         };
-        Self { is_custom, endpoint, key, model }
+        Self { is_custom, is_apple, endpoint, key, model }
     }
 
     fn label(&self) -> &'static str {
-        if self.is_custom { "Custom API" } else { "LLM" }
+        if self.is_apple {
+            "Apple"
+        } else if self.is_custom {
+            "Custom API"
+        } else {
+            "LLM"
+        }
     }
 
     /// One-line description for logs, e.g. `LLM gemini-3.6-flash at https://…`.
     fn describe(&self, settings: &AppSettings) -> String {
+        if self.is_apple {
+            return "Apple Translation (on-device)".to_string();
+        }
         let url = if self.is_custom { settings.custom_api_url.trim() } else { self.endpoint.as_str() };
         format!("{} {} at {}", self.label(), self.model, url)
     }
 
-    async fn translate(&self, settings: &AppSettings, text: &str) -> Result<String, String> {
+    /// Whether the service can be called at all: Apple's needs macOS 26 and its helper (or a
+    /// fallback service), the others their fields filled in.
+    fn is_ready(&self, settings: &AppSettings) -> bool {
+        if self.is_apple {
+            crate::apple_translate::is_available() || self.fallback(settings).is_some()
+        } else {
+            missing_translation_settings(settings).is_empty()
+        }
+    }
+
+    /// The service that translates when Apple Translation fails, if one is chosen and filled in.
+    fn fallback(&self, settings: &AppSettings) -> Option<TranslationRoute> {
+        if !self.is_apple {
+            return None;
+        }
+        let provider = settings.apple_fallback_provider.trim();
+        if provider.is_empty() || crate::apple_translate::is_apple(provider) {
+            return None;
+        }
+        let mut with_fallback = settings.clone();
+        with_fallback.translation_provider = provider.to_string();
+        missing_translation_settings(&with_fallback)
+            .is_empty()
+            .then(|| TranslationRoute::from_settings(&with_fallback))
+    }
+
+    /// Translates `text`, spoken in `from_lang` (the detected language; Apple's provider uses it
+    /// when the spoken language is set to Auto, the LLMs get the configured one in their prompt).
+    async fn translate(&self, settings: &AppSettings, text: &str, from_lang: &str) -> Result<Translated, String> {
+        if !self.is_apple {
+            let text = self.translate_llm(settings, text).await?;
+            return Ok(Translated { text, via: self.describe(settings), label: self.label(), pair: None });
+        }
+        let reason = match self.translate_apple(settings, text, from_lang).await {
+            Ok(done) => return Ok(done),
+            Err(reason) => reason,
+        };
+        let Some(fallback) = self.fallback(settings) else {
+            return Err(reason);
+        };
+        log_stage_event(
+            &get_data_dir(),
+            "TRANSLATE_FALLBACK",
+            &format!("{}; translating with {} instead", reason, fallback.describe(settings)),
+        );
+        match fallback.translate_llm(settings, text).await {
+            Ok(text) => Ok(Translated {
+                text,
+                via: format!("{} (after Apple Translation failed: {})", fallback.describe(settings), reason),
+                label: fallback.label(),
+                pair: None,
+            }),
+            Err(e) => Err(format!("{}; {} failed too: {}", reason, fallback.label(), e)),
+        }
+    }
+
+    async fn translate_apple(&self, settings: &AppSettings, text: &str, from_lang: &str) -> Result<Translated, String> {
+        let source = crate::apple_translate::source_code(&settings.source_lang, from_lang);
+        let Some(target) = crate::apple_translate::to_bcp47(&settings.target_lang) else {
+            return Err(format!("Apple Translation can't translate into {}", settings.target_lang));
+        };
+        let model = crate::apple_translate::model_name(&settings.apple_translation_model);
+        match crate::apple_translate::translate(text, source.as_deref(), &target, model, TRANSLATION_TIMEOUT).await {
+            Ok(done) => {
+                let pair = format!("{} → {}", done.source, target);
+                Ok(Translated { text: done.text, via: format!("{} {}", self.describe(settings), pair), label: self.label(), pair: Some(pair) })
+            }
+            Err(e) => Err(e.describe(&crate::apple_translate::pair_name(source.as_deref(), &target))),
+        }
+    }
+
+    async fn translate_llm(&self, settings: &AppSettings, text: &str) -> Result<String, String> {
         let request = async {
             if self.is_custom {
                 crate::translate::translate_with_openai_compatible(
@@ -774,6 +883,7 @@ fn keep_failed_recording(
         translation_skip_reason: "Transcription failed".to_string(),
         translation_ms: 0,
         translation_error: None,
+        translation_provider: None,
         final_text: String::new(),
         spoken_text: None,
         clipboard_paste_ms: 0,
@@ -1118,8 +1228,8 @@ impl AppController {
         .await
     }
 
-    /// Audio Lab's second try at a translation: sends `text` to the chosen service ("LLM" or
-    /// "Custom API") with the saved keys, endpoints and prompt, and returns the result without
+    /// Audio Lab's second try at a translation: sends `text` to the chosen service ("LLM",
+    /// "Custom API" or "Apple") with the saved keys, endpoints and prompt, and returns the result without
     /// pasting it. Masking applies as it does for a dictation.
     pub async fn lab_translate(
         &self,
@@ -1143,12 +1253,13 @@ impl AppController {
         let data_dir = get_data_dir();
         log_stage_event(&data_dir, "LAB_TRANSLATE_START", &format!("Audio Lab: translating to {} with {}: \"{}\"", settings.target_lang, service, input));
         let started = Instant::now();
-        let result = route.translate(&settings, &input).await;
+        // Audio Lab has no detected language; Apple's provider detects it from the text.
+        let result = route.translate(&settings, &input, "auto").await;
         let ms = started.elapsed().as_millis() as u64;
         match result {
             Ok(translated) => {
-                log_stage_event(&data_dir, "LAB_TRANSLATE_DONE", &format!("Translated in {} ms: \"{}\"", ms, translated));
-                Ok(LabTranslation { text: translated.trim().to_string(), ms, service })
+                log_stage_event(&data_dir, "LAB_TRANSLATE_DONE", &format!("Translated in {} ms via {}: \"{}\"", ms, translated.via, translated.text));
+                Ok(LabTranslation { text: translated.text.trim().to_string(), ms, service: translated.via })
             }
             Err(e) => {
                 log_stage_event(&data_dir, "LAB_TRANSLATE_FAILED", &format!("{} after {} ms: {}", service, ms, e));
@@ -1439,7 +1550,7 @@ impl AppController {
                 &format!("Retrying {} → {} with {}: \"{}\"", from_name, to_name, route.describe(&settings), pending.text),
             );
             let started = Instant::now();
-            let result = route.translate(&settings, &pending.text).await;
+            let result = route.translate(&settings, &pending.text, &pending.from_lang).await;
             let ms = started.elapsed().as_millis() as u64;
             if session_id_arc.load(Ordering::SeqCst) != session {
                 log_stage_event(&data_dir, "TRANSLATE_RETRY_CANCELLED", "A new recording started; retry result dropped");
@@ -1450,11 +1561,11 @@ impl AppController {
                 Ok(translated) => {
                     let mask_config = mask_config_from(&settings);
                     let final_text = if mask_config.enabled {
-                        crate::masker::apply_masking(&translated, &mask_config)
+                        crate::masker::apply_masking(&translated.text, &mask_config)
                     } else {
-                        translated
+                        translated.text
                     };
-                    log_stage_event(&data_dir, "TRANSLATE_RETRY_DONE", &format!("Translated in {} ms: \"{}\"", ms, final_text));
+                    log_stage_event(&data_dir, "TRANSLATE_RETRY_DONE", &format!("Translated in {} ms via {}: \"{}\"", ms, translated.via, final_text));
                     *phase_arc.lock().unwrap() = AssistantPhase::Done;
                     if settings.auto_paste {
                         let _ = copy_and_paste(&final_text);
@@ -1553,6 +1664,24 @@ impl AppController {
             let settings = self.get_settings();
             let mode = *self.recording_mode.lock().unwrap();
             let missing = missing_translation_settings(&settings);
+            if !mode.transcribe_only(&settings) {
+                if let Some(problem) = apple_setup_problem(&settings) {
+                    log_stage_event(
+                        &get_data_dir(),
+                        "REC_BLOCKED",
+                        &format!("Recording requested by {} ({:?} mode) not started: {}", trigger, mode, problem),
+                    );
+                    let subtitle = if mode == RecordingMode::Translate {
+                        format!("{problem}. Nothing was recorded; the launch hotkey still dictates without translating.")
+                    } else {
+                        format!("{problem}. Nothing was recorded. To dictate without translating, set When to translate to Off.")
+                    };
+                    show_main_window(&self.app_handle, &settings);
+                    let session = self.session_id.load(Ordering::SeqCst);
+                    show_long_error(&self.app_handle, &self.session_id, session, "Apple Translation Not Ready", &subtitle);
+                    return Ok(());
+                }
+            }
             if !mode.transcribe_only(&settings) && !missing.is_empty() {
                 let what = list_missing(&missing);
                 log_stage_event(
@@ -1639,6 +1768,20 @@ impl AppController {
                 };
                 log_stage_event(&get_data_dir(), "START_CHIME", &detail);
             });
+        }
+
+        // 5. Apple Translation: start its helper and load the language model while the user talks;
+        // the first translation after launch otherwise waits 2-3 s for it.
+        if stream.is_ok()
+            && !mode.transcribe_only(&settings)
+            && crate::apple_translate::is_apple(&settings.translation_provider)
+            && crate::apple_translate::is_available()
+        {
+            if let Some(target) = crate::apple_translate::to_bcp47(&settings.target_lang) {
+                let source = crate::apple_translate::to_bcp47(&settings.source_lang);
+                let model = crate::apple_translate::model_name(&settings.apple_translation_model);
+                tauri::async_runtime::spawn(crate::apple_translate::warm_up(source, target, model));
+            }
         }
 
         if let Ok(info) = &stream {
@@ -2264,6 +2407,7 @@ impl AppController {
                     translation_skip_reason: "Empty transcription / Blank audio".to_string(),
                     translation_ms: 0,
                     translation_error: None,
+                    translation_provider: None,
                     final_text: String::new(),
                     spoken_text: None,
                     clipboard_paste_ms: 0,
@@ -2424,12 +2568,10 @@ impl AppController {
                 || provider_norm.contains("no translation")
                 || provider_norm == "none"
                 || target_norm == "none";
-            let is_custom = provider_norm.contains("custom");
-            let is_llm = !is_no_trans && !is_custom;
 
             let route = TranslationRoute::from_settings(&settings);
 
-            let can_translate = !is_no_trans && (is_custom || is_llm) && missing_translation_settings(&settings).is_empty();
+            let can_translate = !is_no_trans && route.is_ready(&settings);
 
             // The translate hotkey translates whatever was spoken; only automatic translation is
             // limited to the spoken language set in settings.
@@ -2464,6 +2606,8 @@ impl AppController {
             let mut translation_error_detail: Option<String> = None;
             // Only service translations can be retried; local Whisper translation needs the audio.
             let mut retryable = false;
+            // The service that translated (the fallback's when Apple Translation failed over to it).
+            let mut translated_via: Option<(String, &'static str, Option<String>)> = None;
 
             let trans_start = Instant::now();
             let (final_text, translation_ms) = if skip_translation {
@@ -2497,11 +2641,23 @@ impl AppController {
                     }),
                 );
 
-                let (trans_result, ms) = match route.translate(&settings, &pre_translate_text).await {
+                let (trans_result, ms) = match route.translate(&settings, &pre_translate_text, &detected_effective).await {
                     Ok(t) => {
                         let ms = trans_start.elapsed().as_millis() as u64;
-                        log_stage_event(&data_dir, "TRANSLATE_DONE", &format!("{} translated in {} ms: \"{}\"", provider_label, ms, t));
-                        (t, ms)
+                        log_stage_event(
+                            &data_dir,
+                            "TRANSLATE_DONE",
+                            &format!(
+                                "{} translated in {} ms ({} → {} chars): \"{}\"",
+                                t.via,
+                                ms,
+                                pre_translate_text.chars().count(),
+                                t.text.chars().count(),
+                                t.text
+                            ),
+                        );
+                        translated_via = Some((t.via, t.label, t.pair));
+                        (t.text, ms)
                     }
                     Err(e) => {
                         let ms = trans_start.elapsed().as_millis() as u64;
@@ -2593,7 +2749,17 @@ impl AppController {
             }
 
             perf.lap("translation");
-            perf.translation = (!skip_translation).then(|| route.label().to_string());
+            perf.translation = (!skip_translation).then(|| {
+                translated_via.as_ref().map(|(_, label, _)| *label).unwrap_or(route.label()).to_string()
+            });
+            if can_translate && !skip_translation {
+                perf.translation_pair = translated_via.as_ref().and_then(|(_, _, pair)| pair.clone());
+                perf.translation_ms = Some(translation_ms);
+                perf.translation_chars = Some((
+                    pre_translate_text.chars().count(),
+                    (!translation_failed).then(|| final_text.chars().count()).unwrap_or(0),
+                ));
+            }
             perf.text_chars = final_text.chars().count();
 
             // Step 7: Copy to clipboard and auto-paste if enabled
@@ -2704,7 +2870,14 @@ impl AppController {
                     actions.push("[TRANSLATION] Retry available from the pill or the tray menu".to_string());
                 }
             } else if can_translate {
-                actions.push(format!("[TRANSLATION] Translated in {} ms via {}", translation_ms, route.describe(&settings)));
+                let via = translated_via.as_ref().map(|(via, _, _)| via.clone()).unwrap_or_else(|| route.describe(&settings));
+                actions.push(format!(
+                    "[TRANSLATION] Translated in {} ms via {} ({} → {} chars)",
+                    translation_ms,
+                    via,
+                    pre_translate_text.chars().count(),
+                    final_text.chars().count()
+                ));
             } else {
                 actions.push(format!("[TRANSLATION] Translated locally in {} ms via Whisper", translation_ms));
             }
@@ -2732,6 +2905,11 @@ impl AppController {
                 translation_skip_reason: skip_reason,
                 translation_ms,
                 translation_error: translation_error_detail.clone(),
+                translation_provider: (!skip_translation).then(|| match &translated_via {
+                    Some((via, _, _)) => via.clone(),
+                    None if can_translate => route.describe(&settings),
+                    None => "Whisper (local)".to_string(),
+                }),
                 final_text: final_text.clone(),
                 spoken_text,
                 clipboard_paste_ms: paste_ms,
@@ -2856,7 +3034,7 @@ impl AppController {
 
 #[cfg(test)]
 mod tests {
-    use super::{capitalize, is_digital_silence, list_missing, mic_problem_message, missing_translation_settings, TranslationRoute};
+    use super::{apple_setup_problem, capitalize, is_digital_silence, list_missing, mic_problem_message, missing_translation_settings, TranslationRoute};
     use crate::settings::AppSettings;
 
     #[test]
@@ -2892,8 +3070,105 @@ mod tests {
         // Port 9 (discard) is closed on test machines, so the request fails right away.
         s.llm_endpoint = "http://127.0.0.1:9/v1/chat/completions".into();
         s.llm_model = "test-model".into();
-        let err = TranslationRoute::from_settings(&s).translate(&s, "Привіт").await.unwrap_err();
+        let err = TranslationRoute::from_settings(&s).translate(&s, "Привіт", "ukrainian").await.map(|t| t.text).unwrap_err();
         assert!(!err.is_empty());
+    }
+
+    fn apple_settings() -> AppSettings {
+        let mut s = AppSettings::default();
+        s.translation_provider = "Apple".into();
+        s.source_lang = "Ukrainian".into();
+        s.target_lang = "English".into();
+        s
+    }
+
+    #[test]
+    fn apple_provider_routes_to_apple_translation() {
+        let s = apple_settings();
+        let route = TranslationRoute::from_settings(&s);
+        assert!(route.is_apple && !route.is_custom);
+        assert_eq!(route.label(), "Apple");
+        assert_eq!(route.describe(&s), "Apple Translation (on-device)");
+        // Apple's provider has no endpoint, key or model to fill in.
+        assert!(missing_translation_settings(&s).is_empty());
+        assert!(route.fallback(&s).is_none());
+
+        // The LLM providers are untouched by the new one.
+        let mut llm = s.clone();
+        llm.translation_provider = "LLM".into();
+        assert!(!TranslationRoute::from_settings(&llm).is_apple);
+        llm.translation_provider = "Custom API".into();
+        assert!(TranslationRoute::from_settings(&llm).is_custom);
+    }
+
+    #[test]
+    fn apple_falls_back_only_to_a_service_that_is_set_up() {
+        let mut s = apple_settings();
+        s.apple_fallback_provider = "LLM".into();
+        s.llm_endpoint = "http://localhost:11434/v1/chat/completions".into();
+        s.llm_model = "llama3.2".into();
+        let route = TranslationRoute::from_settings(&s);
+        let fallback = route.fallback(&s).expect("a local LLM needs no key");
+        assert_eq!(fallback.label(), "LLM");
+        assert!(route.is_ready(&s));
+        // With a fallback, nothing about Apple Translation stops a recording.
+        assert_eq!(apple_setup_problem(&s), None);
+
+        s.apple_fallback_provider = "Custom API".into();
+        s.custom_api_key = String::new();
+        assert!(route.fallback(&s).is_none(), "Custom API without a key");
+        s.apple_fallback_provider = "Apple".into();
+        assert!(route.fallback(&s).is_none());
+    }
+
+    #[test]
+    fn apple_setup_problem_explains_why_it_cannot_translate() {
+        let s = apple_settings();
+        if crate::apple_translate::is_available() {
+            // On a Mac with macOS 26 the answer depends on which languages are downloaded.
+            return;
+        }
+        // Tests run without the bundled helper (or on an older macOS), which is reported.
+        let problem = apple_setup_problem(&s).expect("the provider can't run here");
+        assert!(problem.contains("macOS") || problem.contains("helper"), "{problem}");
+        assert!(!TranslationRoute::from_settings(&s).is_ready(&s));
+
+        let mut llm = s.clone();
+        llm.translation_provider = "LLM".into();
+        assert_eq!(apple_setup_problem(&llm), None);
+    }
+
+    #[tokio::test]
+    async fn a_failed_apple_translation_reports_the_reason_and_tries_the_fallback() {
+        // A target Apple has no code for fails before the helper is asked, on any Mac.
+        let mut s = apple_settings();
+        s.target_lang = "Klingon language".into();
+        let route = TranslationRoute::from_settings(&s);
+        let err = route.translate(&s, "Привіт, як справи?", "ukrainian").await.map(|t| t.text).unwrap_err();
+        assert_eq!(err, "Apple Translation can't translate into Klingon language");
+
+        // Port 9 is closed, so the fallback fails too; both reasons are kept.
+        s.apple_fallback_provider = "LLM".into();
+        s.llm_endpoint = "http://127.0.0.1:9/v1/chat/completions".into();
+        s.llm_model = "test-model".into();
+        let err = route.translate(&s, "Привіт, як справи?", "ukrainian").await.map(|t| t.text).unwrap_err();
+        assert!(err.starts_with("Apple Translation can't translate into Klingon language; LLM failed too"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn apple_translates_with_the_detected_language_when_the_source_is_auto() {
+        if !crate::apple_translate::is_available()
+            || crate::apple_translate::status("uk", "en").await.ok().as_deref() != Some("installed")
+        {
+            return;
+        }
+        let mut s = apple_settings();
+        s.source_lang = "Auto".into();
+        let done = TranslationRoute::from_settings(&s).translate(&s, "Привіт, як справи?", "ukrainian").await.unwrap();
+        assert!(done.text.to_lowercase().contains("hello"), "{}", done.text);
+        assert_eq!(done.label, "Apple");
+        assert_eq!(done.pair.as_deref(), Some("uk → en"));
+        assert_eq!(done.via, "Apple Translation (on-device) uk → en");
     }
 
     #[test]

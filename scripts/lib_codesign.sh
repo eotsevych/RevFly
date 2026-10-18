@@ -53,13 +53,26 @@ revfly_sign_app() {
     done
   fi
 
+  revfly_sign_bundle --deep "$app"
+
+  # The Apple Translation helper: --deep above gave it the app's identifier and no hardened
+  # runtime. Sign it on its own, then seal the bundle again around it.
+  local helper="$app/Contents/MacOS/revfly-translate"
+  if [ -f "$helper" ]; then
+    revfly_codesign --options runtime --identifier "$REVFLY_BUNDLE_ID.translate" "$helper"
+    revfly_sign_bundle "$app"
+  fi
+}
+
+# Signs the app bundle itself; extra arguments (e.g. --deep) go before the path.
+revfly_sign_bundle() {
   if [ "$REVFLY_IDENTITY" = "-" ]; then
     # Ad-hoc signatures change every build; an identifier-only requirement is the best that is possible.
-    revfly_codesign --deep --identifier "$REVFLY_BUNDLE_ID" \
-      -r="designated => identifier \"$REVFLY_BUNDLE_ID\"" "$app"
+    revfly_codesign "${@:1:$#-1}" --identifier "$REVFLY_BUNDLE_ID" \
+      -r="designated => identifier \"$REVFLY_BUNDLE_ID\"" "${@: -1}"
   else
     # Default designated requirement pins the certificate, so permissions survive updates.
-    revfly_codesign --deep --identifier "$REVFLY_BUNDLE_ID" "$app"
+    revfly_codesign "${@:1:$#-1}" --identifier "$REVFLY_BUNDLE_ID" "${@: -1}"
   fi
 }
 

@@ -13,6 +13,7 @@ pub mod post_processor;
 pub mod masker;
 pub mod transcribe;
 pub mod translate;
+pub mod apple_translate;
 pub mod tray;
 pub mod updater;
 pub mod vad;
@@ -431,6 +432,59 @@ async fn lab_translate(
     state.controller.lab_translate(text, provider, target_lang).await
 }
 
+/// Whether the Apple translation provider can be used on this Mac, and why not.
+#[derive(serde::Serialize)]
+struct AppleTranslationInfo {
+    available: bool,
+    reason: Option<String>,
+    /// e.g. "26.1"; None off macOS.
+    os_version: Option<String>,
+    min_os: u32,
+}
+
+#[tauri::command]
+fn apple_translation_info() -> AppleTranslationInfo {
+    let reason = apple_translate::unavailable_reason();
+    AppleTranslationInfo {
+        available: reason.is_none(),
+        reason,
+        os_version: apple_translate::macos_version().map(|(major, minor)| format!("{major}.{minor}")),
+        min_os: apple_translate::MIN_MACOS,
+    }
+}
+
+/// Apple's language packs for translating into `target_lang` (a RevFly language name), and the
+/// target's code.
+#[derive(serde::Serialize)]
+struct AppleLanguagePacks {
+    target: String,
+    languages: Vec<apple_translate::LanguagePack>,
+}
+
+#[tauri::command]
+async fn apple_translation_languages(target_lang: String) -> Result<AppleLanguagePacks, String> {
+    let target = apple_translate::to_bcp47(&target_lang)
+        .ok_or_else(|| format!("Apple Translation can't translate into {}", target_lang))?;
+    let languages = apple_translate::languages(&target)
+        .await
+        .map_err(|e| e.describe(&format!("translating into {}", target_lang)))?;
+    Ok(AppleLanguagePacks { target, languages })
+}
+
+/// Shows Apple's download prompt for `source` → `target` (codes) and waits for it to finish.
+#[tauri::command]
+async fn apple_translation_download(state: State<'_, AppState>, source: String, target: String) -> Result<(), String> {
+    let pair = apple_translate::pair_name(Some(&source), &target);
+    let model = apple_translate::model_name(&state.controller.get_settings().apple_translation_model);
+    log::info!("Apple Translation: downloading {} ({} model)", pair, model);
+    apple_translate::download(&source, &target, model).await.map_err(|e| e.describe(&pair))
+}
+
+#[tauri::command]
+fn apple_translation_open_settings() -> Result<(), String> {
+    apple_translate::open_system_settings()
+}
+
 #[tauri::command]
 fn lab_save_result(
     state: State<'_, AppState>,
@@ -623,6 +677,10 @@ pub fn run() {
             list_lab_audio_files,
             run_lab_experiment,
             lab_translate,
+            apple_translation_info,
+            apple_translation_languages,
+            apple_translation_download,
+            apple_translation_open_settings,
             lab_save_result,
             save_lab_custom_audio,
             get_hardware_profile,

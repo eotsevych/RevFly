@@ -137,6 +137,11 @@ The AppImage updates itself (tray icon or **Settings** → **General** → **Upd
 On first launch, your operating system will ask you to approve these permissions.
 On macOS, permissions carry over to future updates, so you grant them only once.
 
+### Apple translation (macOS 26 and later)
+**Settings** → **Translations** → **Apple Native** translates on your Mac with Apple's built-in engine: no API key or internet needed. RevFly runs on macOS 11 and later, but this option needs macOS 26; on older versions it is shown but disabled.
+
+Each language pair is downloaded once. Under **Language packs**, click **Download** next to a language; macOS asks for confirmation in a small window and downloads it. You can also manage them in **System Settings** › **General** › **Language & Region** › **Translation Languages**. RevFly updates the list when you return to its window, or click **Refresh**.
+
 ### Hotkeys
 - **macOS**: Single modifier keys (`Right Option`, `Right Control`) or key combos such as `⌘+Shift+Space`.
 - **Windows & Linux**: Key combos only. The default is `Ctrl+Shift+Space`.

@@ -49,7 +49,12 @@ export interface BackendSettings {
   collapse_redundancy?: boolean;
   annotate_ambiguity?: boolean;
   normalize_structured_values?: boolean;
+  /** "LLM", "Custom API" or "Apple" (Apple's on-device Translation, macOS 26+). */
   translation_provider?: string;
+  /** With the Apple provider: "LLM" or "Custom API" translates when Apple Translation fails; "" = none. */
+  apple_fallback_provider?: string;
+  /** Apple Translation model to use when both are downloaded: "fast" or "quality". */
+  apple_translation_model?: "fast" | "quality";
   device_backend?: string;
   chunk_pause_ms?: number;
   chunk_safety_sec?: number;
@@ -524,6 +529,8 @@ export interface TranscriptionDiagnosticLog {
   translation_ms: number;
   /** Why translation failed, when it did; final_text is then the spoken text. */
   translation_error?: string | null;
+  /** The service that translated, e.g. "Apple Translation (on-device) uk → en"; null when skipped. */
+  translation_provider?: string | null;
   final_text: string;
   /** The text in the spoken language, when final_text is its translation. */
   spoken_text?: string | null;
@@ -703,7 +710,56 @@ export interface LabTranslation {
   service: string;
 }
 
-/** Translates text with the chosen service ("LLM" or "Custom API") without pasting it. Throws
+/** Whether Apple's on-device translation can be used on this Mac (macOS 26+), and why not. */
+export interface AppleTranslationInfo {
+  available: boolean;
+  reason: string | null;
+  os_version: string | null;
+  min_os: number;
+}
+
+export async function fetchAppleTranslationInfo(): Promise<AppleTranslationInfo> {
+  if (!isTauri()) {
+    return {
+      available: false,
+      reason: "Works only in the desktop app.",
+      os_version: null,
+      min_os: 26,
+    };
+  }
+  return await invoke<AppleTranslationInfo>("apple_translation_info");
+}
+
+/** A language Apple translates from, and whether it's downloaded for the current target. */
+export interface AppleLanguagePack {
+  code: string;
+  name: string;
+  status: "installed" | "supported" | "unsupported";
+}
+
+/** Apple's language packs for translating into `targetLang` (a RevFly language name). Throws
+ * when Apple Translation can't be asked. */
+export async function fetchAppleLanguagePacks(
+  targetLang: string,
+): Promise<{ target: string; languages: AppleLanguagePack[] }> {
+  if (!isTauri()) throw new Error("Works only in the desktop app.");
+  return await invoke("apple_translation_languages", { targetLang });
+}
+
+/** Shows Apple's download prompt for `source` → `target` (codes such as "uk", "en") and resolves
+ * when it's downloaded. Throws when it's cancelled or fails. */
+export async function downloadAppleLanguagePack(source: string, target: string): Promise<void> {
+  if (!isTauri()) throw new Error("Works only in the desktop app.");
+  await invoke("apple_translation_download", { source, target });
+}
+
+/** Opens System Settings at Language & Region, where Translation Languages are managed. */
+export async function openAppleTranslationSettings(): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("apple_translation_open_settings");
+}
+
+/** Translates text with the chosen service ("LLM", "Custom API" or "Apple") without pasting it. Throws
  * the service's error message when it fails. */
 export async function triggerLabTranslate(
   text: string,

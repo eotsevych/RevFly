@@ -12,6 +12,7 @@ import {
   triggerSaveLabCustomAudio,
   triggerLabTranslate,
   triggerLabSaveResult,
+  fetchAppleTranslationInfo,
   type LabTranslation,
   isTauri,
   type LabAudioItem,
@@ -24,6 +25,8 @@ const TRANSLATION_SERVICES = [
   { value: "LLM", label: "LLM" },
   { value: "Custom API", label: "Custom API" },
 ];
+// Offered only where Apple's on-device translation works (macOS 26+).
+const APPLE_SERVICE = { value: "Apple", label: "Apple Native" };
 
 const TARGET_LANGUAGES = [
   "English",
@@ -81,9 +84,19 @@ export default function AudioLabTab({
   const [result, setResult] = useState<LabExperimentResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rawUploadName, setRawUploadName] = useState<string | null>(null);
-  const [trService, setTrService] = useState(
-    (settings.translation_provider || "").toLowerCase().includes("custom") ? "Custom API" : "LLM",
-  );
+  const [trService, setTrService] = useState(() => {
+    const provider = (settings.translation_provider || "").toLowerCase();
+    return provider === "apple" ? "Apple" : provider.includes("custom") ? "Custom API" : "LLM";
+  });
+  const [appleAvailable, setAppleAvailable] = useState(false);
+  useEffect(() => {
+    fetchAppleTranslationInfo()
+      .then((info) => setAppleAvailable(info.available))
+      .catch(() => setAppleAvailable(false));
+  }, []);
+  const trServices = appleAvailable
+    ? [...TRANSLATION_SERVICES, APPLE_SERVICE]
+    : TRANSLATION_SERVICES;
   const [trTarget, setTrTarget] = useState(settings.target_lang || "English");
   const [trFrom, setTrFrom] = useState<"spoken" | "result">("spoken");
   const [trPhase, setTrPhase] = useState<"idle" | "running" | "done" | "error">("idle");
@@ -317,7 +330,7 @@ export default function AudioLabTab({
         </Row>
       )}
       <Row label="Service" hint="Uses the keys and prompt saved in Translations" t={t}>
-        <Segmented options={TRANSLATION_SERVICES} value={trService} onChange={setTrService} t={t} />
+        <Segmented options={trServices} value={trService} onChange={setTrService} t={t} />
       </Row>
       <Row label="Translate to" t={t} last>
         <FieldSelect value={trTarget} onChange={setTrTarget} options={TARGET_LANGUAGES} t={t} />

@@ -89,7 +89,8 @@ jobs:
     name: Build macOS (Universal, Apple Silicon & Intel)
     needs: [create-release, test]
     if: ${{ !failure() && !cancelled() }}
-    runs-on: macos-14
+    # The Apple Translation helper needs Xcode with the macOS 26 SDK.
+    runs-on: macos-26
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -133,6 +134,9 @@ jobs:
           echo "REVFLY_SIGN_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
 
       - name: Build macOS installers
+        env:
+          # Fail instead of shipping the Apple translation provider without its helper.
+          REVFLY_REQUIRE_APPLE_TRANSLATE: "1"
         run: bash scripts/build_installers.sh
 
       - name: Upload macOS installers

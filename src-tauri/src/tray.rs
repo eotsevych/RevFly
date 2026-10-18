@@ -205,10 +205,17 @@ const TRANSLATION_MODES: [(&str, &str); 3] = [
     ("hotkey", "With the Translate Hotkey"),
     ("auto", "Automatic (Launch Hotkey)"),
 ];
-const TRANSLATION_PROVIDERS: [(&str, &str); 2] = [("LLM", "LLM (both local & cloud)"), ("Custom API", "Custom API")];
+/// Apple Native is listed only where it works (macOS 26+).
+const TRANSLATION_PROVIDERS: [(&str, &str); 3] = [
+    ("LLM", "LLM (both local & cloud)"),
+    ("Custom API", "Custom API"),
+    (crate::apple_translate::PROVIDER, "Apple Native"),
+];
 
 fn provider_key(settings: &AppSettings) -> &'static str {
-    if settings.translation_provider.to_lowercase().contains("custom") {
+    if crate::apple_translate::is_apple(&settings.translation_provider) {
+        crate::apple_translate::PROVIDER
+    } else if settings.translation_provider.to_lowercase().contains("custom") {
         "Custom API"
     } else {
         "LLM"
@@ -399,6 +406,9 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
         translation_items.push((format!("mode:{}", mode), item));
     }
     for (provider, label) in TRANSLATION_PROVIDERS {
+        if crate::apple_translate::is_apple(provider) && !crate::apple_translate::is_available() {
+            continue;
+        }
         let checked = provider_key(settings) == provider;
         let item = CheckMenuItem::with_id(app, format!("trans_provider:{}", provider), label, !settings.translation_off(), checked, None::<&str>)?;
         translation_items.push((format!("provider:{}", provider), item));
