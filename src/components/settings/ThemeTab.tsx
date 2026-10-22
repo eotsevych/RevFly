@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { Tokens, AccentColor } from "@/lib/tokens";
 import { ACCENT_PALETTE } from "@/lib/tokens";
 import Segmented from "@/components/ui/Segmented";
@@ -6,6 +7,7 @@ import { useSettingsContext } from "./useSettingsContext";
 import { useResolvedTheme, type ThemeMode } from "@/lib/theme";
 import { PillPreview } from "@/components/pill/PillPreview";
 import { PILL_STYLES, pillStyleOf } from "@/components/pill/view";
+import { DEFAULT_BAR_SCALE, setBarVoiceScale } from "@/components/pill/voiceLevel";
 
 interface Props {
   t: Tokens;
@@ -19,6 +21,9 @@ export default function ThemeTab({ t, accent, onAccentChange }: Props) {
   const currentMode = (settings.theme || "system") as ThemeMode;
   const effectiveTheme = useResolvedTheme(currentMode);
   const pillStyle = pillStyleOf(settings.pill_style);
+  const barScale = settings.bar_scale ?? DEFAULT_BAR_SCALE;
+  // The previews above follow the setting right away.
+  useEffect(() => setBarVoiceScale(barScale), [barScale]);
 
   return (
     <div>
@@ -221,6 +226,48 @@ export default function ThemeTab({ t, accent, onAccentChange }: Props) {
           Long errors, microphone warnings and Retry always use the Classic pill. A new style shows
           from your next recording.
         </p>
+      </Section>
+
+      <Section title="Voice Bar Height" t={t}>
+        <Row
+          label="Bar Movement"
+          hint="How high the bars move when you speak. Use higher values for desk microphones."
+          t={t}
+          last
+        >
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {[
+              { label: "1.0×", value: 1.0, title: "Original (quiet)" },
+              { label: "2.0×", value: 2.0, title: "Medium" },
+              { label: "3.2×", value: 3.2, title: "Default (25–35 cm desk distance)" },
+              { label: "4.5×", value: 4.5, title: "High" },
+              { label: "6.0×", value: 6.0, title: "Maximum" },
+            ].map((opt) => {
+              const active = Math.abs(barScale - opt.value) < 0.05;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  title={opt.title}
+                  onClick={() => void updateSettings({ bar_scale: opt.value })}
+                  style={{
+                    padding: "4px 9px",
+                    borderRadius: 6,
+                    border: `1px solid ${active ? t.accent : t.border}`,
+                    background: active ? `${t.accent}20` : t.surface,
+                    color: active ? t.accent : t.textMuted,
+                    fontSize: 11,
+                    fontWeight: active ? 600 : 400,
+                    cursor: "pointer",
+                    transition: "all 0.15s",
+                  }}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </Row>
       </Section>
     </div>
   );

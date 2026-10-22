@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { subscribeToSettingsTab, takeSettingsTab } from "@/lib/tauri";
 import { tok, type AccentColor, type Theme } from "@/lib/tokens";
 import { useResolvedTheme } from "@/lib/theme";
 import { SettingsProvider } from "@/components/settings/SettingsContext";
@@ -154,6 +155,22 @@ function SettingsInner() {
   const [labSelectedAudio, setLabSelectedAudio] = useState<string | null>(null);
   const [labTexts, setLabTexts] = useState<LabSourceTexts | null>(null);
   const [savedSuccess, setSavedSuccess] = useState(false);
+
+  // What's New can ask for a tab, both when it opens this window and when it's already open.
+  useEffect(() => {
+    const show = (tab: string | null) => {
+      const found = TABS.find((tb) => tb.id === tab);
+      if (found) setActiveTab(found.id);
+    };
+    takeSettingsTab().then(show);
+    const unlisten = subscribeToSettingsTab((tab) => {
+      show(tab);
+      void takeSettingsTab();
+    });
+    return () => {
+      unlisten.then((fn) => fn?.());
+    };
+  }, []);
 
   const handleOpenInAudioLab = (audioFilename: string, texts?: LabSourceTexts) => {
     setLabSelectedAudio(audioFilename);

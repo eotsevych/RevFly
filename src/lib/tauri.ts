@@ -31,6 +31,7 @@ export interface BackendSettings {
   theme?: string;
   /** How the floating pill looks (see PILL_STYLES in components/pill/styles.tsx). */
   pill_style?: string;
+  bar_scale?: number;
   /** Whether the first-run welcome guide was finished or closed. */
   onboarding_done?: boolean;
   model_idle_unload_sec?: number;
@@ -38,8 +39,7 @@ export interface BackendSettings {
   no_speech_alert_sec?: number;
   /** When the speech model loads for a recording: while talking (faster) or after (saves RAM). */
   model_load_mode?: "on_start" | "on_stop";
-  window_x?: number | null;
-  window_y?: number | null;
+  pill_center?: [number, number] | null;
   text_normalization?: boolean;
   remove_filler_words?: boolean;
   convert_numbers?: boolean;
@@ -80,6 +80,8 @@ export interface BackendSettings {
   custom_api_key?: string;
   custom_api_model?: string;
   prompt_template?: string;
+  last_version?: string | null;
+  apple_translation_announced?: boolean;
 }
 
 export interface HardwareProfile {
@@ -348,23 +350,71 @@ export async function finishOnboarding(): Promise<void> {
   }
 }
 
+/** The tab Settings was asked to open on (by What's New), if any. Asking clears it. */
+export async function takeSettingsTab(): Promise<string | null> {
+  if (!isTauri()) return null;
+  try {
+    return (await invoke<string | null>("take_settings_tab")) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Sent to an open Settings window that should switch to a tab. */
+export async function subscribeToSettingsTab(
+  callback: (tab: string) => void,
+): Promise<UnlistenFn | null> {
+  if (!isTauri()) return null;
+  try {
+    return await listen<string>("open-settings-tab", (event) => callback(event.payload));
+  } catch (err) {
+    console.error("Failed to listen to settings tab requests:", err);
+    return null;
+  }
+}
+
+export async function openWhatsNewWindow(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    await invoke("open_whats_new_window");
+  } catch (err) {
+    console.error("Failed to open what's new window:", err);
+  }
+}
+
+export async function dismissWhatsNew(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    await invoke("dismiss_whats_new");
+  } catch (err) {
+    console.error("Failed to dismiss what's new:", err);
+  }
+}
+
+export async function enableAppleTranslationAndDismiss(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    await invoke("enable_apple_translation_and_dismiss");
+  } catch (err) {
+    console.error("Failed to enable Apple translation:", err);
+  }
+}
+
+export async function openSettingsFromWhatsNew(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    await invoke("open_settings_from_whats_new");
+  } catch (err) {
+    console.error("Failed to open settings from what's new:", err);
+  }
+}
+
 export async function closePreferencesWindow(): Promise<void> {
   if (!isTauri()) return;
   try {
     await invoke("close_preferences_window");
   } catch (err) {
     console.error("Failed to close preferences window:", err);
-  }
-}
-
-export async function saveWindowPosition(x: number, y: number): Promise<boolean> {
-  if (!isTauri()) return true;
-  try {
-    await invoke("save_window_position", { x: Math.round(x), y: Math.round(y) });
-    return true;
-  } catch (err) {
-    console.error("Failed to save window position:", err);
-    return false;
   }
 }
 
@@ -609,6 +659,22 @@ export async function subscribeToSettingsChanges(
     return await listen<BackendSettings>("settings-changed", (event) => callback(event.payload));
   } catch (err) {
     console.error("Failed to listen to settings changes:", err);
+    return null;
+  }
+}
+
+/** Audio devices plugged or unplugged at runtime. */
+export async function subscribeToAudioDeviceChanges(
+  callback: (payload: { input_devices: string[]; output_devices: string[] }) => void,
+): Promise<UnlistenFn | null> {
+  if (!isTauri()) return null;
+  try {
+    return await listen<{ input_devices: string[]; output_devices: string[] }>(
+      "audio-devices-changed",
+      (event) => callback(event.payload),
+    );
+  } catch (err) {
+    console.error("Failed to listen to audio device changes:", err);
     return null;
   }
 }

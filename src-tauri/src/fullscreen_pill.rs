@@ -73,8 +73,12 @@ mod mac {
     }
 
     unsafe fn frame_of(win: *mut c_void) -> NSRect {
+        rect_of(win, b"frame\0")
+    }
+
+    unsafe fn rect_of(recv: *mut c_void, sel_name: &[u8]) -> NSRect {
         let f: extern "C" fn(*mut c_void, *const c_void) -> NSRect = std::mem::transmute(objc_msgSend as *const ());
-        f(win, sel_registerName(b"frame\0".as_ptr()))
+        f(recv, sel_registerName(sel_name.as_ptr()))
     }
 
     unsafe fn set_frame(win: *mut c_void, frame: NSRect) {
@@ -155,15 +159,22 @@ mod mac {
     }
 
     /// Gives the panel the pill window's new size after a resize (e.g. for long errors), keeping
-    /// the panel's top-left corner where it is since the user may have dragged it. The size is
-    /// passed in rather than read from the window: the window applies a resize asynchronously, so
-    /// its frame still has the previous size here.
+    /// the panel's center where it is, since the user may have dragged it, and the whole panel on
+    /// its screen's visible frame. The size is passed in rather than read from the window: the
+    /// window applies a resize asynchronously, so its frame still has the previous size here.
     pub fn sync_frame(width: f64, height: f64) {
         with_host(|host| unsafe {
             if host.adopted.is_some() {
                 let panel = frame_of(host.panel);
-                let top = panel.y + panel.h;
-                set_frame(host.panel, NSRect { x: panel.x, y: top - height, w: width, h: height });
+                let mut x = panel.x + (panel.w - width) / 2.0;
+                let mut y = panel.y + (panel.h - height) / 2.0;
+                let screen = get(host.panel, b"screen\0");
+                if !screen.is_null() {
+                    let visible = rect_of(screen, b"visibleFrame\0");
+                    x = x.min(visible.x + visible.w - width).max(visible.x);
+                    y = y.min(visible.y + visible.h - height).max(visible.y);
+                }
+                set_frame(host.panel, NSRect { x, y, w: width, h: height });
             }
         });
     }

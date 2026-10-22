@@ -38,11 +38,28 @@ impl AssistantPhase {
 fn hide_main_window(app_handle: &AppHandle) {
     let app = app_handle.clone();
     let _ = app_handle.run_on_main_thread(move || {
+        // Gives the window the panel's frame back on macOS, so a drag there is read below.
         crate::fullscreen_pill::release();
         if let Some(win) = app.get_webview_window("main") {
+            if crate::pill_position::take_dragged() {
+                remember_pill_spot(&app, &win);
+            }
             let _ = win.hide();
         }
     });
+}
+
+/// Saves where the user dragged the pill, so it shows there from now on, on every monitor.
+fn remember_pill_spot(app: &AppHandle, win: &tauri::WebviewWindow) {
+    let (Some(center), Some(state)) = (crate::pill_position::current_center(win), app.try_state::<crate::AppState>())
+    else {
+        return;
+    };
+    let mut settings = state.controller.get_settings();
+    settings.pill_center = Some(center);
+    if let Err(e) = state.controller.save_settings(settings) {
+        log::warn!("Could not save the pill's position: {}", e);
+    }
 }
 
 fn get_active_monitor(win: &tauri::WebviewWindow) -> Option<tauri::Monitor> {
@@ -177,56 +194,14 @@ fn get_active_monitor(win: &tauri::WebviewWindow) -> Option<tauri::Monitor> {
 
 fn show_main_window(app_handle: &AppHandle, settings: &AppSettings) {
     let app = app_handle.clone();
-    let (win_x, win_y) = (settings.window_x, settings.window_y);
+    let center = settings.pill_center;
     let _ = app_handle.run_on_main_thread(move || {
         if let Some(win) = app.get_webview_window("main") {
             // A previous long error may have enlarged the pill window.
             let _ = win.set_size(tauri::Size::Logical(tauri::LogicalSize { width: PILL_WINDOW.0, height: PILL_WINDOW.1 }));
-            let active_monitor = get_active_monitor(&win);
-            let m_pos = active_monitor.as_ref().map(|m| m.position().clone()).unwrap_or(tauri::PhysicalPosition { x: 0, y: 0 });
-            let m_size = active_monitor.as_ref().map(|m| m.size().clone()).unwrap_or(tauri::PhysicalSize { width: 1920, height: 1080 });
-            let scale = active_monitor.as_ref().map(|m| m.scale_factor()).unwrap_or(1.0);
-
-            let pill_w = (340.0 * scale).round() as i32;
-            let pill_h = (100.0 * scale).round() as i32;
-
-            // Check if saved position is inside the active monitor bounds
-            let is_on_active_monitor = if let (Some(x), Some(y)) = (win_x, win_y) {
-                x >= m_pos.x && (x + 100) <= (m_pos.x + m_size.width as i32)
-                    && y >= m_pos.y && (y + 50) <= (m_pos.y + m_size.height as i32)
-            } else {
-                false
-            };
-
-            if is_on_active_monitor {
-                if let (Some(x), Some(y)) = (win_x, win_y) {
-                    let _ = win.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
-                }
-            } else {
-                let target_x = m_pos.x + (m_size.width as i32 - pill_w) / 2;
-                let target_y = if let Some(y) = win_y {
-                    if let Ok(monitors) = win.available_monitors() {
-                        let other_mon = monitors.iter().find(|m| {
-                            let p = m.position();
-                            let s = m.size();
-                            y >= p.y && y <= (p.y + s.height as i32)
-                        });
-                        if let Some(om) = other_mon {
-                            let rel_y = (y - om.position().y) as f64 / om.size().height as f64;
-                            m_pos.y + (rel_y * m_size.height as f64) as i32
-                        } else {
-                            m_pos.y + (m_size.height as i32 - pill_h) / 2
-                        }
-                    } else {
-                        m_pos.y + (m_size.height as i32 - pill_h) / 2
-                    }
-                } else {
-                    m_pos.y + (m_size.height as i32 - pill_h) / 2
-                };
-
-                let clamped_x = target_x.max(m_pos.x).min(m_pos.x + m_size.width as i32 - pill_w);
-                let clamped_y = target_y.max(m_pos.y).min(m_pos.y + m_size.height as i32 - pill_h);
-                let _ = win.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: clamped_x, y: clamped_y }));
+            // At its spot on the monitor with the cursor (see pill_position).
+            if let Some(monitor) = get_active_monitor(&win) {
+                crate::pill_position::move_onto(&win, &monitor, PILL_WINDOW, center);
             }
 
             let _ = win.show();
@@ -742,6 +717,8 @@ fn set_pill_window_size(app_handle: &AppHandle, (width, height): (f64, f64)) {
     let app = app_handle.clone();
     let _ = app_handle.run_on_main_thread(move || {
         if let Some(win) = app.get_webview_window("main") {
+            // Grows around its center and stays on screen, instead of off the right or bottom edge.
+            crate::pill_position::reposition_for_size(&win, (width, height));
             let _ = win.set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }));
             crate::fullscreen_pill::sync_frame(width, height);
         }
@@ -1093,13 +1070,22 @@ impl AppController {
 
     /// Saves settings the Settings window sent; it already shows them.
     pub fn save_settings_from_window(&self, new_settings: AppSettings) -> Result<(), String> {
-        let old_model = { self.settings.lock().unwrap().model_name.clone() };
+        let (old_model, devices_changed) = {
+            let s = self.settings.lock().unwrap();
+            (
+                s.model_name.clone(),
+                s.input_device != new_settings.input_device || s.output_device != new_settings.output_device,
+            )
+        };
         new_settings.save()?;
         {
             let mut s = self.settings.lock().unwrap();
             *s = new_settings.clone();
         }
         crate::tray::sync_translation_menu(&new_settings);
+        if devices_changed {
+            crate::tray::update_tray_audio_devices(&self.app_handle, &new_settings);
+        }
 
         // Single Model Policy: If active model changed, drop the other from RAM immediately
         if old_model != new_settings.model_name {

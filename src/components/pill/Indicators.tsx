@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { AudioLevels } from "../../lib/tauri";
 import type { Tokens } from "../../lib/tokens";
 import { OrbitDots, ScanWave } from "./Motion";
+import { VOICE_CLOSE, VOICE_OPEN, getBarVoiceScale } from "./voiceLevel";
 
 // Nine capsule towers. The centre tower follows low pitch (voice), the edges follow high pitch
 // ("s", "t", breath); the backend sends seven bands already mirrored in that order, and the bars
@@ -14,10 +15,8 @@ const BAR_MAX_H = 29; // stays clear of the pill edge
 const BAR_GROWTH = 20; // extra height at full energy and volume
 const BAR_OVERSHOOT_MAX = 2; // spring overshoot when a loud word starts
 const WAVE_BOX_H = BAR_MAX_H + BAR_OVERSHOOT_MAX + 1;
-// Bars rest flat at BAR_MIN_H until a voice is detected. The gate opens above VOICE_OPEN and
-// closes once volume stays below VOICE_CLOSE for VOICE_HOLD_MS, so pauses between words don't flicker.
-const VOICE_OPEN = 0.03;
-const VOICE_CLOSE = 0.02;
+// Bars rest flat at BAR_MIN_H until a voice is detected (see VOICE_OPEN). The gate closes once
+// volume stays below VOICE_CLOSE for VOICE_HOLD_MS, so pauses between words don't flicker.
 const VOICE_HOLD_MS = 200;
 // Falling bars keep 80% of their height per 60 fps frame; rises are instant.
 const FALL_KEEP_PER_FRAME = 0.8;
@@ -97,27 +96,39 @@ export function SoundWave({
       const dt = Math.min(64, now - last);
       last = now;
       const fallKeep = Math.pow(FALL_KEEP_PER_FRAME, dt / FRAME_MS);
-      const volume = levelsRef.current?.volume ?? 0;
+      const rawVolume = levelsRef.current?.volume ?? 0;
       const bands = levelsRef.current?.bands ?? [];
-      if (volume >= VOICE_OPEN) {
+      const scale = getBarVoiceScale();
+
+      if (rawVolume >= VOICE_OPEN) {
         voice = true;
         quietSince = 0;
-      } else if (voice && volume < VOICE_CLOSE) {
+      } else if (voice && rawVolume < VOICE_CLOSE) {
         if (!quietSince) quietSince = now;
         if (now - quietSince >= VOICE_HOLD_MS) voice = false;
-      } else {
+      } else if (!voice) {
         quietSince = 0;
       }
       const silent = !voice;
 
+      // Volume above the gate, so the bars start from zero.
+      const cleanVolume = silent ? 0 : Math.max(0, (rawVolume - VOICE_CLOSE) / (1 - VOICE_CLOSE));
+
       // Glow and colour shift follow loudness with the same fast-rise, slow-fall feel.
       const loudTarget = silent
         ? 0
-        : Math.min(1, Math.max(0, (volume - LOUD_START) / (LOUD_FULL - LOUD_START)));
+        : Math.min(1, Math.max(0, (cleanVolume - LOUD_START) / (LOUD_FULL - LOUD_START)));
       loud = loudTarget > loud ? loudTarget : loud * fallKeep + loudTarget * (1 - fallKeep);
 
       for (let i = 0; i < count; i++) {
-        const target = silent ? min : min + bandAt(bands, i, count) * volume * growth;
+        const band = bandAt(bands, i, count);
+
+        // The scale boosts peaks only; quiet bands stay close to the original response.
+        const peakFactor = band * Math.min(1, cleanVolume * 2.5);
+        const effectiveScale = 1 + (scale - 1) * peakFactor;
+        const peakVolume = Math.min(1, cleanVolume * effectiveScale);
+
+        const target = silent ? min : min + band * peakVolume * growth;
         const cur = heights[i] ?? min;
         let next: number;
         if (target > cur) {
@@ -127,6 +138,10 @@ export function SoundWave({
             target + (!silent && loudTarget > 0 ? Math.min(BAR_OVERSHOOT_MAX, jump * 0.15) : 0);
         } else {
           next = cur * fallKeep + target * (1 - fallKeep);
+        }
+        // Settle exactly at rest in silence, without a last-pixel jitter.
+        if (silent && next <= min + 0.1) {
+          next = min;
         }
         next = Math.min(max + BAR_OVERSHOOT_MAX, Math.max(min, next));
         heights[i] = next;

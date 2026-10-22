@@ -2,8 +2,6 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   fetchSettings,
   fitPillHeight,
-  isTauri,
-  saveWindowPosition,
   subscribeToAudioLevels,
   subscribeToStateChanges,
   triggerCancelRecording,
@@ -16,6 +14,7 @@ import { tok, type AccentColor, type Theme } from "@/lib/tokens";
 import { useResolvedTheme } from "@/lib/theme";
 import { formatDisplay } from "@/lib/hotkey";
 import { PillBody } from "./pill/styles";
+import { setBarVoiceScale } from "./pill/voiceLevel";
 import { TRANSLATE_ACCENT, parseDirection, pillStyleOf, type PillView } from "./pill/view";
 
 const STATE_META: Record<
@@ -100,37 +99,7 @@ export function VoicePill() {
       if (levels?.bands) setAudioLevels(levels);
     });
 
-    let unlistenMoved: (() => void) | null = null;
-    let saveTimeout: ReturnType<typeof setTimeout> | null = null;
-
-    if (isTauri()) {
-      import("@tauri-apps/api/webviewWindow").then(({ getCurrentWebviewWindow }) => {
-        const win = getCurrentWebviewWindow();
-        win
-          .onMoved(({ payload: position }) => {
-            if (saveTimeout) clearTimeout(saveTimeout);
-            saveTimeout = setTimeout(() => {
-              saveWindowPosition(position.x, position.y);
-            }, 300);
-          })
-          .then((unlisten) => {
-            unlistenMoved = unlisten;
-          });
-      });
-    }
-
-    const handlePointerUp = async () => {
-      if (isTauri()) {
-        try {
-          const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-          const pos = await getCurrentWebviewWindow().outerPosition();
-          saveWindowPosition(pos.x, pos.y);
-        } catch {
-          // ignore
-        }
-      }
-    };
-
+    // Where the pill is dragged is saved by the backend when it hides (see pill_position.rs).
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -138,17 +107,11 @@ export function VoicePill() {
       }
     };
 
-    window.addEventListener("pointerup", handlePointerUp);
-    window.addEventListener("mouseup", handlePointerUp);
     window.addEventListener("keydown", handleKeyDown);
 
     return () => {
       unlistenState.then((fn) => fn?.());
       unlistenAudio.then((fn) => fn?.());
-      if (saveTimeout) clearTimeout(saveTimeout);
-      unlistenMoved?.();
-      window.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("mouseup", handlePointerUp);
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, []);
@@ -186,6 +149,8 @@ export function VoicePill() {
       await triggerStartDragging();
     }
   };
+
+  useEffect(() => setBarVoiceScale(settings?.bar_scale), [settings?.bar_scale]);
 
   const themeMode: Theme = useResolvedTheme(settings?.theme);
   const accentKey: AccentColor = (localStorage.getItem("revfly_accent") as AccentColor) || "violet";

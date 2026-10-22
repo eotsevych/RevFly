@@ -8,6 +8,7 @@ import {
   persistSettings,
   subscribeToDiagnosticLogs,
   subscribeToSettingsChanges,
+  subscribeToAudioDeviceChanges,
   subscribeToModelDownload,
   type BackendSettings,
   type ModelCatalogItem,
@@ -155,6 +156,14 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     // this window's older copy over them.
     const unlistenSettings = subscribeToSettingsChanges((s) => setSettings(s));
 
+    // 8. Update device lists instantly when devices are plugged or unplugged.
+    const unlistenAudioDevices = subscribeToAudioDeviceChanges((devs) => {
+      const keepIfSame = (next: string[]) => (prev: string[]) =>
+        prev.length === next.length && prev.every((d, i) => d === next[i]) ? prev : next;
+      if (devs?.input_devices) setInputDevices(keepIfSame(devs.input_devices));
+      if (devs?.output_devices) setOutputDevices(keepIfSame(devs.output_devices));
+    });
+
     return () => {
       clearInterval(devicePoll);
       window.removeEventListener("focus", pollDevices);
@@ -162,6 +171,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       unlistenDownload.then((fn) => fn?.());
       unlistenLogs.then((fn) => fn?.());
       unlistenSettings.then((fn) => fn?.());
+      unlistenAudioDevices.then((fn) => fn?.());
     };
   }, []);
 

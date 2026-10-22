@@ -21,6 +21,7 @@ pub mod parakeet;
 pub mod lab;
 pub mod denoise;
 pub mod fullscreen_pill;
+pub mod pill_position;
 pub mod leveler;
 pub mod model_download;
 pub mod sound;
@@ -214,10 +215,14 @@ async fn download_model(
 }
 
 #[tauri::command]
-fn get_audio_devices() -> serde_json::Value {
+fn get_audio_devices(app_handle: AppHandle, state: State<'_, AppState>) -> serde_json::Value {
+    let input_devices = audio::list_input_devices();
+    let output_devices = audio::list_output_devices();
+    let settings = state.controller.get_settings();
+    tray::update_tray_audio_devices_with_lists(&app_handle, &settings, &input_devices, &output_devices);
     serde_json::json!({
-        "input_devices": audio::list_input_devices(),
-        "output_devices": audio::list_output_devices(),
+        "input_devices": input_devices,
+        "output_devices": output_devices,
     })
 }
 
@@ -249,6 +254,55 @@ fn finish_onboarding(app_handle: AppHandle) {
     }
 }
 
+#[tauri::command]
+fn open_whats_new_window(app_handle: AppHandle) {
+    tray::open_whats_new(&app_handle);
+}
+
+/// Closes What's New; closing it marks it seen (see `tray::open_whats_new`).
+#[tauri::command]
+fn dismiss_whats_new(app_handle: AppHandle) {
+    close_whats_new(&app_handle);
+}
+
+/// What's New's "Turn On Apple Translation": makes Apple the translation service, turning on the
+/// translate hotkey if translation was off, and opens Settings on Translations, where the user
+/// downloads the languages Apple needs.
+#[tauri::command]
+fn enable_apple_translation_and_dismiss(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut settings = state.controller.get_settings();
+    settings.translation_provider = crate::apple_translate::PROVIDER.to_string();
+    if settings.translation_off() {
+        settings.translation_mode = "hotkey".to_string();
+    }
+    state.controller.save_settings(settings.clone())?;
+    apply_hotkeys(&app_handle, &state, &settings);
+    close_whats_new(&app_handle);
+    tray::open_preferences_tab(&app_handle, "translations");
+    Ok(())
+}
+
+#[tauri::command]
+fn open_settings_from_whats_new(app_handle: AppHandle) {
+    close_whats_new(&app_handle);
+    tray::open_preferences_tab(&app_handle, "translations");
+}
+
+fn close_whats_new(app_handle: &AppHandle) {
+    if let Some(win) = app_handle.get_webview_window("whats-new") {
+        let _ = win.close();
+    }
+}
+
+/// The Settings tab to show when the window opens, if something asked for one.
+#[tauri::command]
+fn take_settings_tab() -> Option<String> {
+    tray::take_settings_tab()
+}
+
 /// Routes the hotkeys to the welcome guide's practice run (see `app_controller::set_practice_mode`).
 #[tauri::command]
 fn set_practice_mode(on: bool) {
@@ -265,6 +319,8 @@ pub(crate) fn mark_onboarding_done(app_handle: &AppHandle) {
         return;
     }
     settings.onboarding_done = true;
+    settings.apple_translation_announced = true;
+    settings.last_version = Some(env!("CARGO_PKG_VERSION").to_string());
     if let Err(e) = state.controller.save_settings(settings) {
         log::warn!("Could not save that the welcome guide was seen: {}", e);
     }
@@ -339,16 +395,10 @@ fn close_preferences_window(app_handle: AppHandle) {
     tray::sync_dock_icon(&app_handle, None);
 }
 
-#[tauri::command]
-fn save_window_position(state: State<'_, AppState>, x: i32, y: i32) -> Result<(), String> {
-    let mut settings = state.controller.get_settings();
-    settings.window_x = Some(x);
-    settings.window_y = Some(y);
-    state.controller.save_settings(settings)
-}
-
+/// Drags the pill; where it ends up is saved when it hides (see `pill_position`).
 #[tauri::command]
 fn start_dragging_window(window: tauri::WebviewWindow) -> Result<(), String> {
+    pill_position::mark_dragged();
     if fullscreen_pill::start_dragging() {
         return Ok(());
     }
@@ -575,31 +625,13 @@ pub fn run() {
             // Create macOS menu bar tray icon
             let _ = tray::create_tray(&app.handle(), &settings);
             crate::tray::update_tray_model_status(&app.handle(), false);
+            audio::start_device_monitor(app.handle().clone());
             updater::spawn_background_checks(app.handle());
             model_download::spawn_initial_download(app.handle(), settings.model_name.clone());
 
-            // Configure window collection behavior and restore saved position if valid
+            // Configure window collection behavior; each show places the pill (see pill_position).
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.set_always_on_top(true);
-                let mut valid_coords = false;
-                if let (Some(x), Some(y)) = (settings.window_x, settings.window_y) {
-                    if let Ok(monitors) = win.available_monitors() {
-                        for monitor in monitors {
-                            let m_size = monitor.size();
-                            let m_pos = monitor.position();
-                            if x >= m_pos.x && (x + 100) <= (m_pos.x + m_size.width as i32)
-                                && y >= m_pos.y && (y + 50) <= (m_pos.y + m_size.height as i32) {
-                                let _ = win.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
-                                valid_coords = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-                if !valid_coords {
-                    let _ = win.center();
-                }
-
                 let _ = win.set_shadow(false);
                 app_controller::apply_pill_window_behavior(&win, false);
             }
@@ -659,13 +691,17 @@ pub fn run() {
             download_model,
             open_onboarding_window,
             finish_onboarding,
+            open_whats_new_window,
+            dismiss_whats_new,
+            enable_apple_translation_and_dismiss,
+            open_settings_from_whats_new,
+            take_settings_tab,
             set_practice_mode,
             get_audio_devices,
             set_audio_device,
             open_preferences_window,
             close_preferences_window,
             fit_pill_height,
-            save_window_position,
             start_dragging_window,
             get_transcription_logs,
             clear_transcription_logs,
@@ -708,11 +744,24 @@ pub fn run() {
             // Opened only once launching has finished: a window built during `setup` on macOS is
             // left off screen when the menu-bar-only policy is applied at launch.
             tauri::RunEvent::Ready => {
-                let done = app
+                let (done, announce) = app
                     .try_state::<AppState>()
-                    .is_none_or(|state| state.controller.get_settings().onboarding_done);
+                    .map(|state| {
+                        let s = state.controller.get_settings();
+                        (s.onboarding_done, s.should_announce_apple_translation())
+                    })
+                    .unwrap_or((true, false));
                 if !done {
                     tray::open_onboarding(app);
+                } else if announce {
+                    tray::open_whats_new(app);
+                } else if let Some(state) = app.try_state::<AppState>() {
+                    let s = state.controller.get_settings();
+                    if s.last_version.as_deref() != Some(env!("CARGO_PKG_VERSION")) {
+                        let mut updated = s;
+                        updated.last_version = Some(env!("CARGO_PKG_VERSION").to_string());
+                        let _ = state.controller.save_settings(updated);
+                    }
                 }
             }
             #[cfg(target_os = "macos")]

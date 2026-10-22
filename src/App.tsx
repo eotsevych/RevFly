@@ -2,6 +2,7 @@ import { useEffect, useState, Component, type ReactNode } from "react";
 import { VoicePill } from "./components/VoicePill";
 import { AssistantSettings } from "./components/AssistantSettings";
 import { Onboarding } from "./components/onboarding/Onboarding";
+import { WhatsNewModal } from "./components/WhatsNewModal";
 import { fetchSettings, isTauri } from "./lib/tauri";
 import { applyTheme, initThemeListener, type ThemeMode } from "./lib/theme";
 
@@ -76,9 +77,9 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   }
 }
 
-type View = "pill" | "preferences" | "onboarding";
+type View = "pill" | "preferences" | "onboarding" | "whats-new";
 
-const WINDOW_VIEWS: View[] = ["preferences", "onboarding"];
+const WINDOW_VIEWS: View[] = ["preferences", "onboarding", "whats-new"];
 
 /** Which screen this window shows, from the URL hash or the Tauri window label. */
 function detectView(): View {
@@ -159,6 +160,14 @@ export default function App() {
     return (
       <ErrorBoundary>
         <Onboarding />
+      </ErrorBoundary>
+    );
+  }
+
+  if (view === "whats-new") {
+    return (
+      <ErrorBoundary>
+        <WhatsNewModal />
       </ErrorBoundary>
     );
   }

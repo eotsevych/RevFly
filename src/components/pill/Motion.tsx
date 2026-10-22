@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { AudioLevels } from "@/lib/tauri";
+import { getBarVoiceScale, VOICE_CLOSE } from "./voiceLevel";
 
 // Small looping animations shared by the pill styles.
 
@@ -99,7 +100,13 @@ export function RecDot({
   useEffect(() => {
     let v = 0;
     let frame = requestAnimationFrame(function tick() {
-      const target = Math.min(1, Math.max(0, ((levelsRef.current?.volume ?? 0) - 0.03) / 0.5));
+      const scale = getBarVoiceScale();
+      const rawVolume = levelsRef.current?.volume ?? 0;
+      const cleanVolume = Math.max(0, (rawVolume - VOICE_CLOSE) / (1 - VOICE_CLOSE));
+      const peakFactor = Math.min(1, cleanVolume * 2.5);
+      const effectiveScale = 1 + (scale - 1) * peakFactor;
+      const peakVolume = Math.min(1, cleanVolume * effectiveScale);
+      const target = Math.min(1, Math.max(0, (peakVolume - 0.03) / 0.5));
       v = target > v ? target : v * 0.88 + target * 0.12;
       const s = size * (0.45 + 0.55 * v);
       if (haloRef.current) {

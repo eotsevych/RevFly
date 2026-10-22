@@ -6,6 +6,8 @@ import {
   subscribeToUpdateStatus,
   triggerCheckForUpdates,
   triggerInstallUpdate,
+  openWhatsNewWindow,
+  fetchAppleTranslationInfo,
   type UpdateStatus,
 } from "@/lib/tauri";
 
@@ -35,6 +37,14 @@ function statusText(status: UpdateStatus | null): string {
 export default function UpdatesSection({ t }: { t: Tokens }) {
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [installError, setInstallError] = useState<string | null>(null);
+  // What's New is about Apple Translation, so it's offered only where that works.
+  const [appleAvailable, setAppleAvailable] = useState(false);
+
+  useEffect(() => {
+    fetchAppleTranslationInfo()
+      .then((info) => setAppleAvailable(info.available))
+      .catch(() => setAppleAvailable(false));
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -102,7 +112,7 @@ export default function UpdatesSection({ t }: { t: Tokens }) {
         }
         hint={installError ?? statusText(status)}
         t={t}
-        last={status?.state !== "downloading"}
+        last={!appleAvailable && status?.state !== "downloading"}
       >
         {!status?.store_managed && (
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -160,6 +170,27 @@ export default function UpdatesSection({ t }: { t: Tokens }) {
             />
           </div>
         </div>
+      )}
+      {appleAvailable && (
+        <Row label="What's New" hint="On-device translation with Apple Translation" t={t} last>
+          <button
+            type="button"
+            onClick={() => openWhatsNewWindow()}
+            style={{
+              padding: "5px 10px",
+              borderRadius: 6,
+              border: `1px solid ${t.border}`,
+              background: t.surface,
+              color: t.accent,
+              fontSize: 11,
+              cursor: "pointer",
+              fontWeight: 500,
+              whiteSpace: "nowrap",
+            }}
+          >
+            View
+          </button>
+        </Row>
       )}
     </Section>
   );

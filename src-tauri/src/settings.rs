@@ -48,6 +48,10 @@ pub struct AppSettings {
     /// How the floating pill looks: "classic" | "compact" | "compact_plain" | "line" | "capsule" | "dot".
     #[serde(default = "default_pill_style")]
     pub pill_style: String,
+    /// How much higher the pill's bars reach on speech peaks: 1.0 is the original response, higher
+    /// suits a mic farther away (Theme > Voice Bar Height).
+    #[serde(default = "default_bar_scale")]
+    pub bar_scale: f64,
     /// Whether the first-run welcome guide has been finished or closed. Settings saved before the
     /// guide existed count as done, so only new installs see it.
     #[serde(default = "default_true")]
@@ -58,10 +62,11 @@ pub struct AppSettings {
     /// the moment you stop) or "on_stop" (after you stop, alongside VAD; saves RAM while recording).
     #[serde(default = "default_model_load_mode")]
     pub model_load_mode: String,
+    /// Where the user dragged the pill: its center as fractions of a monitor's work area, used on
+    /// every monitor. None until the first drag (see `pill_position`). Replaces the old absolute
+    /// `window_x`/`window_y`, which are ignored now.
     #[serde(default)]
-    pub window_x: Option<i32>,
-    #[serde(default)]
-    pub window_y: Option<i32>,
+    pub pill_center: Option<(f64, f64)>,
     #[serde(default = "default_true")]
     pub text_normalization: bool,
     #[serde(default = "default_true")]
@@ -144,6 +149,12 @@ pub struct AppSettings {
     pub custom_api_model: String,
     #[serde(default = "default_prompt_template")]
     pub prompt_template: String,
+    /// The RevFly version that last ran, so an upgrade can be told apart from a new install.
+    #[serde(default)]
+    pub last_version: Option<String>,
+    /// Whether the What's New window announcing Apple Translation was shown.
+    #[serde(default)]
+    pub apple_translation_announced: bool,
 }
 
 fn default_llm_endpoint() -> String {
@@ -213,6 +224,10 @@ fn default_pill_style() -> String {
     "classic".to_string()
 }
 
+fn default_bar_scale() -> f64 {
+    3.2
+}
+
 fn default_idle_unload_sec() -> u64 {
     30
 }
@@ -251,11 +266,11 @@ impl Default for AppSettings {
             output_device: None,
             theme: "system".to_string(),
             pill_style: default_pill_style(),
+            bar_scale: default_bar_scale(),
             onboarding_done: false,
             model_idle_unload_sec: default_idle_unload_sec(),
             model_load_mode: default_model_load_mode(),
-            window_x: None,
-            window_y: None,
+            pill_center: None,
             text_normalization: true,
             remove_filler_words: true,
             convert_numbers: true,
@@ -293,6 +308,8 @@ impl Default for AppSettings {
             custom_api_key: String::new(),
             custom_api_model: default_custom_model(),
             prompt_template: default_prompt_template(),
+            last_version: None,
+            apple_translation_announced: false,
         }
     }
 }
@@ -376,6 +393,24 @@ impl AppSettings {
         true
     }
 
+    /// Whether to show What's New: this install upgraded from a version without Apple Translation
+    /// and the Mac supports it.
+    pub fn should_announce_apple_translation(&self) -> bool {
+        if !crate::apple_translate::is_available() {
+            return false;
+        }
+        if self.apple_translation_announced {
+            return false;
+        }
+        if !self.onboarding_done {
+            return false;
+        }
+        match &self.last_version {
+            None => true,
+            Some(v) => is_version_older_than(v, APPLE_TRANSLATION_SINCE),
+        }
+    }
+
     pub fn load() -> Self {
         let config_dir = get_config_dir();
         let settings_path = config_dir.join("settings.json");
@@ -410,6 +445,31 @@ impl AppSettings {
         fs::write(settings_path, json).map_err(|e| e.to_string())?;
         Ok(())
     }
+}
+
+/// The first version with Apple Translation; upgrades from before it see What's New.
+const APPLE_TRANSLATION_SINCE: &str = "1.0.6";
+
+/// Whether version `current` ("1.0.5", "v1.0.5") is older than `target`.
+pub fn is_version_older_than(current: &str, target: &str) -> bool {
+    let parse = |v: &str| -> Vec<u32> {
+        v.trim_start_matches('v')
+            .split(|c: char| !c.is_ascii_digit())
+            .filter(|s| !s.is_empty())
+            .filter_map(|s| s.parse::<u32>().ok())
+            .collect()
+    };
+    let c = parse(current);
+    let t = parse(target);
+    for (a, b) in c.iter().zip(t.iter()) {
+        if a < b {
+            return true;
+        }
+        if a > b {
+            return false;
+        }
+    }
+    c.len() < t.len()
 }
 
 #[cfg(test)]
@@ -476,5 +536,34 @@ mod tests {
         saved.as_object_mut().unwrap().remove("onboarding_done");
         let upgraded: AppSettings = serde_json::from_value(saved).unwrap();
         assert!(upgraded.onboarding_done, "settings from before the guide count as done");
+    }
+
+    #[test]
+    fn test_version_older_than() {
+        use super::is_version_older_than;
+        assert!(is_version_older_than("1.0.5", "1.0.6"));
+        assert!(is_version_older_than("1.0.0", "1.0.6"));
+        assert!(is_version_older_than("0.9.20", "1.0.6"));
+        assert!(is_version_older_than("v1.0.5", "1.0.6"));
+        assert!(!is_version_older_than("1.0.6", "1.0.6"));
+        assert!(!is_version_older_than("1.0.7", "1.0.6"));
+    }
+
+    #[test]
+    fn test_should_announce_apple_translation() {
+        let mut s = AppSettings::default();
+        // Brand new install: onboarding not done yet -> do not announce
+        assert!(!s.should_announce_apple_translation());
+
+        // Existing user who upgraded from 1.0.5 (or prior without last_version)
+        s.onboarding_done = true;
+        s.apple_translation_announced = false;
+        s.last_version = None;
+        let expected = crate::apple_translate::is_available();
+        assert_eq!(s.should_announce_apple_translation(), expected);
+
+        // Once announced -> false
+        s.apple_translation_announced = true;
+        assert!(!s.should_announce_apple_translation());
     }
 }

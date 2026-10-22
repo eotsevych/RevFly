@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{TrayIcon, TrayIconBuilder};
 
@@ -6,7 +6,7 @@ use crate::audio::{list_input_devices, list_output_devices};
 use crate::settings::AppSettings;
 
 /// Windows that make RevFly behave like a regular app while they're open.
-const DOCK_WINDOWS: [&str; 2] = ["preferences", "onboarding"];
+const DOCK_WINDOWS: [&str; 3] = ["preferences", "onboarding", "whats-new"];
 
 /// RevFly lives in the menu bar, but while Settings or the welcome guide is open it shows in the Dock
 /// and Cmd+Tab like a normal app, so those windows are easy to get back to. `closing` names a window
@@ -32,11 +32,28 @@ pub fn sync_dock_icon(app: &AppHandle, closing: Option<&str>) {
 
 /// Brings back Settings or the welcome guide when the Dock icon is clicked.
 pub fn reopen_from_dock(app: &AppHandle) {
-    if app.get_webview_window("onboarding").is_some() {
+    if app.get_webview_window("whats-new").is_some() {
+        open_whats_new(app);
+    } else if app.get_webview_window("onboarding").is_some() {
         open_onboarding(app);
     } else if app.get_webview_window("preferences").is_some() {
         open_preferences(app);
     }
+}
+
+/// The tab Settings should show once its window is up; it takes this with `take_settings_tab`.
+static PENDING_SETTINGS_TAB: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Opens Settings on `tab` (a tab id such as "translations"). A window that is already open
+/// switches on the `open-settings-tab` event; a new one asks for the pending tab when it loads.
+pub fn open_preferences_tab(app: &AppHandle, tab: &str) {
+    *PENDING_SETTINGS_TAB.lock().unwrap() = Some(tab.to_string());
+    open_preferences(app);
+    let _ = app.emit_to("preferences", "open-settings-tab", tab);
+}
+
+pub fn take_settings_tab() -> Option<String> {
+    PENDING_SETTINGS_TAB.lock().unwrap().take()
 }
 
 pub fn open_preferences(app: &AppHandle) {
@@ -119,6 +136,49 @@ pub fn open_onboarding(app: &AppHandle) {
     }
 }
 
+/// Opens the "What's New in RevFly" announcement modal, or brings it forward if it's already open.
+pub fn open_whats_new(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("whats-new") {
+        let _ = win.unminimize();
+        let _ = win.show();
+        sync_dock_icon(app, None);
+        let _ = win.set_focus();
+        return;
+    }
+    let builder = WebviewWindowBuilder::new(app, "whats-new", WebviewUrl::App("index.html#whats-new".into()))
+        .title("What's New in RevFly")
+        .inner_size(520.0, 520.0)
+        .resizable(false)
+        .maximizable(false)
+        .decorations(false)
+        .transparent(true)
+        .shadow(true)
+        .center()
+        .focused(true);
+
+    match builder.build() {
+        Ok(win) => {
+            sync_dock_icon(app, None);
+            let _ = win.set_focus();
+            let app = app.clone();
+            win.on_window_event(move |event| {
+                if let tauri::WindowEvent::Destroyed = event {
+                    if let Some(state) = app.try_state::<crate::AppState>() {
+                        let mut s = state.controller.get_settings();
+                        if !s.apple_translation_announced {
+                            s.apple_translation_announced = true;
+                            s.last_version = Some(env!("CARGO_PKG_VERSION").to_string());
+                            let _ = state.controller.save_settings(s);
+                        }
+                    }
+                    sync_dock_icon(&app, Some("whats-new"));
+                }
+            });
+        }
+        Err(e) => log::warn!("Could not open what's new window: {}", e),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayIconState {
     Ejected,
@@ -170,6 +230,8 @@ static RETRY_SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 const RETRY_POSITION: usize = 4;
 /// Translation submenu items with the setting value each stands for ("mode:off", "provider:LLM").
 static TRANSLATION_ITEMS: std::sync::OnceLock<Vec<(String, CheckMenuItem<tauri::Wry>)>> = std::sync::OnceLock::new();
+static INPUT_SUBMENU: std::sync::OnceLock<Submenu<tauri::Wry>> = std::sync::OnceLock::new();
+static OUTPUT_SUBMENU: std::sync::OnceLock<Submenu<tauri::Wry>> = std::sync::OnceLock::new();
 static IS_RECORDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn update_tray_model_status(app: &AppHandle, is_loaded: bool) {
@@ -303,6 +365,109 @@ pub fn set_tray_recording(app: &AppHandle, is_recording: bool, llm_loaded: bool)
     }
 }
 
+pub fn update_tray_audio_devices(app: &AppHandle, settings: &AppSettings) {
+    let input_devices = list_input_devices();
+    let output_devices = list_output_devices();
+    update_tray_audio_devices_with_lists(app, settings, &input_devices, &output_devices);
+}
+
+pub fn update_tray_audio_devices_with_lists(
+    app: &AppHandle,
+    settings: &AppSettings,
+    input_devices: &[String],
+    output_devices: &[String],
+) {
+    if let Some(submenu) = INPUT_SUBMENU.get() {
+        while let Ok(Some(_)) = submenu.remove_at(0) {}
+
+        let current_input = settings.input_device.as_deref().unwrap_or("Default");
+        let is_default = current_input == "Default" || current_input.is_empty();
+
+        if let Ok(def_item) = CheckMenuItem::with_id(
+            app,
+            "input_dev:Default",
+            "System Default",
+            true,
+            is_default,
+            None::<&str>,
+        ) {
+            let _ = submenu.append(&def_item);
+        }
+
+        if !is_default && !input_devices.iter().any(|d| d == current_input) {
+            if let Ok(item) = CheckMenuItem::with_id(
+                app,
+                format!("input_dev:{}", current_input),
+                format!("{} (not connected)", current_input),
+                true,
+                true,
+                None::<&str>,
+            ) {
+                let _ = submenu.append(&item);
+            }
+        }
+
+        for dev in input_devices {
+            let is_checked = current_input == dev;
+            if let Ok(item) = CheckMenuItem::with_id(
+                app,
+                format!("input_dev:{}", dev),
+                dev,
+                true,
+                is_checked,
+                None::<&str>,
+            ) {
+                let _ = submenu.append(&item);
+            }
+        }
+    }
+
+    if let Some(submenu) = OUTPUT_SUBMENU.get() {
+        while let Ok(Some(_)) = submenu.remove_at(0) {}
+
+        let current_output = settings.output_device.as_deref().unwrap_or("Default");
+        let is_default = current_output == "Default" || current_output.is_empty();
+
+        if let Ok(def_item) = CheckMenuItem::with_id(
+            app,
+            "output_dev:Default",
+            "System Default",
+            true,
+            is_default,
+            None::<&str>,
+        ) {
+            let _ = submenu.append(&def_item);
+        }
+
+        if !is_default && !output_devices.iter().any(|d| d == current_output) {
+            if let Ok(item) = CheckMenuItem::with_id(
+                app,
+                format!("output_dev:{}", current_output),
+                format!("{} (not connected)", current_output),
+                true,
+                true,
+                None::<&str>,
+            ) {
+                let _ = submenu.append(&item);
+            }
+        }
+
+        for dev in output_devices {
+            let is_checked = current_output == dev;
+            if let Ok(item) = CheckMenuItem::with_id(
+                app,
+                format!("output_dev:{}", dev),
+                dev,
+                true,
+                is_checked,
+                None::<&str>,
+            ) {
+                let _ = submenu.append(&item);
+            }
+        }
+    }
+}
+
 pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, tauri::Error> {
     // Cheap RAM check at tray creation: any model loaded in this process? Check via controller if available later
     // Initial label: assume ejected; will be corrected immediately by update_tray_model_status after startup
@@ -332,72 +497,16 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
     let sep1 = PredefinedMenuItem::separator(app)?;
 
     // Microphone Input submenu
-    let input_devices = list_input_devices();
-    let current_input = settings.input_device.as_deref().unwrap_or("Default");
-    let mut input_menu_items = Vec::new();
-
-    let def_input = CheckMenuItem::with_id(
-        app,
-        "input_dev:Default",
-        "System Default",
-        true,
-        current_input == "Default",
-        None::<&str>,
-    )?;
-    input_menu_items.push(def_input);
-
-    for (_idx, dev) in input_devices.iter().enumerate() {
-        let is_checked = current_input == dev;
-        let item = CheckMenuItem::with_id(
-            app,
-            format!("input_dev:{}", dev),
-            dev,
-            true,
-            is_checked,
-            None::<&str>,
-        )?;
-        input_menu_items.push(item);
-    }
-
-    let input_items_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = input_menu_items
-        .iter()
-        .map(|i| i as &dyn tauri::menu::IsMenuItem<tauri::Wry>)
-        .collect();
-    let input_submenu = Submenu::with_items(app, "Microphone Input", true, &input_items_refs)?;
+    let input_submenu = Submenu::new(app, "Microphone Input", true)?;
+    let _ = INPUT_SUBMENU.set(input_submenu.clone());
 
     // Audio Output submenu
+    let output_submenu = Submenu::new(app, "Audio Output", true)?;
+    let _ = OUTPUT_SUBMENU.set(output_submenu.clone());
+
+    let input_devices = list_input_devices();
     let output_devices = list_output_devices();
-    let current_output = settings.output_device.as_deref().unwrap_or("Default");
-    let mut output_menu_items = Vec::new();
-
-    let def_output = CheckMenuItem::with_id(
-        app,
-        "output_dev:Default",
-        "System Default",
-        true,
-        current_output == "Default",
-        None::<&str>,
-    )?;
-    output_menu_items.push(def_output);
-
-    for (_idx, dev) in output_devices.iter().enumerate() {
-        let is_checked = current_output == dev;
-        let item = CheckMenuItem::with_id(
-            app,
-            format!("output_dev:{}", dev),
-            dev,
-            true,
-            is_checked,
-            None::<&str>,
-        )?;
-        output_menu_items.push(item);
-    }
-
-    let output_items_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = output_menu_items
-        .iter()
-        .map(|i| i as &dyn tauri::menu::IsMenuItem<tauri::Wry>)
-        .collect();
-    let output_submenu = Submenu::with_items(app, "Audio Output", true, &output_items_refs)?;
+    update_tray_audio_devices_with_lists(app, settings, &input_devices, &output_devices);
 
     // Translation submenu: when to translate (the mode), then which service does it.
     let mut translation_items = Vec::new();

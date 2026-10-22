@@ -5,7 +5,7 @@ use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 pub fn list_input_devices() -> Vec<String> {
     let host = cpal::default_host();
@@ -1380,7 +1380,7 @@ const BAND_TILT_DB: [f32; 4] = [0.0, 5.0, 10.0, 14.0];
 /// A band this many dB below the loudest band reads as zero.
 const BAND_RANGE_DB: f32 = 24.0;
 /// Below this loudness the pill treats the input as silence.
-const SILENCE_VOLUME: f32 = 0.02;
+const SILENCE_VOLUME: f32 = 0.03;
 
 /// Payload of the `audio-level` event that drives the pill's equalizer.
 #[derive(Clone, Debug, serde::Serialize)]
@@ -1425,7 +1425,7 @@ impl SpectrumAnalyzer {
         // Same speech sensitivity curve the pill has always used.
         let volume = (rms * 14.0).clamp(0.0, 1.0);
         if volume < SILENCE_VOLUME {
-            return AudioLevels { volume, bands: [0.0; 7] };
+            return AudioLevels { volume: 0.0, bands: [0.0; 7] };
         }
 
         let windowed: Vec<f32> = frame.iter().zip(&self.hann).map(|(x, w)| x * w).collect();
@@ -1445,13 +1445,168 @@ impl SpectrumAnalyzer {
 
         let tilted: Vec<f32> = band_db.iter().zip(BAND_TILT_DB).map(|(db, tilt)| db + tilt).collect();
         let loudest = tilted.iter().cloned().fold(f32::MIN, f32::max);
+        let weight = ((volume - SILENCE_VOLUME) / 0.06).clamp(0.0, 1.0);
         let energy: Vec<f32> = tilted
             .iter()
-            .map(|db| ((db - (loudest - BAND_RANGE_DB)) / BAND_RANGE_DB).clamp(0.0, 1.0))
+            .map(|db| ((db - (loudest - BAND_RANGE_DB)) / BAND_RANGE_DB).clamp(0.0, 1.0) * weight)
             .collect();
         let [low, mid, high_mid, high] = [energy[0], energy[1], energy[2], energy[3]];
         AudioLevels { volume, bands: [high, high_mid, mid, low, mid, high_mid, high] }
     }
+}
+
+#[cfg(target_os = "macos")]
+mod coreaudio_listener {
+    use std::ffi::c_void;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc::Sender;
+    use std::sync::OnceLock;
+
+    #[repr(C)]
+    struct AudioObjectPropertyAddress {
+        m_selector: u32,
+        m_scope: u32,
+        m_element: u32,
+    }
+
+    #[link(name = "CoreAudio", kind = "framework")]
+    extern "C" {
+        fn AudioObjectAddPropertyListener(
+            in_object_id: u32,
+            in_address: *const AudioObjectPropertyAddress,
+            in_listener: unsafe extern "C" fn(u32, u32, *const AudioObjectPropertyAddress, *mut c_void) -> i32,
+            in_client_data: *mut c_void,
+        ) -> i32;
+    }
+
+    static SENDER: OnceLock<Sender<()>> = OnceLock::new();
+    static REGISTERED: AtomicBool = AtomicBool::new(false);
+
+    unsafe extern "C" fn on_audio_hardware_change(
+        _in_object_id: u32,
+        _in_number_addresses: u32,
+        _in_addresses: *const AudioObjectPropertyAddress,
+        _in_client_data: *mut c_void,
+    ) -> i32 {
+        if let Some(tx) = SENDER.get() {
+            let _ = tx.send(());
+        }
+        0
+    }
+
+    pub fn register_listener(tx: Sender<()>) {
+        if REGISTERED.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let _ = SENDER.set(tx);
+
+        const K_AUDIO_OBJECT_SYSTEM_OBJECT: u32 = 1;
+        const K_AUDIO_OBJECT_PROPERTY_SCOPE_GLOBAL: u32 = 0x676c6f62; // 'glob'
+        const K_AUDIO_OBJECT_PROPERTY_ELEMENT_MAIN: u32 = 0;
+
+        // 'dev#' = 0x64657623 (device list changed: plug / unplug)
+        // 'dIn ' = 0x64496e20 (default input device changed)
+        // 'dOut' = 0x644f7574 (default output device changed)
+        let selectors = [
+            0x64657623, // 'dev#'
+            0x64496e20, // 'dIn '
+            0x644f7574, // 'dOut'
+        ];
+
+        for &sel in &selectors {
+            let address = AudioObjectPropertyAddress {
+                m_selector: sel,
+                m_scope: K_AUDIO_OBJECT_PROPERTY_SCOPE_GLOBAL,
+                m_element: K_AUDIO_OBJECT_PROPERTY_ELEMENT_MAIN,
+            };
+            unsafe {
+                let status = AudioObjectAddPropertyListener(
+                    K_AUDIO_OBJECT_SYSTEM_OBJECT,
+                    &address,
+                    on_audio_hardware_change,
+                    std::ptr::null_mut(),
+                );
+                if status != 0 {
+                    log::warn!("CoreAudio: failed to add property listener for selector 0x{:08x}: {}", sel, status);
+                }
+            }
+        }
+    }
+}
+
+pub fn start_device_monitor(app_handle: AppHandle) {
+    let (tx, rx) = channel::<()>();
+
+    #[cfg(target_os = "macos")]
+    coreaudio_listener::register_listener(tx);
+
+    thread::Builder::new()
+        .name("audio-device-monitor".into())
+        .spawn(move || {
+            // Nothing sends here off macOS; holding the sender keeps the channel from disconnecting.
+            #[cfg(not(target_os = "macos"))]
+            let _tx = tx;
+            let mut last_inputs = list_input_devices();
+            let mut last_outputs = list_output_devices();
+
+            loop {
+                // macOS tells us when devices change; elsewhere the lists are checked every 2 seconds.
+                #[cfg(target_os = "macos")]
+                let received_event = match rx.recv() {
+                    Ok(_) => true,
+                    Err(_) => break,
+                };
+                #[cfg(not(target_os = "macos"))]
+                let received_event = match rx.recv_timeout(Duration::from_secs(2)) {
+                    Ok(_) => true,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => false,
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                };
+
+                if received_event {
+                    // Debounce: allow macOS CoreAudio HAL to settle device state (e.g. bluetooth handshake)
+                    thread::sleep(Duration::from_millis(200));
+                    // Drain any queued events that arrived during debounce
+                    while rx.try_recv().is_ok() {}
+                }
+
+                let current_inputs = list_input_devices();
+                let current_outputs = list_output_devices();
+
+                if current_inputs != last_inputs || current_outputs != last_outputs {
+                    log::info!(
+                        "Audio devices changed: inputs={:?}, outputs={:?}",
+                        current_inputs,
+                        current_outputs
+                    );
+
+                    let settings = if let Some(state) = app_handle.try_state::<crate::AppState>() {
+                        state.controller.get_settings()
+                    } else {
+                        crate::settings::AppSettings::load()
+                    };
+
+                    crate::tray::update_tray_audio_devices_with_lists(
+                        &app_handle,
+                        &settings,
+                        &current_inputs,
+                        &current_outputs,
+                    );
+
+                    let _ = app_handle.emit(
+                        "audio-devices-changed",
+                        serde_json::json!({
+                            "input_devices": &current_inputs,
+                            "output_devices": &current_outputs,
+                        }),
+                    );
+
+                    last_inputs = current_inputs;
+                    last_outputs = current_outputs;
+                }
+            }
+        })
+        .expect("failed to spawn audio-device-monitor thread");
 }
 
 #[cfg(test)]
