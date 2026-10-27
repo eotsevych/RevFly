@@ -23,12 +23,6 @@ cask "revfly" do
 
   app "RevFly.app"
 
-  # RevFly is not notarized (no paid Apple Developer ID), so drop the quarantine flag
-  # Homebrew adds; otherwise Gatekeeper blocks the first launch.
-  postflight_steps do
-    run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{appdir}}/RevFly.app"]
-  end
-
   uninstall quit: "com.revfly.desktop"
 
   zap trash: [

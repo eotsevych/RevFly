@@ -38,7 +38,7 @@ Being open-source does not stop these warnings automatically. The OS checks for 
 
 ### Solutions for Open-Source Maintainers
 
-#### Solution 1: Zero Cost (What RevFly Uses)
+#### Solution 1: Zero Cost (What RevFly Used Before 1.0.7)
 Most open-source tools (like Blender, Audacity, and Ollama when they started) use this method.
 
 1. **Install paths without warnings**: the 1-line Terminal installer and the Homebrew cask both clear the quarantine flag, so Gatekeeper never blocks the app. Promote these first.
@@ -222,6 +222,24 @@ cd ../homebrew-tap && git commit -am "revfly 0.1.0" && git push
 ## 5. One-Time Setup: Free Signing & Auto-Updates
 
 Do this once. Keep every file below backed up (for example in a password manager) and never commit it.
+
+### Apple Developer ID (removes the Gatekeeper warning)
+With a paid Apple Developer account, the build signs with your Developer ID and gets each `.app` and `.dmg` notarized automatically. Notarization is an automated scan that takes a few minutes per file, not an App Review.
+
+1. Create the certificate (only the Account Holder can): Xcode → Settings → Accounts → Manage Certificates → **+** → **Developer ID Application**. It lands in your login keychain, and `scripts/lib_codesign.sh` picks it over the self-signed one.
+2. Create an app-specific password at [account.apple.com](https://account.apple.com) → Sign-In and Security → App-Specific Passwords. Find your Team ID at [developer.apple.com/account](https://developer.apple.com/account) → Membership details.
+3. Local builds: `export APPLE_ID=you@example.com APPLE_PASSWORD=xxxx-xxxx-xxxx-xxxx APPLE_TEAM_ID=ABCDE12345` before `bash scripts/build_installers.sh`. Without them the build is signed but not notarized.
+4. CI: in Keychain Access, export the "Developer ID Application" certificate with its private key as a `.p12`, then replace the self-signed secrets:
+   ```bash
+   base64 -i DeveloperID.p12 | gh secret set MACOS_SIGNING_P12
+   gh secret set MACOS_SIGNING_P12_PASSWORD   # the .p12 export password
+   gh secret set APPLE_ID
+   gh secret set APPLE_PASSWORD
+   gh secret set APPLE_TEAM_ID
+   ```
+5. Check a build: `spctl -a -vv /Applications/RevFly.app` should say `source=Notarized Developer ID`.
+
+Switching from the self-signed certificate to the Developer ID changes the app's signature, so every user grants Microphone and Accessibility once more after that update. Say so in the release notes.
 
 ### A. macOS Self-Signed Certificate (keeps permissions across updates)
 ```bash

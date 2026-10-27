@@ -130,6 +130,7 @@ make_dmg() {
   rm -rf "$stage_dir"
 
   revfly_sign_dmg "$out_installers"
+  revfly_notarize "$out_installers"
 
   # Copy to Desktop for immediate access
   cp "$out_installers" "$out_desktop"
@@ -176,6 +177,7 @@ install_name_tool -add_rpath "@executable_path/../Frameworks" "$UNIV_BIN" 2>/dev
 cp "$UNIV_BIN" "$UNIV_APP/Contents/MacOS/revfly"
 rm -f "$UNIV_BIN"
 sign_app_bundle "$UNIV_APP"
+revfly_notarize "$UNIV_APP"
 
 # Update root app bundle
 rm -rf "$ROOT_DIR/RevFly.app"
@@ -216,6 +218,7 @@ chmod +x "$INTEL_APP/Contents/MacOS/revfly"
 install_name_tool -add_rpath "@executable_path/../Frameworks" "$INTEL_APP/Contents/MacOS/revfly" 2>/dev/null || true
 copy_resources "$INTEL_APP"
 sign_app_bundle "$INTEL_APP"
+revfly_notarize "$INTEL_APP"
 make_dmg "$INTEL_APP" "RevFly_Intel_x86_64.dmg" "RevFly Intel"
 rm -rf "$INTEL_DIR"
 
@@ -231,6 +234,7 @@ cp "$ARM64_BIN" "$ARM_APP/Contents/MacOS/revfly"
 chmod +x "$ARM_APP/Contents/MacOS/revfly"
 copy_resources "$ARM_APP"
 sign_app_bundle "$ARM_APP"
+revfly_notarize "$ARM_APP"
 make_dmg "$ARM_APP" "RevFly_Apple_Silicon_arm64.dmg" "RevFly Apple Silicon"
 rm -rf "$ARM_DIR"
 

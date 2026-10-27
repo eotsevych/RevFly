@@ -111,7 +111,8 @@ jobs:
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
-      - name: Import self-signed signing certificate
+      # MACOS_SIGNING_P12 holds the Developer ID Application certificate (or the older self-signed one).
+      - name: Import signing certificate
         env:
           MACOS_SIGNING_P12: ${{ secrets.MACOS_SIGNING_P12 }}
           MACOS_SIGNING_P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
@@ -137,6 +138,11 @@ jobs:
         env:
           # Fail instead of shipping the Apple translation provider without its helper.
           REVFLY_REQUIRE_APPLE_TRANSLATE: "1"
+          # Notarization (skipped when unset): app-specific password from account.apple.com.
+          # Only on release tags and manual runs; it adds ~15 minutes.
+          APPLE_ID: ${{ (env.IS_RELEASE == 'true' || github.event_name == 'workflow_dispatch') && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: bash scripts/build_installers.sh
 
       - name: Upload macOS installers

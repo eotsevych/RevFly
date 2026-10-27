@@ -1,6 +1,6 @@
 [package]
 name = "revfly"
-version = "1.0.6"
+version = "1.0.7"
 description = "RevFly Desktop Assistant"
 authors = ["RevFly Team"]
 edition = "2021"
@@ -38,6 +38,7 @@ regex = "1"
 tauri-plugin-updater = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-autostart = "2"
+tauri-plugin-single-instance = "2"
 nnnoiseless = { version = "0.5.2", default-features = false }
 rubato = "1.0.1"
 audioadapter-buffers = "2"
@@ -45,6 +46,9 @@ audioadapter-buffers = "2"
 [target.'cfg(target_os = "macos")'.dependencies]
 tauri = { version = "2", features = ["tray-icon", "macos-private-api", "custom-protocol", "devtools", "image-png"] }
 whisper-rs = { version = "0.16.0", features = ["metal"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 tauri = { version = "2", features = ["macos-private-api", "tray-icon", "custom-protocol", "devtools", "image-png"] }

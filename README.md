@@ -126,7 +126,7 @@ See **[INSTALL.md](INSTALL.md)** for detailed installation steps.
 
 ### macOS Quick Install (1-Line Terminal Command)
 
-Open Terminal and run this command to download, install, and clear gatekeeper quarantine automatically:
+RevFly is signed and notarized by Apple, so it opens without security warnings. Download `RevFly_Universal.dmg` from [Releases](https://github.com/eotsevych/RevFly/releases/latest), or run this in Terminal to download and install it:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/eotsevych/RevFly/main/scripts/install_mac.sh | bash
@@ -153,6 +153,32 @@ On macOS and Linux, RevFly updates itself: you get a notification when a new ver
 | **Linux** | `RevFly_<version>_amd64.AppImage`, `.deb` or `.rpm` | 64-bit Linux (Ubuntu, Debian, Fedora) |
 
 All installers are published on [GitHub Releases](https://github.com/eotsevych/RevFly/releases).
+
+### Linux: Pasting and Hotkeys
+
+**Pasting.** RevFly sends Ctrl+V with whichever of these tools is installed, and falls back to its built-in method (which on Wayland reaches only XWayland apps):
+
+| Session | Tools, in the order RevFly tries them | Install (Ubuntu/Debian) |
+|---|---|---|
+| X11 | `xdotool`, `ydotool` | `sudo apt install xdotool` |
+| Wayland (GNOME, KDE) | `dotool`, `ydotool` | `sudo apt install ydotool`, then make sure its daemon `ydotoold` runs (how depends on the distro's package) |
+| Wayland (Sway, Hyprland, others) | `wtype`, `dotool`, `ydotool` | `sudo apt install wtype` |
+
+On Wayland, also install `wl-clipboard` (`wl-copy`) so native Wayland apps see the copied text. If RevFly can't paste, the pill says so, and the text stays on the clipboard for Ctrl+V.
+
+**Hotkeys on Wayland.** Wayland doesn't let apps register global hotkeys. Add custom shortcuts in your desktop settings that run these commands instead:
+
+| Command | Does |
+|---|---|
+| `revfly --toggle` | Starts or stops a recording, like the main hotkey |
+| `revfly --translate` | Starts or stops a recording that is translated |
+| `revfly --cancel` | Cancels the recording in progress |
+
+- **GNOME:** Settings › Keyboard › Keyboard Shortcuts › Custom Shortcuts › **+**, with the command above.
+- **KDE Plasma:** System Settings › Shortcuts › **Add New** › **Command or Script**.
+- **Sway / i3:** `bindsym Mod4+o exec revfly --toggle` in your config.
+
+For the AppImage, use the AppImage's full path instead of `revfly`. The commands work on macOS and Windows too, for example from Raycast or a Stream Deck.
 
 ---
 
@@ -193,3 +219,5 @@ Each platform is built on its own OS. GitHub Actions builds all three on every p
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
+
+Linux pasting (`linux_paste.rs`) and the Linux memory fix (`memory.rs`) are adapted from [Handy](https://github.com/cjpais/Handy), MIT License, Copyright (c) 2025 CJ Pais.

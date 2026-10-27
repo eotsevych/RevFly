@@ -6,19 +6,13 @@ This guide explains how to install RevFly on macOS, Windows, and Linux.
 
 ## 1. macOS (Apple Silicon M-series & Intel)
 
-RevFly is free and open source, so it is not notarized by Apple (that requires a paid Apple Developer account).
-Options A and B install it without any "unidentified developer" warning. Option C works too, with one extra step.
+Since version 1.0.7, RevFly is signed with an Apple Developer ID and notarized by Apple: Apple scans every build for malware before it ships. It opens like any other Mac app, with no "unidentified developer" warning, whichever way you install it.
 
-### Option A: Quick 1-Line Terminal Install (Recommended)
+### Option A: Download the DMG
 
-This command downloads the latest app, installs it to Applications, and clears the macOS quarantine flag automatically.
-
-You will see **zero unknown developer warnings**.
-
-Open Terminal and run:
-```bash
-curl -fsSL https://raw.githubusercontent.com/eotsevych/RevFly/main/scripts/install_mac.sh | bash
-```
+1. Download **`RevFly_Universal.dmg`** (works on M1–M4 Apple Silicon and Intel) from [GitHub Releases](https://github.com/eotsevych/RevFly/releases/latest).
+2. Double-click the `.dmg` file to open it.
+3. Drag **RevFly** into your **Applications** folder, then open it.
 
 ---
 
@@ -33,32 +27,11 @@ To uninstall later: `brew uninstall --cask revfly` (add `--zap` to also remove s
 
 ---
 
-### Option C: Manual DMG Download
+### Option C: 1-Line Terminal Install
 
-1. Download **`RevFly_Universal.dmg`** (works on M1–M4 Apple Silicon and Intel) from [GitHub Releases](https://github.com/eotsevych/RevFly/releases).
-2. Double-click the `.dmg` file to open it.
-3. Drag **RevFly** into your **Applications** folder.
-
-#### First Launch: Allow RevFly to Open
-
-When downloaded with a browser, macOS blocks apps that are not notarized by Apple. You need to allow RevFly once:
-
-**macOS 15 Sequoia and newer:**
-1. Open **RevFly** from Applications. macOS says it cannot verify the app. Click **Done**.
-2. Open **System Settings** → **Privacy & Security**.
-3. Scroll down to the **Security** section. Next to *"RevFly" was blocked*, click **Open Anyway**.
-4. Confirm with your password or Touch ID, then click **Open Anyway** again.
-
-**macOS 11 Big Sur to 14 Sonoma:**
-1. Open your **Applications** folder in Finder.
-2. **Right-click** (or hold `Control` and click) **RevFly.app** and choose **Open**.
-3. Click **Open** in the dialog.
-
-You only need to do this once. After this, open the app normally.
-
-*Alternative (Terminal command, any macOS version)*:
+This command downloads the latest app and installs it to Applications:
 ```bash
-xattr -cr "/Applications/RevFly.app"
+curl -fsSL https://raw.githubusercontent.com/eotsevych/RevFly/main/scripts/install_mac.sh | bash
 ```
 
 ---
@@ -71,7 +44,7 @@ RevFly updates itself. It checks once a day, and when a new version is out you g
 
 You can also check at any time with **Check for Updates** in either place.
 
-Updates installed this way do not show the Gatekeeper warning again, and RevFly keeps its Microphone and Accessibility permissions.
+RevFly keeps its Microphone and Accessibility permissions across updates. The one exception is the update to 1.0.7, the first Apple-signed version: macOS asks for both once more. If pasting stops working after it, remove RevFly from System Settings → Privacy & Security → Accessibility with **–**, then add it again.
 
 ---
 

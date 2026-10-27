@@ -1,10 +1,14 @@
 pub mod app_controller;
 pub mod audio;
+pub mod cli;
 pub mod cpu_features;
 pub mod custom_models;
 pub mod global_key_listener;
 pub mod history;
+pub mod linux_paste;
+pub mod memory;
 pub mod paste;
+pub mod secure_input;
 pub mod perf;
 pub mod pipeline_logger;
 pub mod settings;
@@ -581,9 +585,38 @@ fn post_process_transcript(
     post_processor::post_process(&text, config)
 }
 
+/// Runs a command from a second `revfly` process (see cli.rs) in this one.
+fn handle_cli(app: &AppHandle, args: &[String]) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let controller = Arc::clone(&state.controller);
+    match cli::parse(args.iter().skip(1)) {
+        Some(cli::CliCommand::Toggle) => {
+            let _ = controller.toggle_recording_as("command line", RecordingMode::Main);
+        }
+        Some(cli::CliCommand::Translate) => {
+            let _ = controller.toggle_recording_as("command line (translate)", RecordingMode::Translate);
+        }
+        Some(cli::CliCommand::Cancel) => controller.cancel("command line"),
+        // Help is printed by the second process itself.
+        Some(cli::CliCommand::Help) => {}
+        // Launched again from the app menu: show Settings instead of starting a second copy.
+        None => tray::open_preferences(app),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    memory::init_allocator();
+    if cli::parse(std::env::args().skip(1)) == Some(cli::CliCommand::Help) {
+        println!("{}", cli::USAGE);
+        return;
+    }
+
     tauri::Builder::default()
+        // Must be the first plugin, so a second launch exits before anything else starts.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| handle_cli(app, &args)))
         .plugin(tauri_plugin_log::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
@@ -594,6 +627,11 @@ pub fn run() {
                     if event.state() == ShortcutState::Pressed {
                         if let Some(state) = app.try_state::<AppState>() {
                             let controller = Arc::clone(&state.controller);
+                            // Registered only while Secure Input is on (see secure_input.rs).
+                            if *shortcut == secure_input::escape_shortcut() {
+                                controller.cancel("Esc (Secure Input)");
+                                return;
+                            }
                             let mode = shortcut_mode(shortcut, &controller.get_settings());
                             let trigger = match mode {
                                 RecordingMode::Main => "keyboard shortcut",

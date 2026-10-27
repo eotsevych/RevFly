@@ -1553,10 +1553,13 @@ impl AppController {
                     };
                     log_stage_event(&data_dir, "TRANSLATE_RETRY_DONE", &format!("Translated in {} ms via {}: \"{}\"", ms, translated.via, final_text));
                     *phase_arc.lock().unwrap() = AssistantPhase::Done;
-                    if settings.auto_paste {
-                        let _ = copy_and_paste(&final_text);
+                    let pasted = if settings.auto_paste {
+                        copy_and_paste(&final_text).map(|_| ())
                     } else {
-                        let _ = crate::paste::copy_to_clipboard(&final_text);
+                        crate::paste::copy_to_clipboard(&final_text)
+                    };
+                    if let Err(e) = pasted {
+                        log_stage_event(&data_dir, "PASTE_FAILED", &e);
                     }
                     if let Err(e) = history_arc.update_translation(pending.history_id, &final_text) {
                         log::warn!("Could not update history with the retried translation: {}", e);
@@ -1629,7 +1632,11 @@ impl AppController {
         match cur_phase {
             AssistantPhase::Idle => {
                 *self.recording_mode.lock().unwrap() = mode;
-                self.start_listening(trigger)
+                let started = self.start_listening(trigger);
+                if self.is_listening() {
+                    crate::secure_input::guard_escape(&self.app_handle);
+                }
+                started
             }
             AssistantPhase::Listening => self.stop_listening_and_process(trigger),
             _ => {
@@ -1940,7 +1947,7 @@ impl AppController {
         let mode = *self.recording_mode.lock().unwrap();
 
         // Run processing in background thread using Tauri's async runtime
-        tauri::async_runtime::spawn(async move {
+        let pipeline = async move {
             let is_cancelled = || session_id_arc.load(Ordering::SeqCst) != session;
             let data_dir = get_data_dir();
             if is_cancelled() {
@@ -2750,17 +2757,38 @@ impl AppController {
 
             // Step 7: Copy to clipboard and auto-paste if enabled
             let paste_start = Instant::now();
-            if settings.auto_paste {
-                let _ = copy_and_paste(&final_text);
+            // Err: not pasted (the text is on the clipboard). Ok(Some): pasted with a fallback
+            // that may miss some apps; the note says what to do.
+            let pasted = if settings.auto_paste {
+                copy_and_paste(&final_text)
             } else {
-                let _ = crate::paste::copy_to_clipboard(&final_text);
-            }
+                crate::paste::copy_to_clipboard(&final_text).map(|_| None)
+            };
             let paste_ms = paste_start.elapsed().as_millis() as u64;
-            log_stage_event(&data_dir, "PASTE", &format!("Auto-paste {} in {} ms", if settings.auto_paste { "dispatched" } else { "skipped" }, paste_ms));
+            match &pasted {
+                Ok(_) => log_stage_event(&data_dir, "PASTE", &format!("Auto-paste {} in {} ms", if settings.auto_paste { "dispatched" } else { "skipped" }, paste_ms)),
+                Err(e) => log_stage_event(&data_dir, "PASTE_FAILED", &format!("After {} ms: {}", paste_ms, e)),
+            }
             perf.lap("paste");
+            let paste_message = match &pasted {
+                Err(e) => Some(("Couldn't Paste", e.clone())),
+                Ok(Some(note)) => Some(("Check That It Pasted", note.clone())),
+                Ok(None) => None,
+            };
+            if paste_message.is_some() && !translation_failed {
+                // Back to Idle now, so the hotkey works while the message is on screen.
+                *phase_arc.lock().unwrap() = AssistantPhase::Idle;
+            }
 
             // A failed translation is announced after it's saved to history (the retry needs its id).
-            if !translation_failed {
+            if let (Some((title, subtitle)), false) = (&paste_message, translation_failed) {
+                show_long_error_payload(
+                    &app_handle,
+                    &session_id_arc,
+                    session,
+                    serde_json::json!({ "state": "error", "title": title, "subtitle": subtitle, "long": true }),
+                );
+            } else if !translation_failed {
                 let _ = app_handle.emit(
                     "assistant-state-changed",
                     serde_json::json!({
@@ -2867,7 +2895,10 @@ impl AppController {
             } else {
                 actions.push(format!("[TRANSLATION] Translated locally in {} ms via Whisper", translation_ms));
             }
-            actions.push(format!("[DISPATCH] Pasted output in {} ms", paste_ms));
+            match &pasted {
+                Err(e) => actions.push(format!("[DISPATCH] Paste failed after {} ms: {}", paste_ms, e)),
+                Ok(_) => actions.push(format!("[DISPATCH] Pasted output in {} ms", paste_ms)),
+            }
             actions.push(format!("[COMPLETE] Total pipeline finished in {} ms", total_pipeline_ms));
 
             // Step 9: Diagnostic Logging (stdout report, file write, in-memory ring buffer, Tauri event)
@@ -2915,8 +2946,8 @@ impl AppController {
             pipeline_logger_arc.add_log(log_entry.clone(), &get_data_dir());
             let _ = app_handle.emit("transcription-diagnostic-log", &log_entry);
 
-            // A failed translation hides itself after LONG_ERROR_HOLD (see show_long_error_payload).
-            if translation_failed {
+            // A failed translation or paste hides itself after LONG_ERROR_HOLD (see show_long_error_payload).
+            if translation_failed || paste_message.is_some() {
                 return;
             }
             // Show the done pill briefly, then revert to Idle and hide the window.
@@ -2937,6 +2968,11 @@ impl AppController {
                     hide_main_window(&app_handle);
                 }
             }
+        };
+        tauri::async_runtime::spawn(async move {
+            pipeline.await;
+            // The recording's buffers are freed once the pipeline is done with them.
+            crate::memory::trim_freed_memory();
         });
 
         Ok(())
