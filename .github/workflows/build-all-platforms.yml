@@ -138,11 +138,11 @@ jobs:
         env:
           # Fail instead of shipping the Apple translation provider without its helper.
           REVFLY_REQUIRE_APPLE_TRANSLATE: "1"
-          # Notarization (skipped when unset): app-specific password from account.apple.com.
+          # Notarization (skipped when unset) with an App Store Connect API key.
           # Only on release tags and manual runs; it adds ~15 minutes.
-          APPLE_ID: ${{ (env.IS_RELEASE == 'true' || github.event_name == 'workflow_dispatch') && secrets.APPLE_ID || '' }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ (env.IS_RELEASE == 'true' || github.event_name == 'workflow_dispatch') && secrets.APPLE_API_KEY || '' }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: bash scripts/build_installers.sh
 
       - name: Upload macOS installers

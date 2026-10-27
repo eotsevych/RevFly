@@ -53,21 +53,25 @@ revfly_print_identity() {
 }
 
 # Sends a signed .app or .dmg to Apple's notary service and staples the ticket to it, so it opens
-# without a Gatekeeper warning, even offline. Needs a Developer ID identity plus APPLE_ID,
-# APPLE_PASSWORD (an app-specific password) and APPLE_TEAM_ID; skipped otherwise.
+# without a Gatekeeper warning, even offline. Needs a Developer ID identity plus an App Store
+# Connect API key: APPLE_API_KEY (the .p8 file's contents), APPLE_API_KEY_ID and APPLE_API_ISSUER;
+# skipped otherwise.
 revfly_notarize() {
   local target="$1"
-  if [ "$REVFLY_DEVELOPER_ID" != 1 ] || [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_PASSWORD:-}" ] || [ -z "${APPLE_TEAM_ID:-}" ]; then
-    echo "--> Skipping notarization of $(basename "$target") (needs Developer ID + APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID)."
+  if [ "$REVFLY_DEVELOPER_ID" != 1 ] || [ -z "${APPLE_API_KEY:-}" ] || [ -z "${APPLE_API_KEY_ID:-}" ] || [ -z "${APPLE_API_ISSUER:-}" ]; then
+    echo "--> Skipping notarization of $(basename "$target") (needs Developer ID + APPLE_API_KEY, APPLE_API_KEY_ID, APPLE_API_ISSUER)."
     return 0
   fi
+  local key_file
+  key_file="$(mktemp)"
+  printf '%s\n' "$APPLE_API_KEY" > "$key_file"
   local upload="$target"
   if [ -d "$target" ]; then
     # The notary service takes a zip, not a bare .app.
     upload="$(mktemp -d)/$(basename "$target").zip"
     ditto -c -k --keepParent "$target" "$upload"
   fi
-  local auth=(--apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID")
+  local auth=(--key "$key_file" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER")
   echo "--> Notarizing $(basename "$target") (usually a few minutes)..."
   local out
   out="$(xcrun notarytool submit "$upload" "${auth[@]}" --wait 2>&1)" || true
@@ -76,9 +80,11 @@ revfly_notarize() {
     local id
     id="$(awk '$1 == "id:" {print $2; exit}' <<<"$out")"
     [ -n "$id" ] && xcrun notarytool log "$id" "${auth[@]}"
+    rm -f "$key_file"
     echo "❌ Notarization failed for $(basename "$target")" >&2
     return 1
   fi
+  rm -f "$key_file"
   xcrun stapler staple "$target"
 }
 

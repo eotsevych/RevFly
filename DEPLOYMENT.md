@@ -227,15 +227,15 @@ Do this once. Keep every file below backed up (for example in a password manager
 With a paid Apple Developer account, the build signs with your Developer ID and gets each `.app` and `.dmg` notarized automatically. Notarization is an automated scan that takes a few minutes per file, not an App Review.
 
 1. Create the certificate (only the Account Holder can): Xcode → Settings → Accounts → Manage Certificates → **+** → **Developer ID Application**. It lands in your login keychain, and `scripts/lib_codesign.sh` picks it over the self-signed one.
-2. Create an app-specific password at [account.apple.com](https://account.apple.com) → Sign-In and Security → App-Specific Passwords. Find your Team ID at [developer.apple.com/account](https://developer.apple.com/account) → Membership details.
-3. Local builds: `export APPLE_ID=you@example.com APPLE_PASSWORD=xxxx-xxxx-xxxx-xxxx APPLE_TEAM_ID=ABCDE12345` before `bash scripts/build_installers.sh`. Without them the build is signed but not notarized.
+2. Create an App Store Connect API key: [appstoreconnect.apple.com](https://appstoreconnect.apple.com) → Users and Access → Integrations → **Team Keys** → **+**, access **Developer**. Note the **Key ID** and the **Issuer ID** above the list, and download the `AuthKey_<KeyID>.p8` file (Apple lets you download it only once). An API key avoids the Apple ID + app-specific password login, which can fail with "401 Invalid credentials" even when both are right.
+3. Local builds: `export APPLE_API_KEY="$(cat AuthKey_XXXX.p8)" APPLE_API_KEY_ID=XXXX APPLE_API_ISSUER=<issuer-uuid>` before `bash scripts/build_installers.sh`. Without them the build is signed but not notarized.
 4. CI: in Keychain Access, export the "Developer ID Application" certificate with its private key as a `.p12`, then replace the self-signed secrets:
    ```bash
    base64 -i DeveloperID.p12 | gh secret set MACOS_SIGNING_P12
    gh secret set MACOS_SIGNING_P12_PASSWORD   # the .p12 export password
-   gh secret set APPLE_ID
-   gh secret set APPLE_PASSWORD
-   gh secret set APPLE_TEAM_ID
+   gh secret set APPLE_API_KEY < AuthKey_XXXX.p8
+   gh secret set APPLE_API_KEY_ID
+   gh secret set APPLE_API_ISSUER
    ```
 5. Check a build: `spctl -a -vv /Applications/RevFly.app` should say `source=Notarized Developer ID`.
 
