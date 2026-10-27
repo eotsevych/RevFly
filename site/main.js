@@ -178,7 +178,7 @@ const HERO_ASSET = { linux: "linux-appimage" };
 // Store installs skip the SmartScreen prompt and update through the Store.
 const STORE_URL = "https://apps.microsoft.com/detail/9NVMTPSDZFWR";
 if (os === "windows") document.getElementById("hero-download").href = STORE_URL;
-// The .dmg isn't notarized, so Macs go to the Homebrew command instead.
+// Macs go to the download card, which offers both Homebrew and the .dmg.
 if (os === "mac") document.getElementById("hero-download").href = "#download-mac";
 
 async function loadRelease() {
