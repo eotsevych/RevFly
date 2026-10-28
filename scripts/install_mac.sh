@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # RevFly - 1-Line Installer for macOS
-# Automatically downloads, installs, and clears Gatekeeper quarantine flags.
+# Downloads the latest notarized release and installs it to /Applications.
 
 set -e
 
@@ -95,10 +95,6 @@ cp -R "$SOURCE_APP" "/Applications/"
 hdiutil detach "$MOUNT_POINT" -force >/dev/null 2>&1 || true
 MOUNT_POINT=""
 
-# Clear macOS quarantine flag (bypasses Gatekeeper "unidentified developer" block)
-echo "--> Clearing macOS quarantine flag..."
-xattr -cr "$INSTALL_PATH" || true
-
 # Register with macOS LaunchServices
 echo "--> Registering application with system..."
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$INSTALL_PATH" >/dev/null 2>&1 || true
@@ -106,7 +102,6 @@ echo "--> Registering application with system..."
 echo ""
 echo "=========================================================="
 echo "✓ RevFly installed successfully into /Applications!"
-echo "✓ Gatekeeper quarantine cleared (no unknown developer warning)."
 echo "=========================================================="
 echo ""
 echo "To start the app:"
