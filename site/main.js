@@ -22,7 +22,6 @@ const EN = {
   "ui.selectCopy": "Select & copy",
   "hero.download": "Download RevFly",
   "hero.downloadFor": "Download for {os}",
-  "hero.installFor": "Install for {os}",
   "dl.latestTag": "Latest: {tag}",
   "demo.listening": "Listening",
   "demo.toEnglish": "Translating to English",
@@ -158,7 +157,7 @@ function updateDynamicText() {
   const heroLabel = document.getElementById("hero-download-label");
   heroLabel.textContent = !os
     ? t("hero.download")
-    : t(os === "mac" ? "hero.installFor" : "hero.downloadFor", { os: OS_NAMES[os] });
+    : t("hero.downloadFor", { os: OS_NAMES[os] });
   if (releaseTag) {
     document.getElementById("release-version").textContent = t("dl.latestTag", { tag: releaseTag });
   }
@@ -174,12 +173,10 @@ const ASSET_PATTERNS = {
   "linux-deb": /_amd64\.deb$/,
   "linux-rpm": /\.x86_64\.rpm$/,
 };
-const HERO_ASSET = { linux: "linux-appimage" };
+const HERO_ASSET = { mac: "mac-dmg", linux: "linux-appimage" };
 // Store installs skip the SmartScreen prompt and update through the Store.
 const STORE_URL = "https://apps.microsoft.com/detail/9NVMTPSDZFWR";
 if (os === "windows") document.getElementById("hero-download").href = STORE_URL;
-// Macs go to the download card, which offers both Homebrew and the .dmg.
-if (os === "mac") document.getElementById("hero-download").href = "#download-mac";
 
 async function loadRelease() {
   try {
