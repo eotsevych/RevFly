@@ -168,6 +168,10 @@ jobs:
     needs: [create-release, test]
     if: ${{ !failure() && !cancelled() }}
     runs-on: windows-latest
+    # Whisper's Vulkan build nests deep CMake folders that pass Windows' 260-character path limit
+    # under D:\a\RevFly\RevFly\src-tauri\target, so cargo builds in a short folder instead.
+    env:
+      CARGO_TARGET_DIR: C:\t
     defaults:
       run:
         shell: bash
@@ -215,6 +219,11 @@ jobs:
           else
             bun run tauri build --bundles nsis,msi
           fi
+
+      # The steps below read the build from src-tauri/target.
+      - name: Link the build folder
+        shell: pwsh
+        run: New-Item -ItemType Junction -Path src-tauri\target -Target C:\t | Out-Null
 
       # The same app, packaged for the Microsoft Store (it switches its own updater off there).
       # Unsigned: the Store signs it on publish, so it is kept out of the GitHub Release.

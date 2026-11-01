@@ -155,9 +155,7 @@ let releaseTag = null;
 // Text that depends on runtime state (OS, release) as well as the language.
 function updateDynamicText() {
   const heroLabel = document.getElementById("hero-download-label");
-  heroLabel.textContent = !os
-    ? t("hero.download")
-    : t("hero.downloadFor", { os: OS_NAMES[os] });
+  heroLabel.textContent = !os ? t("hero.download") : t("hero.downloadFor", { os: OS_NAMES[os] });
   if (releaseTag) {
     document.getElementById("release-version").textContent = t("dl.latestTag", { tag: releaseTag });
   }
