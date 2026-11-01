@@ -165,8 +165,7 @@ pub fn open_whats_new(app: &AppHandle) {
                 if let tauri::WindowEvent::Destroyed = event {
                     if let Some(state) = app.try_state::<crate::AppState>() {
                         let mut s = state.controller.get_settings();
-                        if !s.apple_translation_announced {
-                            s.apple_translation_announced = true;
+                        if s.last_version.as_deref() != Some(env!("CARGO_PKG_VERSION")) {
                             s.last_version = Some(env!("CARGO_PKG_VERSION").to_string());
                             let _ = state.controller.save_settings(s);
                         }
@@ -267,7 +266,7 @@ const TRANSLATION_MODES: [(&str, &str); 3] = [
     ("hotkey", "With the Translate Hotkey"),
     ("auto", "Automatic (Launch Hotkey)"),
 ];
-/// Apple's providers are listed only where they can run (macOS 26+); Offline only where they can't.
+/// Apple's providers are listed only where they can run (macOS 26+); the others everywhere.
 const TRANSLATION_PROVIDERS: [(&str, &str); 5] = [
     ("LLM", "LLM (both local & cloud)"),
     ("Custom API", "Custom API"),
@@ -521,12 +520,10 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
         translation_items.push((format!("mode:{}", mode), item));
     }
     for (provider, label) in TRANSLATION_PROVIDERS {
-        // Apple's engines where Apple Translation runs, the offline models everywhere else; the
-        // chosen one always stays listed.
+        // Apple's engines only where Apple Translation runs; the chosen one always stays listed.
         let apple = crate::apple_translate::is_apple(provider) || crate::apple_translate::is_apple_intelligence(provider);
-        let offline = crate::offline_translate::is_offline(provider);
         let checked = provider_key(settings) == provider;
-        let fits = if apple || offline { apple == crate::apple_translate::is_available() } else { true };
+        let fits = !apple || crate::apple_translate::is_available();
         if !fits && !checked {
             continue;
         }

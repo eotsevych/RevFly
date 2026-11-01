@@ -328,8 +328,8 @@ export default function GeneralTab({ t }: { t: Tokens }) {
 
   return (
     <div>
-      {/* ── System Permissions (macOS only): at the top while missing, at the bottom once granted ── */}
-      {IS_MAC && isAccessibilityGranted !== true && permissions}
+      {/* ── System Permissions (macOS only: Accessibility permission) ── */}
+      {IS_MAC && permissions}
       <UpdatesSection t={t} />
 
       {/* ── Input Section ── */}
@@ -638,8 +638,6 @@ export default function GeneralTab({ t }: { t: Tokens }) {
           />
         </Row>
       </Section>
-
-      {IS_MAC && isAccessibilityGranted === true && permissions}
     </div>
   );
 }

@@ -350,15 +350,10 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
             style={{ padding: 12, display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}
           >
             {PROVIDERS.map((p) => {
-              // Apple's engines where Apple Translation runs (macOS 26+), the offline models
-              // everywhere else (older Macs, Windows, Linux). The chosen one always stays visible.
+              // Apple's engines only where Apple Translation runs (macOS 26+). The chosen one
+              // always stays visible.
               const native = p.value === "Apple" || p.value === "Apple Intelligence";
-              const fits =
-                p.value === "Offline"
-                  ? appleInfo?.available === false
-                  : native
-                    ? appleInfo?.available === true
-                    : true;
+              const fits = !native || appleInfo?.available === true;
               if (!fits && activeProvider !== p.value) return null;
               const reason =
                 p.value === "Apple"

@@ -152,9 +152,6 @@ pub struct AppSettings {
     /// The RevFly version that last ran, so an upgrade can be told apart from a new install.
     #[serde(default)]
     pub last_version: Option<String>,
-    /// Whether the What's New window announcing Apple Translation was shown.
-    #[serde(default)]
-    pub apple_translation_announced: bool,
 }
 
 fn default_llm_endpoint() -> String {
@@ -305,7 +302,6 @@ impl Default for AppSettings {
             custom_api_model: default_custom_model(),
             prompt_template: default_prompt_template(),
             last_version: None,
-            apple_translation_announced: false,
         }
     }
 }
@@ -389,22 +385,10 @@ impl AppSettings {
         true
     }
 
-    /// Whether to show What's New: this install upgraded from a version without Apple Translation
-    /// and the Mac supports it.
-    pub fn should_announce_apple_translation(&self) -> bool {
-        if !crate::apple_translate::is_available() {
-            return false;
-        }
-        if self.apple_translation_announced {
-            return false;
-        }
-        if !self.onboarding_done {
-            return false;
-        }
-        match &self.last_version {
-            None => true,
-            Some(v) => is_version_older_than(v, APPLE_TRANSLATION_SINCE),
-        }
+    /// Whether to show What's New: the first launch after an update. A new install sets
+    /// `last_version` when the welcome guide closes, so it never sees it.
+    pub fn should_show_whats_new(&self) -> bool {
+        self.onboarding_done && self.last_version.as_deref() != Some(env!("CARGO_PKG_VERSION"))
     }
 
     pub fn load() -> Self {
@@ -441,31 +425,6 @@ impl AppSettings {
         fs::write(settings_path, json).map_err(|e| e.to_string())?;
         Ok(())
     }
-}
-
-/// The first version with Apple Translation; upgrades from before it see What's New.
-const APPLE_TRANSLATION_SINCE: &str = "1.0.6";
-
-/// Whether version `current` ("1.0.5", "v1.0.5") is older than `target`.
-pub fn is_version_older_than(current: &str, target: &str) -> bool {
-    let parse = |v: &str| -> Vec<u32> {
-        v.trim_start_matches('v')
-            .split(|c: char| !c.is_ascii_digit())
-            .filter(|s| !s.is_empty())
-            .filter_map(|s| s.parse::<u32>().ok())
-            .collect()
-    };
-    let c = parse(current);
-    let t = parse(target);
-    for (a, b) in c.iter().zip(t.iter()) {
-        if a < b {
-            return true;
-        }
-        if a > b {
-            return false;
-        }
-    }
-    c.len() < t.len()
 }
 
 #[cfg(test)]
@@ -535,31 +494,16 @@ mod tests {
     }
 
     #[test]
-    fn test_version_older_than() {
-        use super::is_version_older_than;
-        assert!(is_version_older_than("1.0.5", "1.0.6"));
-        assert!(is_version_older_than("1.0.0", "1.0.6"));
-        assert!(is_version_older_than("0.9.20", "1.0.6"));
-        assert!(is_version_older_than("v1.0.5", "1.0.6"));
-        assert!(!is_version_older_than("1.0.6", "1.0.6"));
-        assert!(!is_version_older_than("1.0.7", "1.0.6"));
-    }
-
-    #[test]
-    fn test_should_announce_apple_translation() {
+    fn test_should_show_whats_new() {
         let mut s = AppSettings::default();
-        // Brand new install: onboarding not done yet -> do not announce
-        assert!(!s.should_announce_apple_translation());
-
-        // Existing user who upgraded from 1.0.5 (or prior without last_version)
+        // New install, welcome guide still open.
+        assert!(!s.should_show_whats_new());
+        // Updated from an older version.
         s.onboarding_done = true;
-        s.apple_translation_announced = false;
-        s.last_version = None;
-        let expected = crate::apple_translate::is_available();
-        assert_eq!(s.should_announce_apple_translation(), expected);
-
-        // Once announced -> false
-        s.apple_translation_announced = true;
-        assert!(!s.should_announce_apple_translation());
+        s.last_version = Some("1.0.7".to_string());
+        assert!(s.should_show_whats_new());
+        // Seen.
+        s.last_version = Some(env!("CARGO_PKG_VERSION").to_string());
+        assert!(!s.should_show_whats_new());
     }
 }

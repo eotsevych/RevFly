@@ -1,13 +1,6 @@
 import { useState, useEffect, type ReactNode } from "react";
 import { useResolvedTheme } from "@/lib/theme";
-import { formatDisplay } from "@/lib/hotkey";
-import {
-  dismissWhatsNew,
-  enableAppleTranslationAndDismiss,
-  openSettingsFromWhatsNew,
-  fetchSettings,
-  fetchUpdateStatus,
-} from "@/lib/tauri";
+import { dismissWhatsNew, openSettingsFromWhatsNew, fetchUpdateStatus } from "@/lib/tauri";
 
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
 const SANS = "Inter, system-ui, sans-serif";
@@ -140,36 +133,29 @@ function Feature({
   );
 }
 
-/** Shown once after upgrading on a Mac that has Apple Translation (macOS 15+), and from Settings >
- * Updates. Both buttons open Settings on Translations, where the languages are downloaded. */
+/** Shown once after each update, and from Settings › Updates. Update the features for each release
+ * that changes what users see. */
 export function WhatsNewModal() {
   const theme = useResolvedTheme();
   const p = theme === "dark" ? DARK : LIGHT;
-  const [loading, setLoading] = useState<"enable" | "settings" | "dismiss" | null>(null);
+  const [loading, setLoading] = useState<"settings" | "dismiss" | null>(null);
   const [version, setVersion] = useState<string | null>(null);
-  // Set when translation is off, so turning Apple on also turns on this hotkey.
-  const [offHotkey, setOffHotkey] = useState<string | null>(null);
 
   useEffect(() => {
     fetchUpdateStatus().then((s) => setVersion(s?.current_version ?? null));
-    fetchSettings().then((s) => {
-      if (s?.translation_mode === "off") setOffHotkey(formatDisplay(s.translate_hotkey ?? ""));
-    });
   }, []);
 
-  const run =
-    (which: "enable" | "settings" | "dismiss", action: () => Promise<void>) => async () => {
-      if (loading) return;
-      setLoading(which);
-      try {
-        await action();
-      } catch (e) {
-        console.error("What's New action failed:", e);
-        setLoading(null);
-      }
-    };
+  const run = (which: "settings" | "dismiss", action: () => Promise<void>) => async () => {
+    if (loading) return;
+    setLoading(which);
+    try {
+      await action();
+    } catch (e) {
+      console.error("What's New action failed:", e);
+      setLoading(null);
+    }
+  };
 
-  const handleEnable = run("enable", enableAppleTranslationAndDismiss);
   const handleSettings = run("settings", openSettingsFromWhatsNew);
   const handleDismiss = run("dismiss", dismissWhatsNew);
 
@@ -271,7 +257,7 @@ export function WhatsNewModal() {
       </div>
 
       {/* Title & lead */}
-      <div style={{ marginBottom: 16 }}>
+      <div style={{ marginBottom: 14 }}>
         <h1
           style={{
             margin: "0 0 6px",
@@ -281,128 +267,113 @@ export function WhatsNewModal() {
             color: p.text,
           }}
         >
-          Apple Translation
+          What&apos;s new
         </h1>
         <p style={{ margin: 0, fontSize: 13, lineHeight: 1.45, color: p.body }}>
-          RevFly can now translate your dictations with the translation built into macOS, right on
-          your Mac.
+          Simpler settings, text styles and faster long dictations.
         </p>
       </div>
 
       {/* Feature highlights */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1 }}>
-        <Feature
-          p={p}
-          color={p.green}
-          soft={p.greenSoft}
-          border={p.greenBorder}
-          title="Stays on your Mac"
-          icon={
-            <Icon>
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-            </Icon>
-          }
-        >
-          Your text isn&apos;t sent to any server, and no API key is needed.
-        </Feature>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1 }}>
         <Feature
           p={p}
           color={p.accent}
           soft={p.accentSoft}
           border={p.accentSoftBorder}
-          title="Works offline"
+          title="Text styles"
           icon={
             <Icon>
-              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+              <path d="M4 7V5h16v2M9 19h6M12 5v14" />
             </Icon>
           }
         >
-          Once a language is downloaded, translating doesn&apos;t wait on the network.
+          Natural speech, For AI prompts or Verbatim. Pick one in Settings › Text.
         </Feature>
         <Feature
           p={p}
           color={p.cyan}
           soft={p.cyanSoft}
           border={p.cyanBorder}
-          title="Download your languages once"
+          title="Simpler settings"
           icon={
             <Icon>
-              <path d="M12 3v12M7 10l5 5 5-5M5 21h14" />
+              <path d="M4 6h16M4 12h10M4 18h6" />
             </Icon>
           }
         >
-          Apple needs each language you speak downloaded. Settings › Translations shows which are
-          ready and downloads the rest.
+          The basics come first. Details show when you turn a feature on.
+        </Feature>
+        <Feature
+          p={p}
+          color={p.accent}
+          soft={p.accentSoft}
+          border={p.accentSoftBorder}
+          title="Faster long dictations"
+          icon={
+            <Icon>
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+            </Icon>
+          }
+        >
+          Transcribe while you talk now works with every model, so text is ready right after you
+          stop.
+        </Feature>
+        <Feature
+          p={p}
+          color={p.green}
+          soft={p.greenSoft}
+          border={p.greenBorder}
+          title="Offline translation everywhere"
+          icon={
+            <Icon>
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </Icon>
+          }
+        >
+          On-device translation on Windows, Linux and Mac. Nothing leaves your computer.
         </Feature>
       </div>
 
       {/* Actions */}
-      <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 10 }}>
-        {offHotkey !== null && (
-          <div style={{ fontSize: 11.5, lineHeight: 1.4, color: p.dim, textAlign: "center" }}>
-            Translation is off now. Turning this on also turns on the translate hotkey
-            {offHotkey ? ` (${offHotkey})` : ""}.
-          </div>
-        )}
-        <div style={{ display: "flex", gap: 10 }}>
-          <button
-            type="button"
-            onClick={handleEnable}
-            disabled={loading !== null}
-            style={{
-              flex: 1.4,
-              padding: "10px 16px",
-              borderRadius: 10,
-              background: p.accent,
-              color: p.onAccent,
-              border: "none",
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: loading ? "default" : "pointer",
-              opacity: loading && loading !== "enable" ? 0.6 : 1,
-              transition: "transform 0.1s, opacity 0.15s",
-            }}
-          >
-            {loading === "enable" ? "Turning On…" : "Turn On Apple Translation"}
-          </button>
-
-          <button
-            type="button"
-            onClick={handleSettings}
-            disabled={loading !== null}
-            style={{
-              flex: 1,
-              padding: "10px 16px",
-              borderRadius: 10,
-              background: "transparent",
-              color: p.text,
-              border: `1px solid ${p.cardBorder}`,
-              fontSize: 13,
-              fontWeight: 500,
-              cursor: loading ? "default" : "pointer",
-              opacity: loading && loading !== "settings" ? 0.6 : 1,
-            }}
-          >
-            {loading === "settings" ? "Opening…" : "Open Settings"}
-          </button>
-        </div>
-
+      <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
+        <button
+          type="button"
+          onClick={handleSettings}
+          disabled={loading !== null}
+          style={{
+            flex: 1.4,
+            padding: "10px 16px",
+            borderRadius: 10,
+            background: p.accent,
+            color: p.onAccent,
+            border: "none",
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: loading ? "default" : "pointer",
+            opacity: loading && loading !== "settings" ? 0.6 : 1,
+          }}
+        >
+          {loading === "settings" ? "Opening…" : "Choose a Text Style"}
+        </button>
         <button
           type="button"
           onClick={handleDismiss}
           disabled={loading !== null}
           style={{
-            background: "none",
-            border: "none",
-            color: p.dim,
-            fontSize: 12,
+            flex: 1,
+            padding: "10px 16px",
+            borderRadius: 10,
+            background: "transparent",
+            color: p.text,
+            border: `1px solid ${p.cardBorder}`,
+            fontSize: 13,
             fontWeight: 500,
             cursor: loading ? "default" : "pointer",
-            padding: "4px 0",
-            textAlign: "center",
+            opacity: loading && loading !== "dismiss" ? 0.6 : 1,
           }}
         >
-          Not now
+          Close
         </button>
       </div>
     </div>

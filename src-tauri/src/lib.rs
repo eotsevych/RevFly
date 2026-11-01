@@ -273,30 +273,11 @@ fn dismiss_whats_new(app_handle: AppHandle) {
     close_whats_new(&app_handle);
 }
 
-/// What's New's "Turn On Apple Translation": makes Apple the translation service, turning on the
-/// translate hotkey if translation was off, and opens Settings on Translations, where the user
-/// downloads the languages Apple needs.
-#[tauri::command]
-fn enable_apple_translation_and_dismiss(
-    app_handle: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let mut settings = state.controller.get_settings();
-    settings.translation_provider = crate::apple_translate::PROVIDER.to_string();
-    if settings.translation_off() {
-        settings.translation_mode = "hotkey".to_string();
-    }
-    state.controller.save_settings(settings.clone())?;
-    apply_hotkeys(&app_handle, &state, &settings);
-    close_whats_new(&app_handle);
-    tray::open_preferences_tab(&app_handle, "translations");
-    Ok(())
-}
-
+/// What's New's "Open Settings": on Text, where the new text styles are.
 #[tauri::command]
 fn open_settings_from_whats_new(app_handle: AppHandle) {
     close_whats_new(&app_handle);
-    tray::open_preferences_tab(&app_handle, "translations");
+    tray::open_preferences_tab(&app_handle, "text");
 }
 
 fn close_whats_new(app_handle: &AppHandle) {
@@ -327,7 +308,6 @@ pub(crate) fn mark_onboarding_done(app_handle: &AppHandle) {
         return;
     }
     settings.onboarding_done = true;
-    settings.apple_translation_announced = true;
     settings.last_version = Some(env!("CARGO_PKG_VERSION").to_string());
     if let Err(e) = state.controller.save_settings(settings) {
         log::warn!("Could not save that the welcome guide was seen: {}", e);
@@ -768,7 +748,6 @@ pub fn run() {
             finish_onboarding,
             open_whats_new_window,
             dismiss_whats_new,
-            enable_apple_translation_and_dismiss,
             open_settings_from_whats_new,
             take_settings_tab,
             set_practice_mode,
@@ -827,20 +806,13 @@ pub fn run() {
                     .try_state::<AppState>()
                     .map(|state| {
                         let s = state.controller.get_settings();
-                        (s.onboarding_done, s.should_announce_apple_translation())
+                        (s.onboarding_done, s.should_show_whats_new())
                     })
                     .unwrap_or((true, false));
                 if !done {
                     tray::open_onboarding(app);
                 } else if announce {
                     tray::open_whats_new(app);
-                } else if let Some(state) = app.try_state::<AppState>() {
-                    let s = state.controller.get_settings();
-                    if s.last_version.as_deref() != Some(env!("CARGO_PKG_VERSION")) {
-                        let mut updated = s;
-                        updated.last_version = Some(env!("CARGO_PKG_VERSION").to_string());
-                        let _ = state.controller.save_settings(updated);
-                    }
                 }
             }
             #[cfg(target_os = "macos")]

@@ -80,7 +80,6 @@ export interface BackendSettings {
   custom_api_model?: string;
   prompt_template?: string;
   last_version?: string | null;
-  apple_translation_announced?: boolean;
 }
 
 export interface HardwareProfile {
@@ -399,15 +398,6 @@ export async function dismissWhatsNew(): Promise<void> {
     await invoke("dismiss_whats_new");
   } catch (err) {
     console.error("Failed to dismiss what's new:", err);
-  }
-}
-
-export async function enableAppleTranslationAndDismiss(): Promise<void> {
-  if (!isTauri()) return;
-  try {
-    await invoke("enable_apple_translation_and_dismiss");
-  } catch (err) {
-    console.error("Failed to enable Apple translation:", err);
   }
 }
 
