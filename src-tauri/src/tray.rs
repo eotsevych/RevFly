@@ -147,7 +147,7 @@ pub fn open_whats_new(app: &AppHandle) {
     }
     let builder = WebviewWindowBuilder::new(app, "whats-new", WebviewUrl::App("index.html#whats-new".into()))
         .title("What's New in RevFly")
-        .inner_size(520.0, 520.0)
+        .inner_size(540.0, 680.0)
         .resizable(false)
         .maximizable(false)
         .decorations(false)
