@@ -80,7 +80,8 @@ function Icon({ children }: { children: ReactNode }) {
   );
 }
 
-function Feature({
+/** One area of the update (translation, transcription…) and its changes. */
+function Group({
   p,
   color,
   soft,
@@ -100,35 +101,49 @@ function Feature({
   return (
     <div
       style={{
-        display: "flex",
-        alignItems: "flex-start",
-        gap: 12,
-        padding: "8px 14px",
+        padding: "10px 14px 12px",
         background: p.row,
         border: `1px solid ${p.rowBorder}`,
         borderRadius: 12,
       }}
     >
-      <div
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: 8,
-          background: soft,
-          border: `1px solid ${border}`,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flexShrink: 0,
-          color,
-        }}
-      >
-        {icon}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <div
+          style={{
+            width: 26,
+            height: 26,
+            borderRadius: 7,
+            background: soft,
+            border: `1px solid ${border}`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+            color,
+          }}
+        >
+          {icon}
+        </div>
+        <div
+          style={{
+            font: `700 11px ${MONO}`,
+            letterSpacing: 0.8,
+            textTransform: "uppercase",
+            color,
+          }}
+        >
+          {title}
+        </div>
       </div>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: p.text, marginBottom: 2 }}>{title}</div>
-        <div style={{ fontSize: 12, lineHeight: 1.4, color: p.body }}>{children}</div>
-      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{children}</div>
+    </div>
+  );
+}
+
+function Item({ p, title, children }: { p: Palette; title: string; children: ReactNode }) {
+  return (
+    <div style={{ fontSize: 12, lineHeight: 1.45, color: p.body }}>
+      <span style={{ fontWeight: 600, color: p.text }}>{title}.</span> {children}
     </div>
   );
 }
@@ -280,18 +295,18 @@ export function WhatsNewModal() {
         style={{
           display: "flex",
           flexDirection: "column",
-          gap: 6,
+          gap: 8,
           flex: 1,
           minHeight: 0,
           overflowY: "auto",
         }}
       >
-        <Feature
+        <Group
           p={p}
           color={p.green}
           soft={p.greenSoft}
           border={p.greenBorder}
-          title="Offline translation on every computer"
+          title="Translation"
           icon={
             <Icon>
               <circle cx="12" cy="12" r="10" />
@@ -299,59 +314,44 @@ export function WhatsNewModal() {
             </Icon>
           }
         >
-          Windows, Linux and Mac. Free, no API key, works without internet, and nothing leaves your
-          computer.
-        </Feature>
-        <Feature
+          <Item p={p} title="Offline on every computer">
+            Free and private on Windows, Linux and Mac.
+          </Item>
+          <Item p={p} title="Apple Intelligence">
+            On macOS 26, translates on your Mac with your own prompt.
+          </Item>
+          <Item p={p} title="Easier to choose">
+            Each service shows what it&apos;s best for.
+          </Item>
+        </Group>
+        <Group
           p={p}
           color={p.accent}
           soft={p.accentSoft}
           border={p.accentSoftBorder}
-          title="Faster transcription on your hardware"
-          icon={
-            <Icon>
-              <rect x="5" y="5" width="14" height="14" rx="2" />
-              <path d="M9 9h6v6H9zM9 2v3M15 2v3M9 19v3M15 19v3M19 9h3M19 15h3M2 9h3M2 15h3" />
-            </Icon>
-          }
-        >
-          Parakeet runs on the Apple Neural Engine. Whisper uses the GPU on Windows and Linux.
-        </Feature>
-        <Feature
-          p={p}
-          color={p.cyan}
-          soft={p.cyanSoft}
-          border={p.cyanBorder}
-          title="Transcribe while you talk"
+          title="Transcription"
           icon={
             <Icon>
               <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
             </Icon>
           }
         >
-          Works with every model, so long dictations are ready right after you stop. Turn it on in
-          Settings › Transcription.
-        </Feature>
-        <Feature
+          <Item p={p} title="Faster on your hardware">
+            Neural Engine on Mac, GPU on Windows and Linux.
+          </Item>
+          <Item p={p} title="Transcribe while you talk">
+            Now with every model, for faster long dictations.
+          </Item>
+          <Item p={p} title="Better numbers">
+            &ldquo;Two hundred and fifty&rdquo; → 250, &ldquo;4 30 PM&rdquo; → 4:30 PM.
+          </Item>
+        </Group>
+        <Group
           p={p}
-          color={p.accent}
-          soft={p.accentSoft}
-          border={p.accentSoftBorder}
-          title="Apple Intelligence translation"
-          icon={
-            <Icon>
-              <path d="M12 3l1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2z" />
-            </Icon>
-          }
-        >
-          On macOS 26, translate on your Mac with your own prompt.
-        </Feature>
-        <Feature
-          p={p}
-          color={p.green}
-          soft={p.greenSoft}
-          border={p.greenBorder}
-          title="More privacy"
+          color={p.cyan}
+          soft={p.cyanSoft}
+          border={p.cyanBorder}
+          title="Privacy & text"
           icon={
             <Icon>
               <rect x="3" y="11" width="18" height="11" rx="2" />
@@ -359,23 +359,16 @@ export function WhatsNewModal() {
             </Icon>
           }
         >
-          &ldquo;Don&apos;t save&rdquo; now keeps nothing on disk. Your saved dictations are listed
-          in Settings › History.
-        </Feature>
-        <Feature
-          p={p}
-          color={p.cyan}
-          soft={p.cyanSoft}
-          border={p.cyanBorder}
-          title="Text styles"
-          icon={
-            <Icon>
-              <path d="M4 7V5h16v2M9 19h6M12 5v14" />
-            </Icon>
-          }
-        >
-          Natural speech, For AI prompts or Verbatim. Pick one in Settings › Text.
-        </Feature>
+          <Item p={p} title="Don't save keeps nothing on disk">
+            Saved ones are in Settings › History.
+          </Item>
+          <Item p={p} title="Text styles">
+            Natural speech, For AI prompts or Verbatim.
+          </Item>
+          <Item p={p} title="Keep my clipboard">
+            After pasting, RevFly puts back what you had copied.
+          </Item>
+        </Group>
       </div>
 
       {/* Actions */}
