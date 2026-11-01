@@ -75,7 +75,7 @@ const PROVIDERS = [
   {
     value: "LLM",
     label: "LLM (both local & cloud)",
-    desc: "Gemini, Ollama, LM Studio, OpenAI, etc.",
+    desc: "Any AI model: Gemini, OpenAI, or local with Ollama or LM Studio. Follows your prompt below",
   },
   {
     value: "Custom API",
@@ -85,17 +85,17 @@ const PROVIDERS = [
   {
     value: "Offline",
     label: "Offline (on-device)",
-    desc: "Free, private, works on any computer. Download languages below",
+    desc: "Firefox's translation models. Free, private, works on any computer. Pairs without English go through English",
   },
   {
     value: "Apple",
     label: "Apple Native",
-    desc: "Built into macOS. Free, offline, private. Download languages below",
+    desc: "Apple's translation engine. Fast and faithful: translates exactly what you said. Free, offline",
   },
   {
     value: "Apple Intelligence",
     label: "Apple Intelligence",
-    desc: "Apple's on-device LLM. Free and offline, and it follows your prompt below",
+    desc: "Apple's on-device AI. Translates and also follows your prompt below, e.g. a friendlier tone or fixed grammar. Slower. Free, offline",
   },
 ] as const;
 
