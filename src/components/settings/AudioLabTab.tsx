@@ -6,6 +6,7 @@ import { SELECTABLE } from "./selectable";
 import { useSettingsContext } from "./useSettingsContext";
 import Toggle from "@/components/ui/Toggle";
 import Segmented from "@/components/ui/Segmented";
+import AppleTranslationPanel from "./AppleTranslationPanel";
 import {
   fetchLabAudioFiles,
   triggerRunLabExperiment,
@@ -24,6 +25,7 @@ import {
 const TRANSLATION_SERVICES = [
   { value: "LLM", label: "LLM" },
   { value: "Custom API", label: "Custom API" },
+  { value: "Offline", label: "Offline" },
 ];
 // Offered only where Apple's on-device engines work (macOS 26+).
 const APPLE_SERVICES = [
@@ -95,7 +97,9 @@ export default function AudioLabTab({
         ? "Apple Intelligence"
         : provider.includes("custom")
           ? "Custom API"
-          : "LLM";
+          : provider === "offline"
+            ? "Offline"
+            : "LLM";
   });
   const [appleAvailable, setAppleAvailable] = useState(false);
   useEffect(() => {
@@ -345,6 +349,16 @@ export default function AudioLabTab({
       <Row label="Translate to" t={t} last>
         <FieldSelect value={trTarget} onChange={setTrTarget} options={TARGET_LANGUAGES} t={t} />
       </Row>
+      {(trService === "Apple" || trService === "Offline") && (
+        <div style={{ padding: "12px 12px 0" }}>
+          <AppleTranslationPanel
+            t={t}
+            offline={trService === "Offline"}
+            targetLang={trTarget}
+            packsOnly
+          />
+        </div>
+      )}
       <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
         <button
           type="button"

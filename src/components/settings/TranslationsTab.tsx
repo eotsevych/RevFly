@@ -7,6 +7,7 @@ import {
 } from "@/lib/tauri";
 import AppleTranslationPanel from "./AppleTranslationPanel";
 import HotkeyRecorder from "@/components/ui/HotkeyRecorder";
+import Segmented from "@/components/ui/Segmented";
 import {
   Section,
   Row,
@@ -57,7 +58,7 @@ const TARGET_LANGUAGES = [
 
 // When dictation is translated (the same setting as General → Translation).
 const MODES: { value: TranslationMode; label: string; desc: string }[] = [
-  { value: "off", label: "Off", desc: "Voice to text only. Nothing is translated" },
+  { value: "off", label: "Off", desc: "Plain dictation, nothing is translated" },
   {
     value: "hotkey",
     label: "Separate hotkey",
@@ -231,9 +232,9 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
     <span
       key={text}
       style={{
-        padding: "2px 8px",
+        padding: "1px 7px",
         borderRadius: 999,
-        fontSize: 11,
+        fontSize: 10.5,
         fontFamily: "Inter, sans-serif",
         fontWeight: 500,
         whiteSpace: "nowrap",
@@ -247,7 +248,7 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
     </span>
   );
 
-  // One service: what it's best for and its strengths, or why it can't run here.
+  // One service in two lines: name and strengths, then what it's best for or why it can't run here.
   const serviceCard = (p: (typeof PROVIDERS)[number], active: boolean, problem: string | null) => {
     const disabled = problem !== null && !active;
     return (
@@ -260,10 +261,10 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
         disabled={disabled}
         style={{
           display: "flex",
-          gap: 12,
+          gap: 10,
           alignItems: "flex-start",
           width: "100%",
-          padding: "12px 14px",
+          padding: "8px 12px",
           borderRadius: 10,
           cursor: disabled ? "not-allowed" : "pointer",
           opacity: disabled ? 0.55 : 1,
@@ -291,12 +292,13 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
             <span style={{ width: 8, height: 8, borderRadius: "50%", background: t.accent }} />
           )}
         </span>
-        <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
-          <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
             <span
               style={{
-                fontSize: 14,
+                fontSize: 13,
                 fontWeight: 600,
+                marginRight: 2,
                 color: active ? t.accent : t.text,
                 fontFamily: "Inter, sans-serif",
               }}
@@ -316,113 +318,44 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
                   fontFamily: "Inter, sans-serif",
                 }}
               >
-                RECOMMENDED FOR THIS COMPUTER
+                RECOMMENDED
               </span>
             )}
+            {!problem && p.pros.map((x) => tag(x, true))}
+            {!problem && p.notes.map((x) => tag(x, false))}
           </span>
           <span
             style={{
               fontSize: 12,
-              lineHeight: 1.45,
+              lineHeight: 1.4,
               color: problem ? t.warnColor : t.textMuted,
               fontFamily: "Inter, sans-serif",
             }}
           >
             {problem || p.bestFor}
           </span>
-          {!problem && (
-            <span style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {p.pros.map((x) => tag(x, true))}
-              {p.notes.map((x) => tag(x, false))}
-            </span>
-          )}
         </span>
       </button>
     );
   };
 
-  const card = (
-    p: { value: string; label: string; desc: string },
-    active: boolean,
-    onClick: () => void,
-    disabled = false,
-  ) => (
-    <button
-      key={p.value}
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      style={{
-        padding: "14px 14px",
-        borderRadius: 10,
-        cursor: disabled ? "not-allowed" : "pointer",
-        opacity: disabled ? 0.55 : 1,
-        background: active ? `${t.accent}18` : t.inputBg,
-        border: `1px solid ${active ? `${t.accent}66` : t.border}`,
-        textAlign: "left",
-        transition: "all 0.2s",
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "space-between",
-        minHeight: 90,
-      }}
-    >
-      <div>
-        <p
-          style={{
-            fontSize: 13,
-            fontWeight: 600,
-            color: active ? t.accent : t.text,
-            fontFamily: "Inter, sans-serif",
-            margin: "0 0 4px",
-          }}
-        >
-          {p.label}
-          {p.value === recommended && (
-            <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 500, color: t.successColor }}>
-              Recommended
-            </span>
-          )}
-        </p>
-        <p
-          style={{
-            fontSize: 11,
-            color: t.textDim,
-            fontFamily: "Inter, sans-serif",
-            margin: 0,
-            lineHeight: 1.4,
-          }}
-        >
-          {p.desc}
-        </p>
-      </div>
-      {active && (
-        <div
-          style={{
-            width: 7,
-            height: 7,
-            borderRadius: "50%",
-            background: t.accent,
-            marginTop: 8,
-          }}
-        />
-      )}
-    </button>
-  );
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {/* ── When to translate ── */}
       <Section title="When to Translate" t={t}>
-        <div
-          style={{ padding: 12, display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}
+        <Row
+          label="Translate"
+          hint={MODES.find((m) => m.value === translationMode)?.desc ?? ""}
+          t={t}
+          last={translationMode !== "hotkey"}
         >
-          {MODES.map((m) =>
-            card(m, translationMode === m.value, () =>
-              updateSettings({ translation_mode: m.value }),
-            ),
-          )}
-        </div>
+          <Segmented
+            options={MODES}
+            value={translationMode}
+            onChange={(v) => updateSettings({ translation_mode: v })}
+            t={t}
+          />
+        </Row>
         {translationMode === "hotkey" && (
           <Row
             label="Translate hotkey"

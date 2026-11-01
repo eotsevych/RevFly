@@ -52,16 +52,20 @@ const text = (t: Tokens, size = 12): React.CSSProperties => ({
 /** Settings for Apple's on-device translation: which model, which languages are downloaded for the
  * target language (with a Download action), and what happens when it fails. With `offline`, the
  * same for the Offline provider (Firefox Translations models), which has one model and no System
- * Settings. */
+ * Settings. With `packsOnly`, just the language packs into `targetLang` (Audio Lab). */
 export default function AppleTranslationPanel({
   t,
   offline = false,
+  packsOnly = false,
+  targetLang: targetOverride,
 }: {
   t: Tokens;
   offline?: boolean;
+  packsOnly?: boolean;
+  targetLang?: string;
 }) {
   const { settings, updateSettings } = useSettingsContext();
-  const targetLang = settings.target_lang || "English";
+  const targetLang = targetOverride || settings.target_lang || "English";
   const sourceCode = LANG_CODES[settings.source_lang || ""] ?? null;
 
   const [packs, setPacks] = useState<AppleLanguagePack[] | null>(null);
@@ -159,14 +163,16 @@ export default function AppleTranslationPanel({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <p style={text(t)}>
-        {offline
-          ? "Translates with the models behind Firefox's translations. They run on this computer's CPU: no API key, no cost, works offline, and nothing leaves the computer. Each language is a 20-55 MB download, done once. Languages other than English go through English (Ukrainian → English → German), so a pair like that needs both. It translates as-is; for rephrasing or formatting, use an LLM provider."
-          : "Translates with the engine behind Apple's Translate app. It runs on your Mac: no API key, no cost, works offline, and nothing leaves the computer. Each language pair is downloaded once. It translates as-is; for rephrasing or formatting, use an LLM provider."}
-      </p>
+      {!packsOnly && (
+        <p style={text(t)}>
+          {offline
+            ? "Translates with the models behind Firefox's translations. They run on this computer's CPU: no API key, no cost, works offline, and nothing leaves the computer. Each language is a 20-55 MB download, done once. Languages other than English go through English (Ukrainian → English → German), so a pair like that needs both. It translates as-is; for rephrasing or formatting, use an LLM provider."
+            : "Translates with the engine behind Apple's Translate app. It runs on your Mac: no API key, no cost, works offline, and nothing leaves the computer. Each language pair is downloaded once. It translates as-is; for rephrasing or formatting, use an LLM provider."}
+        </p>
+      )}
 
       {/* ── Model ── */}
-      {!offline && (
+      {!offline && !packsOnly && (
         <FormGroup>
           <FormLabel t={t}>Model</FormLabel>
           <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
@@ -321,22 +327,26 @@ export default function AppleTranslationPanel({
       </FormGroup>
 
       {/* ── When it fails ── */}
-      <FormGroup>
-        <FormLabel t={t}>
-          If {offline ? "offline translation" : "Apple Translation"} fails
-        </FormLabel>
-        <FieldSelect
-          value={settings.apple_fallback_provider || ""}
-          onChange={(v) => updateSettings({ apple_fallback_provider: v })}
-          options={offline ? FALLBACKS.filter((f) => f.value !== "Apple Intelligence") : FALLBACKS}
-          t={t}
-        />
-        <span style={{ ...text(t, 11), marginTop: 4, display: "block" }}>
-          For example, when a language pair isn't downloaded. The fallback uses the settings saved
-          for that service (switch to it above to fill them in) and is used only when they're
-          complete.
-        </span>
-      </FormGroup>
+      {!packsOnly && (
+        <FormGroup>
+          <FormLabel t={t}>
+            If {offline ? "offline translation" : "Apple Translation"} fails
+          </FormLabel>
+          <FieldSelect
+            value={settings.apple_fallback_provider || ""}
+            onChange={(v) => updateSettings({ apple_fallback_provider: v })}
+            options={
+              offline ? FALLBACKS.filter((f) => f.value !== "Apple Intelligence") : FALLBACKS
+            }
+            t={t}
+          />
+          <span style={{ ...text(t, 11), marginTop: 4, display: "block" }}>
+            For example, when a language pair isn't downloaded. The fallback uses the settings saved
+            for that service (switch to it above to fill them in) and is used only when they're
+            complete.
+          </span>
+        </FormGroup>
+      )}
     </div>
   );
 }
