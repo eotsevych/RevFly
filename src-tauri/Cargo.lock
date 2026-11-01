@@ -4499,7 +4499,7 @@ dependencies = [
 
 [[package]]
 name = "revfly"
-version = "1.0.7"
+version = "1.0.8"
 dependencies = [
  "arboard",
  "audioadapter-buffers",

@@ -58,18 +58,7 @@ pub fn trim_silence(samples: &[f32], sample_rate: u32) -> VadResult {
         Ok(v) => v,
         Err(e) => {
             log::warn!("Silero VAD init error: {:?}. Returning full buffer.", e);
-            let ms = t0.elapsed().as_millis() as u64;
-            return VadResult {
-                samples: samples.to_vec(),
-                original_samples: original_len,
-                trimmed_samples: original_len,
-                original_duration_sec: original_dur,
-                trimmed_duration_sec: original_dur,
-                silence_removed_sec: 0.0,
-                duration_ms: ms,
-                no_speech: false,
-                chunks: chunking::whole(0..original_len),
-            };
+            return VadResult { duration_ms: t0.elapsed().as_millis() as u64, ..untrimmed(samples, sample_rate) };
         }
     };
 
@@ -77,18 +66,7 @@ pub fn trim_silence(samples: &[f32], sample_rate: u32) -> VadResult {
         Ok(p) => p,
         Err(e) => {
             log::warn!("Silero VAD forward error: {:?}. Returning full buffer.", e);
-            let ms = t0.elapsed().as_millis() as u64;
-            return VadResult {
-                samples: samples.to_vec(),
-                original_samples: original_len,
-                trimmed_samples: original_len,
-                original_duration_sec: original_dur,
-                trimmed_duration_sec: original_dur,
-                silence_removed_sec: 0.0,
-                duration_ms: ms,
-                no_speech: false,
-                chunks: chunking::whole(0..original_len),
-            };
+            return VadResult { duration_ms: t0.elapsed().as_millis() as u64, ..untrimmed(samples, sample_rate) };
         }
     };
 
@@ -127,6 +105,23 @@ pub fn trim_silence(samples: &[f32], sample_rate: u32) -> VadResult {
         duration_ms: ms,
         no_speech,
         chunks,
+    }
+}
+
+/// The whole recording as one chunk, without running VAD: what `trim_silence` returns when VAD
+/// can't run, and what a model that needs no trimming or chunking gets.
+pub fn untrimmed(samples: &[f32], sample_rate: u32) -> VadResult {
+    let duration = samples.len() as f32 / sample_rate as f32;
+    VadResult {
+        samples: samples.to_vec(),
+        original_samples: samples.len(),
+        trimmed_samples: samples.len(),
+        original_duration_sec: duration,
+        trimmed_duration_sec: duration,
+        silence_removed_sec: 0.0,
+        duration_ms: 0,
+        no_speech: false,
+        chunks: chunking::whole(0..samples.len()),
     }
 }
 

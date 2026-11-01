@@ -3,6 +3,7 @@ import { useResolvedTheme } from "@/lib/theme";
 import { createHotkeyCapture, formatDisplay } from "@/lib/hotkey";
 import { SettingsProvider } from "@/components/settings/SettingsContext";
 import { useSettingsContext } from "@/components/settings/useSettingsContext";
+import { PRESETS, STYLES, presetOf, type Preset } from "@/lib/textStyles";
 import {
   checkAccessibility,
   finishOnboarding,
@@ -23,11 +24,11 @@ import {
 /** Hotkeys and pasting need the Accessibility permission only on macOS. */
 const IS_MAC = typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
 
-type StepId = "welcome" | "mic" | "access" | "keys" | "lang" | "try";
+type StepId = "welcome" | "mic" | "access" | "keys" | "lang" | "style" | "try";
 
 const STEPS: StepId[] = IS_MAC
-  ? ["welcome", "mic", "access", "keys", "lang", "try"]
-  : ["welcome", "mic", "keys", "lang", "try"];
+  ? ["welcome", "mic", "access", "keys", "lang", "style", "try"]
+  : ["welcome", "mic", "keys", "lang", "style", "try"];
 
 /** Animation clock of the stage illustrations, in ms per tick (as in the design). */
 const TICK_MS = 80;
@@ -931,6 +932,45 @@ function KeysStage({ p }: { p: Palette }) {
   );
 }
 
+/** The text style: the same presets as Settings → Text. */
+function StyleStage({ p }: { p: Palette }) {
+  const { settings, updateSettings } = useSettingsContext();
+  const current = presetOf(settings);
+  const styles = STYLES.filter((s) => s.value !== "custom");
+  return (
+    <div
+      style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%", maxWidth: 420 }}
+    >
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 6 }}>
+        {styles.map(({ value, label }) => {
+          const on = value === current;
+          return (
+            <button
+              key={value}
+              type="button"
+              onClick={() => updateSettings(PRESETS[value as Preset])}
+              style={{
+                padding: "9px 10px",
+                borderRadius: 9,
+                background: on ? p.tealSoft : p.row,
+                border: `1px solid ${on ? p.tealBorder : p.rowBorder}`,
+                color: on ? p.teal : p.text,
+                font: `500 13px ${SANS}`,
+                cursor: "pointer",
+              }}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ font: `400 12px ${SANS}`, color: p.dim, minHeight: 32, textAlign: "center" }}>
+        {styles.find((s) => s.value === current)?.hint ?? "Your own mix, set in Settings → Text"}
+      </div>
+    </div>
+  );
+}
+
 function LangStage({ p }: { p: Palette }) {
   const { settings, updateSettings } = useSettingsContext();
   const target = settings.target_lang || "English";
@@ -1374,6 +1414,10 @@ function OnboardingInner() {
       title: "Translate into…",
       body: "Speak any language and RevFly detects it. Pick the language translations should come out in.",
     },
+    style: {
+      title: "How should your text look?",
+      body: "Pick a style for the text RevFly pastes. Change it any time in Settings → Text, where you can also fine-tune each step.",
+    },
     try: {
       title: "Give it a try",
       body: practice
@@ -1537,6 +1581,7 @@ function OnboardingInner() {
           {step === "access" && <AccessStage p={p} granted={granted} />}
           {step === "keys" && <KeysStage p={p} />}
           {step === "lang" && <LangStage p={p} />}
+          {step === "style" && <StyleStage p={p} />}
           {step === "try" && <TryStage t={t} p={p} practice={practice} onState={setTryCtl} />}
         </div>
       </div>

@@ -982,6 +982,8 @@ pub struct AppController {
     /// a stop or cancel arriving in between (e.g. a quick hold-to-talk release) waits on this;
     /// otherwise it reached the recorder before the start did and the microphone was left open.
     start_gate: Arc<Mutex<()>>,
+    /// Pieces of the current recording transcribed while it goes on (see `live_chunks`).
+    live_chunks: Arc<Mutex<Option<crate::live_chunks::LiveChunks>>>,
 }
 
 impl AppController {
@@ -1085,7 +1087,44 @@ impl AppController {
             recording_start: Arc::new(Mutex::new(None)),
             recording_mode: Arc::new(Mutex::new(RecordingMode::Main)),
             start_gate: Arc::new(Mutex::new(())),
+            live_chunks: Arc::new(Mutex::new(None)),
         })
+    }
+
+    /// What transcribes the pieces cut while recording, when live chunking applies: chunking on and
+    /// the model on disk. On the Neural Engine this is the opt-in Fast mode; off, it takes the whole
+    /// recording at the end.
+    fn live_transcriber(&self, settings: &AppSettings) -> Option<crate::live_chunks::Transcribe> {
+        use crate::live_chunks::Piece;
+        if !settings.audio_chunking || !crate::model_download::is_model_present(&settings.model_name) {
+            return None;
+        }
+        if settings.model_name == crate::model_download::PARAKEET_MODEL {
+            let parakeet = Arc::clone(&self.parakeet_transcriber);
+            let dir = crate::parakeet::ParakeetTranscriber::get_model_dir();
+            return Some(Box::new(move |piece: &[f32]| {
+                let mut pk = parakeet.lock().unwrap_or_else(|e| e.into_inner());
+                let (text, ..) = pk.transcribe(piece, &[0..piece.len()], &dir)?;
+                Ok(Piece { text, lang: None })
+            }));
+        }
+        let transcriber = Arc::clone(&self.transcriber);
+        let path = Transcriber::get_model_path(&settings.model_name);
+        let excluded = settings.excluded_languages.clone();
+        let mut lang = crate::transcribe::map_language_hint(&settings.source_lang).map(str::to_string);
+        Some(Box::new(move |piece: &[f32]| {
+            let mut tr = transcriber.lock().unwrap_or_else(|e| e.into_inner());
+            let res = tr.transcribe_detailed(piece, &[0..piece.len()], &path, false, lang.as_deref())?;
+            // The first piece sets the language for the rest. One in an excluded language is
+            // re-transcribed in another, so that recording goes the usual way, whole.
+            if lang.is_none() && res.detected_lang != "auto" {
+                if !excluded.trim().is_empty() && crate::translate::is_language_excluded(&res.detected_lang, &res.text, &excluded) {
+                    return Err(format!("the first piece is in an excluded language ({})", res.detected_lang));
+                }
+                lang = Some(res.detected_lang.clone());
+            }
+            Ok(Piece { text: res.text, lang: lang.clone() })
+        }))
     }
 
     pub fn get_phase(&self) -> String {
@@ -1404,6 +1443,7 @@ impl AppController {
         }
         crate::tray::set_tray_recording(&self.app_handle, false, self.is_model_loaded());
         self.recorder.cancel_recording();
+        self.live_chunks.lock().unwrap().take();
 
         let _ = self.app_handle.emit(
             "assistant-state-changed",
@@ -1434,6 +1474,7 @@ impl AppController {
         }
         let session = self.session_id.fetch_add(1, Ordering::SeqCst) + 1;
         self.recorder.cancel_recording();
+        self.live_chunks.lock().unwrap().take();
         crate::tray::set_tray_recording(&self.app_handle, false, self.is_model_loaded());
 
         let (title, subtitle) = mic_problem_message(&report);
@@ -1810,6 +1851,11 @@ impl AppController {
         let denoise = crate::denoise::strength_wet(&settings.noise_reduction).is_some();
         let stream = self.recorder.start_recording(self.app_handle.clone(), settings.input_device.clone(), denoise);
         let mic_open_ms = mic_open_started.elapsed().as_millis();
+        *self.live_chunks.lock().unwrap() = stream
+            .is_ok()
+            .then(|| self.live_transcriber(&settings))
+            .flatten()
+            .map(|t| crate::live_chunks::LiveChunks::start(Arc::clone(&self.recorder), crate::denoise::strength_wet(&settings.noise_reduction), t));
 
         // 4. Then the chime, once the mic delivers its first audio. Playback and capture are never
         // opened at the same instant (some combo USB/Bluetooth headsets stall when they are), and
@@ -2024,6 +2070,7 @@ impl AppController {
             .unwrap_or((0.0, None));
         let stop_started = Instant::now();
         let captured = self.recorder.stop_recording(crate::denoise::strength_wet(&settings.noise_reduction));
+        let live_chunks = self.live_chunks.lock().unwrap().take();
         let mut perf = crate::perf::PerfRun::start(stop_started.elapsed().as_millis() as u64);
         perf.model = settings.model_name.clone();
         perf.model_load_mode = settings.model_load_mode.clone();
@@ -2097,9 +2144,37 @@ impl AppController {
                 return;
             }
 
-            // Step 1: Silero VAD silence trimming with 400ms padding
-            let vad_res = trim_silence(&raw_samples, 16000);
-            log_stage_event(&data_dir, "VAD", &format!("VAD completed in {} ms: original {:.2} s → trimmed {:.2} s (cut {:.2} s silence){}", vad_res.duration_ms, vad_res.original_duration_sec, vad_res.trimmed_duration_sec, vad_res.silence_removed_sec, if vad_res.no_speech { "; no speech found, kept the whole recording" } else { "" }));
+            let is_parakeet = settings.model_name == "parakeet-tdt-0.6b-v3";
+
+            // Pieces transcribed while recording (see live_chunks): only the audio after the last
+            // cut goes to the model now.
+            let live = match live_chunks {
+                Some(live) => tokio::task::spawn_blocking(move || live.finish()).await.ok().flatten(),
+                None => None,
+            };
+            let model_samples = match &live {
+                Some(done) => {
+                    // The same 16 kHz timeline as the live audio, give or take the resampler's few
+                    // ms; the cut is in the middle of a 2 s pause.
+                    let cut = done.cut.min(raw_samples.len());
+                    log_stage_event(&data_dir, "LIVE_CHUNKS", &format!("{} piece(s), {:.1} s, transcribed while recording; transcribing the last {:.1} s now", done.pieces, cut as f32 / 16000.0, (raw_samples.len() - cut) as f32 / 16000.0));
+                    &raw_samples[cut.saturating_sub(crate::live_chunks::OVERLAP)..]
+                }
+                None => &raw_samples[..],
+            };
+            perf.lap("live_chunks");
+
+            // Step 1: Silero VAD silence trimming with 400ms padding. Skipped for Parakeet on the
+            // Neural Engine: it takes the whole recording (see transcribe_on_neural_engine), and VAD
+            // took 1.4 s on 3 minutes to trim nothing.
+            let vad_res = if is_parakeet && crate::parakeet::ParakeetTranscriber::runs_on_neural_engine() {
+                log_stage_event(&data_dir, "VAD", "VAD skipped: Parakeet on the Neural Engine takes the whole recording");
+                crate::vad::untrimmed(model_samples, 16000)
+            } else {
+                let vad_res = trim_silence(model_samples, 16000);
+                log_stage_event(&data_dir, "VAD", &format!("VAD completed in {} ms: original {:.2} s → trimmed {:.2} s (cut {:.2} s silence){}", vad_res.duration_ms, vad_res.original_duration_sec, vad_res.trimmed_duration_sec, vad_res.silence_removed_sec, if vad_res.no_speech { "; no speech found, kept the whole recording" } else { "" }));
+                vad_res
+            };
 
             // Save trimmed (VAD) audio to latest_vad_trimmed.wav for debugging
             let latest_vad_wav = data_dir.join("latest_vad_trimmed.wav");
@@ -2117,8 +2192,6 @@ impl AppController {
             // Saved before inference so a failed transcription still keeps the whole recording.
             let session_audio = session_audio_filename(&data_dir, &settings.storage_mode, &captured);
             perf.lap("save_audio");
-
-            let is_parakeet = settings.model_name == "parakeet-tdt-0.6b-v3";
 
             // Step 2 & 3: Model inference
             let (raw_text, detected_lang, whisper_inference_ms, thread_count, whisper_raw_output, segments_count) = if is_parakeet {
@@ -2320,13 +2393,17 @@ impl AppController {
                 let model_path_clone = model_path.clone();
                 let transcriber_clone = Arc::clone(&transcriber_arc);
 
-                let lang_hint = crate::transcribe::map_language_hint(&settings.source_lang);
+                // After live pieces, the rest keeps their language.
+                let lang_hint = live
+                    .as_ref()
+                    .and_then(|done| done.lang.clone())
+                    .or_else(|| crate::transcribe::map_language_hint(&settings.source_lang).map(str::to_string));
                 let timeout = inference_timeout(vad_res.trimmed_duration_sec);
                 let inference_res = tokio::time::timeout(
                     timeout,
                     tokio::task::spawn_blocking(move || {
                         let mut tr = transcriber_clone.lock().unwrap();
-                        tr.transcribe_detailed(&samples_clone, &chunks, &model_path_clone, false, lang_hint)
+                        tr.transcribe_detailed(&samples_clone, &chunks, &model_path_clone, false, lang_hint.as_deref())
                     }),
                 )
                 .await;
@@ -2466,6 +2543,12 @@ impl AppController {
                         return;
                     }
                 }
+            };
+            let raw_text = match &live {
+                // A rest with no speech adds nothing: Whisper makes up words ("Thank you.") on silence.
+                Some(done) if vad_res.no_speech || raw_text == "[BLANK_AUDIO]" => done.text.clone(),
+                Some(done) => crate::chunking::join_overlapping(&[done.text.as_str(), raw_text.as_str()]),
+                None => raw_text,
             };
 
             crate::tray::update_tray_model_status(&app_handle, true);

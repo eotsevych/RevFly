@@ -1,119 +1,138 @@
 import type { Tokens } from "@/lib/tokens";
 import Toggle from "@/components/ui/Toggle";
 import Segmented from "@/components/ui/Segmented";
-import { Section, Row, FieldTextarea } from "./SettingsPrimitives";
+import { Section, Row, FieldTextarea, Disclosure } from "./SettingsPrimitives";
 import { useSettingsContext } from "./useSettingsContext";
+import { PRESETS, STYLES, presetOf } from "@/lib/textStyles";
 
 /** What happens to the text after transcription: cleanup and masking of confidential words. */
 export default function TextTab({ t }: { t: Tokens }) {
   const { settings, updateSettings } = useSettingsContext();
+  const style = presetOf(settings);
+  const custom = style === "custom";
 
   return (
     <div>
-      {/* ── Post-Processing & Formatting (LLM-Friendly) ── */}
-      <Section title="Post-Processing & Formatting (LLM-Friendly)" t={t}>
-        <Row
-          label="LLM-Friendly Normalization"
-          hint="Master toggle to prepare spoken audio cleanly for downstream LLMs"
-          t={t}
-          last={!settings.text_normalization}
-        >
-          <Toggle
-            value={settings.text_normalization ?? true}
-            onChange={(v) => updateSettings({ text_normalization: v })}
-            accent={t.accent}
+      {/* ── Formatting ── */}
+      <Section title="Formatting" t={t}>
+        <Row label="Text style" hint={STYLES.find((s) => s.value === style)?.hint ?? ""} t={t}>
+          <Segmented
+            // Custom is shown only while the steps match no style; it's reached by changing a step.
+            options={STYLES.filter((s) => custom || s.value !== "custom").map(
+              ({ value, label }) => ({ value, label }),
+            )}
+            value={style}
+            onChange={(v) => {
+              if (v !== "custom") updateSettings(PRESETS[v]);
+            }}
+            t={t}
           />
         </Row>
 
-        {settings.text_normalization && (
-          <>
-            <Row
-              label="Remove filler words"
-              hint="Strip spoken 'um', 'uh', 'you know', 'like'"
-              t={t}
-            >
-              <Toggle
-                value={settings.remove_filler_words ?? true}
-                onChange={(v) => updateSettings({ remove_filler_words: v })}
-                accent={t.accent}
-              />
-            </Row>
-            <Row
-              label="Convert numbers to digits"
-              hint="Convert 'twenty twenty four' to 2024"
-              t={t}
-            >
-              <Toggle
-                value={settings.convert_numbers ?? true}
-                onChange={(v) => updateSettings({ convert_numbers: v })}
-                accent={t.accent}
-              />
-            </Row>
-            <Row
-              label="Remove stutters"
-              hint="Collapse immediate repeated words (e.g. 'I I want' → 'I want')"
-              t={t}
-            >
-              <Toggle
-                value={settings.remove_stutters ?? true}
-                onChange={(v) => updateSettings({ remove_stutters: v })}
-                accent={t.accent}
-              />
-            </Row>
-            <Row
-              label="Apply self-corrections"
-              hint="Process self-correction edits (e.g. 'on Monday, no Tuesday')"
-              t={t}
-            >
-              <Toggle
-                value={settings.apply_self_corrections ?? true}
-                onChange={(v) => updateSettings({ apply_self_corrections: v })}
-                accent={t.accent}
-              />
-            </Row>
-            <Row
-              label="Strip noise markers"
-              hint="Strip audio tags like [applause], [laughter], (cough)"
-              t={t}
-            >
-              <Toggle
-                value={settings.remove_noise_markers ?? true}
-                onChange={(v) => updateSettings({ remove_noise_markers: v })}
-                accent={t.accent}
-              />
-            </Row>
-            <Row
-              label="Collapse redundancy"
-              hint="Merge immediate duplicate phrases into one"
-              t={t}
-            >
-              <Toggle
-                value={settings.collapse_redundancy ?? true}
-                onChange={(v) => updateSettings({ collapse_redundancy: v })}
-                accent={t.accent}
-              />
-            </Row>
-            <Row label="Annotate ambiguities" hint="Mark uncertain phonetic spans with [?]" t={t}>
-              <Toggle
-                value={settings.annotate_ambiguity ?? true}
-                onChange={(v) => updateSettings({ annotate_ambiguity: v })}
-                accent={t.accent}
-              />
-            </Row>
-            <Row
-              label="Structured values"
-              hint="Format currency, dates, percentages into consistent tokens"
-              t={t}
-              last
-            >
-              <Toggle
-                value={settings.normalize_structured_values ?? true}
-                onChange={(v) => updateSettings({ normalize_structured_values: v })}
-                accent={t.accent}
-              />
-            </Row>
-          </>
-        )}
+        <Disclosure label="Fine-tune each step" t={t} last defaultOpen={custom}>
+          <Row
+            label="Clean up text"
+            hint="Off: the text stays as the model heard it, apart from tags like [applause]"
+            t={t}
+            last={!settings.text_normalization}
+          >
+            <Toggle
+              value={settings.text_normalization ?? true}
+              onChange={(v) => updateSettings({ text_normalization: v })}
+              accent={t.accent}
+            />
+          </Row>
+
+          {settings.text_normalization && (
+            <>
+              <Row
+                label="Remove filler words"
+                hint="Strip spoken 'um', 'uh', 'you know', 'like'"
+                t={t}
+              >
+                <Toggle
+                  value={settings.remove_filler_words ?? true}
+                  onChange={(v) => updateSettings({ remove_filler_words: v })}
+                  accent={t.accent}
+                />
+              </Row>
+              <Row
+                label="Convert numbers to digits"
+                hint="Convert 'twenty twenty four' to 2024"
+                t={t}
+              >
+                <Toggle
+                  value={settings.convert_numbers ?? true}
+                  onChange={(v) => updateSettings({ convert_numbers: v })}
+                  accent={t.accent}
+                />
+              </Row>
+              <Row
+                label="Remove stutters"
+                hint="Collapse immediate repeated words (e.g. 'I I want' → 'I want')"
+                t={t}
+              >
+                <Toggle
+                  value={settings.remove_stutters ?? true}
+                  onChange={(v) => updateSettings({ remove_stutters: v })}
+                  accent={t.accent}
+                />
+              </Row>
+              <Row
+                label="Apply self-corrections"
+                hint="'on Monday, no, Tuesday' becomes 'on Tuesday'. May also drop real text, as in 'I'm sorry, ...'"
+                t={t}
+              >
+                <Toggle
+                  value={settings.apply_self_corrections ?? true}
+                  onChange={(v) => updateSettings({ apply_self_corrections: v })}
+                  accent={t.accent}
+                />
+              </Row>
+              <Row
+                label="Strip noise markers"
+                hint="Strip audio tags like [applause], [laughter], (cough)"
+                t={t}
+              >
+                <Toggle
+                  value={settings.remove_noise_markers ?? true}
+                  onChange={(v) => updateSettings({ remove_noise_markers: v })}
+                  accent={t.accent}
+                />
+              </Row>
+              <Row
+                label="Collapse redundancy"
+                hint="Merge immediate duplicate phrases into one"
+                t={t}
+              >
+                <Toggle
+                  value={settings.collapse_redundancy ?? true}
+                  onChange={(v) => updateSettings({ collapse_redundancy: v })}
+                  accent={t.accent}
+                />
+              </Row>
+              <Row label="Annotate ambiguities" hint="Mark uncertain phonetic spans with [?]" t={t}>
+                <Toggle
+                  value={settings.annotate_ambiguity ?? true}
+                  onChange={(v) => updateSettings({ annotate_ambiguity: v })}
+                  accent={t.accent}
+                />
+              </Row>
+              <Row
+                label="Structured values"
+                hint="Format currency, dates, percentages into consistent tokens"
+                t={t}
+                last
+              >
+                <Toggle
+                  value={settings.normalize_structured_values ?? true}
+                  onChange={(v) => updateSettings({ normalize_structured_values: v })}
+                  accent={t.accent}
+                />
+              </Row>
+            </>
+          )}
+        </Disclosure>
       </Section>
 
       {/* ── Confidential Text & Masking ── */}

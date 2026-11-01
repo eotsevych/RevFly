@@ -339,21 +339,11 @@ fn apply_marker_corrections(sentence: &str) -> String {
             continue;
         }
 
-        if let Some(pos) = lower.find(marker_lower) {
-            // Only treat as correction if not at the very beginning.
-            if pos == 0 {
-                continue;
-            }
-
+        if let Some(pos) = lower.match_indices(marker_lower).map(|(p, _)| p).find(|&p| is_correction_at(&lower, p, marker_lower)) {
             let after_marker_pos = pos + marker_lower.len();
 
             // The replacement text starts after the marker.
             let replacement = result[after_marker_pos..].trim_start();
-
-            // Check if there's something after the marker to replace with.
-            if replacement.is_empty() {
-                continue;
-            }
 
             // The "wrong" fragment is the clause before the marker.
             // For simple cases, drop the last clause before the marker.
@@ -380,6 +370,27 @@ fn apply_marker_corrections(sentence: &str) -> String {
     }
 
     result
+}
+
+/// Words that make the marker after them an exclamation, not a correction: "Oh no, you
+/// couldn't", "Hey, wait!".
+const INTERJECTIONS: &[&str] = &["oh", "ah", "hey", "uh", "um", "oops", "well", "aw"];
+
+/// Whether `marker` at byte `pos` of the lowercased sentence starts a correction: not at the start,
+/// a whole word (not the "no" in "piano"), not after an interjection, and with words after it to
+/// replace the fragment with.
+fn is_correction_at(lower: &str, pos: usize, marker: &str) -> bool {
+    let end = pos + marker.len();
+    let before = &lower[..pos];
+    let word_char = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '\'');
+    if pos == 0 || word_char(before.chars().last()) || word_char(lower[end..].chars().next()) {
+        return false;
+    }
+    if !lower[end..].chars().any(char::is_alphanumeric) {
+        return false;
+    }
+    let previous = before.split_whitespace().last().map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()));
+    !previous.is_some_and(|w| INTERJECTIONS.contains(&w))
 }
 
 /// Finds the best break point before a correction marker.
@@ -657,6 +668,25 @@ fn normalize_time_expressions(text: &str) -> String {
                             .unwrap_or(0);
 
                         let num_str = &before_trimmed[num_start..];
+                        // "4 30 PM" (spoken "four thirty PM") → "4:30 PM"
+                        if num_str.len() == 2 && num_str < "60" && before_trimmed[..num_start].ends_with(' ') {
+                            let head = &before_trimmed[..num_start - 1];
+                            let hour_start = head
+                                .rfind(|c: char| !c.is_ascii_digit())
+                                .map(|p| p + 1)
+                                .unwrap_or(0);
+                            if let Ok(hour @ 1..=12) = head[hour_start..].parse::<u32>() {
+                                let new_time = format!("{}:{}{}", hour, num_str, normalized_suffix);
+                                result = format!(
+                                    "{}{}{}",
+                                    &result[..hour_start],
+                                    new_time,
+                                    &result[abs_pos + suffix.len()..]
+                                );
+                                offset = hour_start + new_time.len();
+                                continue;
+                            }
+                        }
                         if let Ok(hour) = num_str.parse::<u32>() {
                             if (1..=12).contains(&hour) {
                                 let new_time = format!("{}:00{}", hour, normalized_suffix);
@@ -691,37 +721,24 @@ fn normalize_time_expressions(text: &str) -> String {
     result
 }
 
-/// "twenty percent" → "20%", "fifty percent" → "50%"
+/// "20 percent" → "20%"; "15 percentage", as people often say it, → "15%"
 fn normalize_percentage_expressions(text: &str) -> String {
-    let mut result = text.to_string();
-
-    // Pattern: "NUMBER percent" where NUMBER is already a digit
-    let re_pattern = " percent";
-    while let Some(pos) = result.to_lowercase().find(re_pattern) {
-        let before = &result[..pos];
-        let before_trimmed = before.trim_end();
-
-        if before_trimmed.ends_with(|c: char| c.is_ascii_digit()) {
-            let num_start = before_trimmed
-                .rfind(|c: char| !c.is_ascii_digit())
-                .map(|p| p + 1)
-                .unwrap_or(0);
-
-            let num_str = &before_trimmed[num_start..];
-            let replacement = format!("{}%", num_str);
-            // Keep the num_start prefix, replace from num_start to end of "percent"
-            result = format!(
-                "{}{}{}",
-                &result[..num_start],
-                replacement,
-                &result[pos + re_pattern.len()..]
-            );
-        } else {
-            break; // Avoid infinite loop if pattern doesn't match expected structure
+    let mut words: Vec<String> = Vec::new();
+    let mut changed = false;
+    for word in text.split_whitespace() {
+        let bare = word.trim_end_matches(|c: char| c.is_ascii_punctuation());
+        let is_percent = bare.eq_ignore_ascii_case("percent") || bare.eq_ignore_ascii_case("percentage");
+        if let Some(prev) = words.last_mut().filter(|_| is_percent) {
+            if prev.ends_with(|c: char| c.is_ascii_digit()) && prev.chars().all(|c| c.is_ascii_digit() || c == '.') {
+                prev.push('%');
+                prev.push_str(&word[bare.len()..]);
+                changed = true;
+                continue;
+            }
         }
+        words.push(word.to_string());
     }
-
-    result
+    if changed { words.join(" ") } else { text.to_string() }
 }
 
 /// "fifty dollars" → "$50", "twenty euros" → "€20"
@@ -1392,6 +1409,29 @@ mod tests {
         assert!(!result.clean_text.contains("Delete"));
     }
 
+    #[test]
+    fn test_self_correction_markers_that_are_not_corrections() {
+        for text in [
+            "Oh no, you couldn't be more wrong about that.",
+            "Everything's gonna be fine. Hey, wait! What, your hair's beautiful.",
+            "Everything's gonna be fine. Hey, wait. What your hair's beautiful.",
+            "I play the piano, and she sings.",
+            "I'm waiting for you at the station.",
+            "Tell them no.",
+        ] {
+            let result = post_process_default(text);
+            let words = |s: &str| s.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).count();
+            assert_eq!(words(&result.clean_text), words(text), "{text:?} became {:?}", result.clean_text);
+        }
+    }
+
+    #[test]
+    fn test_self_correction_no_between_values() {
+        let result = post_process_default("Book it for Monday, no, Tuesday afternoon");
+        assert!(result.clean_text.contains("Tuesday afternoon"), "{}", result.clean_text);
+        assert!(!result.clean_text.contains("Monday"), "{}", result.clean_text);
+    }
+
     // ── 7. False starts ──
     #[test]
     fn test_false_start_correction() {
@@ -1504,6 +1544,14 @@ mod tests {
     fn test_percentage_normalization() {
         let result = post_process_default("The success rate is 50 percent");
         assert!(result.clean_text.contains("50%"));
+    }
+
+    #[test]
+    fn test_spoken_numbers_from_a_real_dictation() {
+        let result = post_process_default(
+            "March third at four thirty PM two hundred five. two hundred and fifty dollars fifteen percentage.",
+        );
+        assert_eq!(result.clean_text, "March 3rd at 4:30 PM 205. $250 15%.");
     }
 
     #[test]

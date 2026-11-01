@@ -26,6 +26,7 @@ pub mod updater;
 pub mod vad;
 pub mod parakeet;
 pub mod lab;
+pub mod live_chunks;
 pub mod denoise;
 pub mod fullscreen_pill;
 pub mod pill_position;

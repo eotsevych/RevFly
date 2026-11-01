@@ -940,6 +940,17 @@ impl AudioRecorder {
         }
     }
 
+    /// The current recording's raw 16 kHz audio from sample `from` on, as captured so far; empty
+    /// once it has stopped.
+    pub fn speech_since(&self, from: usize) -> Vec<f32> {
+        self.buffer.lock().map(|b| b.get(from..).map(<[f32]>::to_vec).unwrap_or_default()).unwrap_or_default()
+    }
+
+    /// When the start chime died away, if it played in this recording.
+    pub fn chime_until(&self) -> Option<Instant> {
+        self.chime_until.lock().ok().and_then(|c| *c)
+    }
+
     pub fn is_recording(&self) -> bool {
         self.is_recording.load(Ordering::SeqCst)
     }

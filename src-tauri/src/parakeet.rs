@@ -218,6 +218,11 @@ impl ParakeetTranscriber {
         current().ready()
     }
 
+    /// True when dictations go to the Neural Engine build (it may still be downloading).
+    pub fn runs_on_neural_engine() -> bool {
+        std::ptr::eq(current(), &NEURAL_ENGINE)
+    }
+
     /// Where Parakeet runs on this computer, for Settings: "the Neural Engine", or the CPU and why.
     pub fn engine_label() -> String {
         if ane_helper().is_none() {
@@ -415,7 +420,7 @@ impl ParakeetTranscriber {
 
         let mut model_dir = model_dir.to_path_buf();
         if model_dir == NEURAL_ENGINE.path() {
-            match self.transcribe_on_neural_engine(samples, chunks, &model_dir) {
+            match self.transcribe_on_neural_engine(samples, &model_dir) {
                 Ok(done) => return Ok(done),
                 // A helper that failed is started afresh next time; this recording goes to the CPU.
                 Err(e) if ONNX.ready() => {
@@ -456,21 +461,16 @@ impl ParakeetTranscriber {
         Ok((crate::chunking::join_transcripts(&texts), "auto".to_string(), inference_ms, self.threads as i32))
     }
 
-    fn transcribe_on_neural_engine(&mut self, samples: &[f32], chunks: &[Range<usize>], model_dir: &Path) -> Result<(String, String, u64, i32), String> {
+    /// The whole recording in one call: FluidAudio windows long audio itself, with overlap. Our own
+    /// cuts lost words at each one and cost ~0.7 s on 3 minutes, so `chunks` aren't used here.
+    fn transcribe_on_neural_engine(&mut self, samples: &[f32], model_dir: &Path) -> Result<(String, String, u64, i32), String> {
         if self.ane.is_none() || self.current_dir != model_dir.to_str().unwrap_or_default() {
             self.load_model(model_dir)?;
         }
         let helper = self.ane.as_mut().ok_or("Parakeet model not loaded")?;
         let t0 = Instant::now();
-        let mut texts = Vec::new();
-        for chunk in chunks {
-            let audio = &samples[chunk.clone()];
-            // FluidAudio windows long audio itself; the same pause-aligned cuts keep results comparable.
-            for range in model_segments(audio, 16000) {
-                texts.push(helper.transcribe(&audio[range])?);
-            }
-        }
-        Ok((crate::chunking::join_transcripts(&texts), "auto".to_string(), t0.elapsed().as_millis() as u64, 0))
+        let text = helper.transcribe(samples)?;
+        Ok((text, "auto".to_string(), t0.elapsed().as_millis() as u64, 0))
     }
 }
 

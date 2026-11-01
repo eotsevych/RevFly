@@ -1,8 +1,6 @@
 //! Text normalizer for speech-to-text transcripts.
 //! Cleans speech disfluencies (fillers), stutters, formats numbers (ITN), and cleans punctuation.
 
-use std::collections::HashMap;
-
 #[derive(Debug, Clone, Copy)]
 pub struct NormalizationOptions {
     pub enabled: bool,
@@ -87,7 +85,7 @@ struct WordToken {
 fn is_filler(token: &WordToken) -> bool {
     matches!(
         token.cleaned.as_str(),
-        "uh" | "um" | "ah" | "er" | "erm" | "hmm" | "mhm"
+        "uh" | "um" | "ah" | "er" | "erm" | "hmm" | "mhm" | "mm" | "mmm"
     )
 }
 
@@ -207,117 +205,146 @@ fn deduplicate_phrases(tokens: &[WordToken]) -> Vec<WordToken> {
     out
 }
 
-/// Converts number words (e.g., "fifteen" -> "15", "twenty one" -> "21")
+const MONTHS: [&str; 12] = [
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+];
+
+fn small_number(word: &str) -> Option<i64> {
+    Some(match word {
+        "zero" => 0, "one" => 1, "two" => 2, "three" => 3, "four" => 4,
+        "five" => 5, "six" => 6, "seven" => 7, "eight" => 8, "nine" => 9,
+        "ten" => 10, "eleven" => 11, "twelve" => 12, "thirteen" => 13, "fourteen" => 14,
+        "fifteen" => 15, "sixteen" => 16, "seventeen" => 17, "eighteen" => 18, "nineteen" => 19,
+        "twenty" => 20, "thirty" => 30, "forty" => 40, "fifty" => 50,
+        "sixty" => 60, "seventy" => 70, "eighty" => 80, "ninety" => 90,
+        _ => return None,
+    })
+}
+
+fn ordinal_number(word: &str) -> Option<i64> {
+    Some(match word {
+        "first" => 1, "second" => 2, "third" => 3, "fourth" => 4, "fifth" => 5,
+        "sixth" => 6, "seventh" => 7, "eighth" => 8, "ninth" => 9, "tenth" => 10,
+        "eleventh" => 11, "twelfth" => 12, "thirteenth" => 13, "fourteenth" => 14, "fifteenth" => 15,
+        "sixteenth" => 16, "seventeenth" => 17, "eighteenth" => 18, "nineteenth" => 19,
+        "twentieth" => 20, "thirtieth" => 30,
+        _ => return None,
+    })
+}
+
+/// Converts number words: "fifteen" -> "15", "two hundred and fifty" -> "250", "March third" -> "March 3rd".
 fn convert_number_words(tokens: &[WordToken]) -> Vec<WordToken> {
-    let number_map: HashMap<&str, i64> = [
-        ("zero", 0),
-        ("one", 1),
-        ("two", 2),
-        ("three", 3),
-        ("four", 4),
-        ("five", 5),
-        ("six", 6),
-        ("seven", 7),
-        ("eight", 8),
-        ("nine", 9),
-        ("ten", 10),
-        ("eleven", 11),
-        ("twelve", 12),
-        ("thirteen", 13),
-        ("fourteen", 14),
-        ("fifteen", 15),
-        ("sixteen", 16),
-        ("seventeen", 17),
-        ("eighteen", 18),
-        ("nineteen", 19),
-        ("twenty", 20),
-        ("thirty", 30),
-        ("forty", 40),
-        ("fifty", 50),
-        ("sixty", 60),
-        ("seventy", 70),
-        ("eighty", 80),
-        ("ninety", 90),
-        ("hundred", 100),
-        ("thousand", 1000),
-        ("million", 1_000_000),
-    ]
-    .iter()
-    .cloned()
-    .collect();
-
-    let ordinal_map: HashMap<&str, &str> = [
-        ("first", "1st"),
-        ("second", "2nd"),
-        ("third", "3rd"),
-        ("fourth", "4th"),
-        ("fifth", "5th"),
-        ("sixth", "6th"),
-        ("seventh", "7th"),
-        ("eighth", "8th"),
-        ("ninth", "9th"),
-        ("tenth", "10th"),
-    ]
-    .iter()
-    .cloned()
-    .collect();
-
     let mut out: Vec<WordToken> = Vec::with_capacity(tokens.len());
     let mut i = 0;
-
     while i < tokens.len() {
-        let token = &tokens[i];
-
-        // Check ordinal first
-        if let Some(&ord) = ordinal_map.get(token.cleaned.as_str()) {
-            out.push(WordToken {
-                cleaned: ord.to_string(),
-                original: ord.to_string(),
-                trailing_punct: token.trailing_punct,
-                leading_punct: token.leading_punct,
-            });
-            i += 1;
-            continue;
-        }
-
-        // Check cardinal number
-        if let Some(&val) = number_map.get(token.cleaned.as_str()) {
-            // See if we have compound numbers (e.g. "twenty five", "one hundred")
-            let mut total = val;
-            let mut last_idx = i;
-            let mut trailing = token.trailing_punct;
-
-            if token.trailing_punct.is_none() && i + 1 < tokens.len() {
-                let next = &tokens[i + 1];
-                if let Some(&next_val) = number_map.get(next.cleaned.as_str()) {
-                    if (val >= 20 && val <= 90 && next_val < 10) || next_val == 100 || next_val == 1000 {
-                        if next_val == 100 || next_val == 1000 {
-                            total = val * next_val;
-                        } else {
-                            total = val + next_val;
-                        }
-                        last_idx = i + 1;
-                        trailing = next.trailing_punct;
-                    }
-                }
+        // Ordinals only in dates: elsewhere "first" and "second" are plain words ("a second").
+        let after_month = i > 0
+            && MONTHS.contains(&tokens[i - 1].cleaned.as_str())
+            && tokens[i - 1].original.starts_with(char::is_uppercase)
+            && tokens[i - 1].trailing_punct.is_none();
+        // A lone "one" is a word ("a big one", "one of the most"), unless it ends a count ("3, 2, 1").
+        let after_number = out.last().is_some_and(|t| t.cleaned.starts_with(|c: char| c.is_ascii_digit()));
+        let number = if after_month { parse_day(tokens, i) } else { None }.or_else(|| {
+            parse_number(tokens, i)
+                .filter(|&(_, end)| after_number || !(end == i + 1 && tokens[i].cleaned == "one"))
+                .map(|(value, end)| (value.to_string(), end))
+        });
+        match number {
+            Some((text, end)) => {
+                out.push(WordToken {
+                    cleaned: text.clone(),
+                    original: text,
+                    trailing_punct: tokens[end - 1].trailing_punct,
+                    leading_punct: tokens[i].leading_punct,
+                });
+                i = end;
             }
-
-            let num_str = total.to_string();
-            out.push(WordToken {
-                cleaned: num_str.clone(),
-                original: num_str,
-                trailing_punct: trailing,
-                leading_punct: token.leading_punct,
-            });
-            i = last_idx + 1;
-            continue;
+            None => {
+                out.push(tokens[i].clone());
+                i += 1;
+            }
         }
+    }
+    out
+}
 
-        out.push(token.clone());
+/// Reads the spoken number starting at `start` ("two hundred and five", "twenty five thousand"),
+/// as far as the words make one number: "four thirty" is two. Returns its value and the index after it.
+fn parse_number(tokens: &[WordToken], start: usize) -> Option<(i64, usize)> {
+    // `group` is the part below the current thousand: 250 in "three thousand two hundred fifty".
+    let (mut total, mut group, mut in_group) = (0i64, 0i64, false);
+    let mut last_scale = i64::MAX;
+    let mut end = start;
+    let mut i = start;
+    while i < tokens.len() {
+        let word = tokens[i].cleaned.as_str();
+        let tail = group % 100;
+        if let Some(v) = small_number(word) {
+            let fits = if !in_group {
+                v > 0 || i == start
+            } else if tail == 0 {
+                group > 0 && (1..100).contains(&v) // "hundred five", "hundred fifty"
+            } else {
+                tail >= 20 && tail % 10 == 0 && (1..10).contains(&v) // "twenty five"
+            };
+            if !fits {
+                break;
+            }
+            group += v;
+            in_group = true;
+        } else if word == "hundred" && in_group && (1..100).contains(&group) {
+            group *= 100;
+        } else if let Some(scale) = match word { "thousand" => Some(1000), "million" => Some(1_000_000), _ => None } {
+            if !in_group || group == 0 || scale >= last_scale {
+                break;
+            }
+            total += group * scale;
+            group = 0;
+            in_group = false;
+            last_scale = scale;
+        } else if word == "and"
+            && i > start
+            && tokens[i - 1].trailing_punct.is_none()
+            && tokens[i - 1].cleaned == "hundred"
+            && tokens.get(i + 1).and_then(|t| small_number(&t.cleaned)).is_some_and(|v| v > 0)
+        {
+            i += 1; // "two hundred and fifty"
+            continue;
+        } else {
+            break;
+        }
+        end = i + 1;
+        if tokens[i].trailing_punct.is_some() {
+            break;
+        }
         i += 1;
     }
+    (end > start).then_some((total + group, end))
+}
 
-    out
+/// A day after a month name: "third" -> "3rd", "twenty first" -> "21st".
+fn parse_day(tokens: &[WordToken], start: usize) -> Option<(String, usize)> {
+    let word = tokens[start].cleaned.as_str();
+    let (day, end) = match ordinal_number(word) {
+        Some(day) => (day, start + 1),
+        None => {
+            let tens = small_number(word).filter(|&v| v == 20 || v == 30)?;
+            if tokens[start].trailing_punct.is_some() {
+                return None;
+            }
+            let unit = ordinal_number(&tokens.get(start + 1)?.cleaned).filter(|&v| v < 10)?;
+            (tens + unit, start + 2)
+        }
+    };
+    let suffix = match (day % 10, day % 100) {
+        (_, 11..=13) => "th",
+        (1, _) => "st",
+        (2, _) => "nd",
+        (3, _) => "rd",
+        _ => "th",
+    };
+    Some((format!("{day}{suffix}"), end))
 }
 
 /// Reconstructs sentences with proper spacing, trailing punctuation, and capitalization.
@@ -396,6 +423,27 @@ mod tests {
             normalized,
             "Imagine you have only 15 minutes and you need to provide the comprehensive test results."
         );
+    }
+
+    #[test]
+    fn test_compound_numbers() {
+        assert_eq!(normalize_transcript("two hundred five"), "205.");
+        assert_eq!(normalize_transcript("two hundred and fifty dollars"), "250 dollars.");
+        assert_eq!(normalize_transcript("twenty five thousand three hundred"), "25300.");
+        assert_eq!(normalize_transcript("one hundred twenty"), "120.");
+        // Separate numbers stay separate.
+        assert_eq!(normalize_transcript("four thirty pm"), "4 30 pm.");
+        assert_eq!(normalize_transcript("three two one"), "3 2 1.");
+    }
+
+    #[test]
+    fn test_number_words_in_prose_stay_words() {
+        assert_eq!(
+            normalize_transcript("It's a big one. This is the first test, one of the best. Wait a second"),
+            "It's a big one. This is the first test, one of the best. Wait a second."
+        );
+        assert_eq!(normalize_transcript("Meet on March twenty first"), "Meet on March 21st.");
+        assert_eq!(normalize_transcript("Meet on March third"), "Meet on March 3rd.");
     }
 
     #[test]

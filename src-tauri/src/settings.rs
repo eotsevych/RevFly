@@ -103,8 +103,9 @@ pub struct AppSettings {
     pub apple_translation_model: String,
     #[serde(default = "default_device_backend")]
     pub device_backend: String,
-    /// On: a recording over 40 s is transcribed in chunks cut in the middle of pauses (see
-    /// `chunking`). Off: it is sent to the model as one whole track and logged as such.
+    /// On ("Fast"): pieces cut at long pauses are transcribed while recording (see `live_chunks`),
+    /// and a rest over 40 s is cut at pauses at the end (see `chunking`). Off ("Whole"): it is sent
+    /// to the model as one whole track and logged as such.
     #[serde(default)]
     pub audio_chunking: bool,
     /// "off" | "light" | "balanced" | "strong": RNNoise strength applied when recording stops.
@@ -268,14 +269,15 @@ impl Default for AppSettings {
             model_idle_unload_sec: default_idle_unload_sec(),
             model_load_mode: default_model_load_mode(),
             pill_center: None,
+            // The "Natural speech" text style (see TextTab's PRESETS).
             text_normalization: true,
             remove_filler_words: true,
-            convert_numbers: true,
+            convert_numbers: false,
             remove_stutters: true,
-            apply_self_corrections: true,
+            apply_self_corrections: false,
             remove_noise_markers: true,
-            collapse_redundancy: true,
-            annotate_ambiguity: true,
+            collapse_redundancy: false,
+            annotate_ambiguity: false,
             normalize_structured_values: true,
             translation_provider: "LLM".to_string(),
             apple_fallback_provider: String::new(),

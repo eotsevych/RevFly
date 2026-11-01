@@ -187,6 +187,53 @@ export function Row({
   );
 }
 
+// ── Rows hidden behind a "More" line, so the basics come first ─────────────
+export function Disclosure({
+  label,
+  children,
+  t,
+  last,
+  defaultOpen = false,
+}: {
+  label: string;
+  children: React.ReactNode;
+  t: Tokens;
+  last?: boolean;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          display: "flex",
+          width: "100%",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "10px 16px",
+          background: "none",
+          border: "none",
+          borderBottom: last && !open ? "none" : `1px solid ${t.border}`,
+          cursor: "pointer",
+          color: t.textMuted,
+          fontSize: 13,
+          fontFamily: "Inter, sans-serif",
+          textAlign: "left",
+        }}
+      >
+        {label}
+        <span style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>
+          ›
+        </span>
+      </button>
+      {open && children}
+    </>
+  );
+}
+
 // ── Form field label ───────────────────────────────────────────────────────
 export function FormLabel({ children, t }: { children: React.ReactNode; t: Tokens }) {
   return (

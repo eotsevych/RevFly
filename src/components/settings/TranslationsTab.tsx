@@ -6,8 +6,10 @@ import {
   type TranslationMode,
 } from "@/lib/tauri";
 import AppleTranslationPanel from "./AppleTranslationPanel";
+import HotkeyRecorder from "@/components/ui/HotkeyRecorder";
 import {
   Section,
+  Row,
   FormLabel,
   FormGroup,
   FieldInput,
@@ -59,7 +61,7 @@ const MODES: { value: TranslationMode; label: string; desc: string }[] = [
   {
     value: "hotkey",
     label: "Separate hotkey",
-    desc: "Only recordings started with the translate hotkey (set it in General)",
+    desc: "Only recordings started with the translate hotkey",
   },
   {
     value: "auto",
@@ -174,6 +176,13 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
       .catch(() => setAppleInfo(null));
   }, []);
 
+  // Apple's engines where they run (macOS 26+), the offline models everywhere else.
+  const recommended = appleInfo?.available ? "Apple" : "Offline";
+
+  const [hotkeyConflict, setHotkeyConflict] = useState(false);
+  const translateHotkey = settings.translate_hotkey ?? "";
+  const targetName = settings.target_lang || "the target language";
+
   const setProvider = (p: string) => {
     updateSettings({ translation_provider: p });
   };
@@ -238,6 +247,11 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
           }}
         >
           {p.label}
+          {p.value === recommended && (
+            <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 500, color: t.successColor }}>
+              Recommended
+            </span>
+          )}
         </p>
         <p
           style={{
@@ -278,6 +292,34 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
             ),
           )}
         </div>
+        {translationMode === "hotkey" && (
+          <Row
+            label="Translate hotkey"
+            hint={
+              hotkeyConflict
+                ? "That's already the launch hotkey — pick a different key"
+                : translateHotkey
+                  ? `Records and translates to ${targetName}`
+                  : `Set a key to record and translate to ${targetName}`
+            }
+            t={t}
+            last
+          >
+            <HotkeyRecorder
+              value={translateHotkey}
+              clearable
+              onChange={(v) => {
+                if (v && v === settings.hotkey) {
+                  setHotkeyConflict(true);
+                  return;
+                }
+                setHotkeyConflict(false);
+                updateSettings({ translate_hotkey: v });
+              }}
+              t={t}
+            />
+          </Row>
+        )}
       </Section>
 
       {translationOff && (

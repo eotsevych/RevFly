@@ -218,6 +218,26 @@ pub fn join_transcripts<S: AsRef<str>>(texts: &[S]) -> String {
     joined
 }
 
+/// Joins transcripts of pieces that overlap in time (see live_chunks::OVERLAP): the words a piece
+/// repeats from the end of the one before, up to 8, are dropped.
+pub fn join_overlapping<S: AsRef<str>>(texts: &[S]) -> String {
+    const MAX_WORDS: usize = 8;
+    fn key(word: &str) -> String {
+        word.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
+    }
+    let mut kept: Vec<String> = Vec::with_capacity(texts.len());
+    for text in texts {
+        let words: Vec<&str> = text.as_ref().split_whitespace().collect();
+        let prev: Vec<String> = kept.last().map_or(Vec::new(), |p| p.split_whitespace().map(key).collect());
+        let repeated = (1..=MAX_WORDS.min(prev.len()).min(words.len()))
+            .rev()
+            .find(|&k| prev[prev.len() - k..].iter().zip(&words[..k]).all(|(a, b)| !a.is_empty() && *a == key(b)))
+            .unwrap_or(0);
+        kept.push(words[repeated..].join(" "));
+    }
+    join_transcripts(&kept)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -290,5 +310,13 @@ mod tests {
         assert_eq!(join_transcripts(&["今天天气很好。", "我们去公园吧。"]), "今天天气很好。我们去公园吧。");
         assert_eq!(join_transcripts(&["I said", "你好"]), "I said你好");
         assert_eq!(join_transcripts(&["Привіт.", "Як справи?"]), "Привіт. Як справи?");
+    }
+
+    #[test]
+    fn overlapping_pieces_drop_the_repeated_words() {
+        assert_eq!(join_overlapping(&["What's the matter?", "the matter? I thought"]), "What's the matter? I thought");
+        assert_eq!(join_overlapping(&["Hello there.", "General Kenobi."]), "Hello there. General Kenobi.");
+        assert_eq!(join_overlapping(&["Wait.", "Wait. What?"]), "Wait. What?");
+        assert_eq!(join_overlapping(&["Привіт, як", "Як справи?"]), "Привіт, як справи?");
     }
 }

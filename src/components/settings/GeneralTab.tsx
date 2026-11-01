@@ -31,12 +31,6 @@ import {
 /** Hotkeys and pasting need the Accessibility permission only on macOS. */
 const IS_MAC = typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
 
-const TRANSLATION_MODE_OPTIONS: { value: TranslationMode; label: string }[] = [
-  { value: "off", label: "Off" },
-  { value: "hotkey", label: "Separate hotkey" },
-  { value: "auto", label: "Automatic" },
-];
-
 export default function GeneralTab({ t }: { t: Tokens }) {
   const { settings, updateSettings, inputDevices, outputDevices, refreshAudioDevices } =
     useSettingsContext();
@@ -60,7 +54,6 @@ export default function GeneralTab({ t }: { t: Tokens }) {
       setLaunchAtLoginError(String(e));
     }
   };
-  const [translateHotkeyConflict, setTranslateHotkeyConflict] = useState(false);
   const translateHotkey = settings.translate_hotkey ?? "";
   const translationMode: TranslationMode = settings.translation_mode ?? "hotkey";
   const targetName = settings.target_lang || "the target language";
@@ -233,107 +226,110 @@ export default function GeneralTab({ t }: { t: Tokens }) {
     return [{ value: "", label: "System Default" }, ...base];
   })();
 
+  const anySound = settings.sound_start || settings.sound_stop || settings.sound_error;
+
+  const permissions = (
+    <Section title="System Permissions" t={t}>
+      <Row
+        label="Accessibility sync"
+        hint="Check or grant macOS accessibility permission for hotkeys and auto-paste"
+        t={t}
+        last
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span
+            style={{
+              fontSize: 11,
+              fontFamily: "JetBrains Mono, monospace",
+              padding: "4px 8px",
+              borderRadius: 6,
+              fontWeight: 600,
+              background:
+                isAccessibilityGranted === true
+                  ? `${t.successColor}18`
+                  : isAccessibilityGranted === false
+                    ? `${t.warnColor}18`
+                    : t.surface,
+              color:
+                isAccessibilityGranted === true
+                  ? t.successColor
+                  : isAccessibilityGranted === false
+                    ? t.warnColor
+                    : t.textDim,
+              border: `1px solid ${
+                isAccessibilityGranted === true
+                  ? `${t.successColor}33`
+                  : isAccessibilityGranted === false
+                    ? `${t.warnColor}33`
+                    : t.border
+              }`,
+            }}
+          >
+            {isAccessibilityGranted === null
+              ? "Checking…"
+              : isAccessibilityGranted
+                ? "✓ Granted"
+                : "⚠ Not Granted"}
+          </span>
+
+          {isAccessibilityGranted === false && (
+            <button
+              type="button"
+              onClick={() => requestAccessibility()}
+              style={{
+                padding: "5px 10px",
+                borderRadius: 6,
+                border: `1px solid ${t.warnColor}`,
+                background: `${t.warnColor}20`,
+                color: t.warnColor,
+                fontSize: 11,
+                cursor: "pointer",
+                fontWeight: 500,
+                whiteSpace: "nowrap",
+              }}
+            >
+              Grant Access
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={syncAccessibility}
+            title="Sync accessibility status"
+            disabled={isCheckingAccessibility}
+            style={{
+              padding: "5px 10px",
+              borderRadius: 6,
+              border: `1px solid ${t.border}`,
+              background: t.surface,
+              color: t.textMuted,
+              fontSize: 11,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+          >
+            <span
+              style={{
+                display: "inline-block",
+                transform: isCheckingAccessibility ? "rotate(180deg)" : "none",
+                transition: "transform 0.4s",
+              }}
+            >
+              ↻
+            </span>
+            <span>Sync</span>
+          </button>
+        </div>
+      </Row>
+    </Section>
+  );
+
   return (
     <div>
-      {/* ── System Permissions Section (macOS only: Accessibility permission) ── */}
-      {IS_MAC && (
-        <Section title="System Permissions" t={t}>
-          <Row
-            label="Accessibility sync"
-            hint="Check or grant macOS accessibility permission for hotkeys and auto-paste"
-            t={t}
-            last
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span
-                style={{
-                  fontSize: 11,
-                  fontFamily: "JetBrains Mono, monospace",
-                  padding: "4px 8px",
-                  borderRadius: 6,
-                  fontWeight: 600,
-                  background:
-                    isAccessibilityGranted === true
-                      ? `${t.successColor}18`
-                      : isAccessibilityGranted === false
-                        ? `${t.warnColor}18`
-                        : t.surface,
-                  color:
-                    isAccessibilityGranted === true
-                      ? t.successColor
-                      : isAccessibilityGranted === false
-                        ? t.warnColor
-                        : t.textDim,
-                  border: `1px solid ${
-                    isAccessibilityGranted === true
-                      ? `${t.successColor}33`
-                      : isAccessibilityGranted === false
-                        ? `${t.warnColor}33`
-                        : t.border
-                  }`,
-                }}
-              >
-                {isAccessibilityGranted === null
-                  ? "Checking…"
-                  : isAccessibilityGranted
-                    ? "✓ Granted"
-                    : "⚠ Not Granted"}
-              </span>
-
-              {isAccessibilityGranted === false && (
-                <button
-                  type="button"
-                  onClick={() => requestAccessibility()}
-                  style={{
-                    padding: "5px 10px",
-                    borderRadius: 6,
-                    border: `1px solid ${t.warnColor}`,
-                    background: `${t.warnColor}20`,
-                    color: t.warnColor,
-                    fontSize: 11,
-                    cursor: "pointer",
-                    fontWeight: 500,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  Grant Access
-                </button>
-              )}
-
-              <button
-                type="button"
-                onClick={syncAccessibility}
-                title="Sync accessibility status"
-                disabled={isCheckingAccessibility}
-                style={{
-                  padding: "5px 10px",
-                  borderRadius: 6,
-                  border: `1px solid ${t.border}`,
-                  background: t.surface,
-                  color: t.textMuted,
-                  fontSize: 11,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                }}
-              >
-                <span
-                  style={{
-                    display: "inline-block",
-                    transform: isCheckingAccessibility ? "rotate(180deg)" : "none",
-                    transition: "transform 0.4s",
-                  }}
-                >
-                  ↻
-                </span>
-                <span>Sync</span>
-              </button>
-            </div>
-          </Row>
-        </Section>
-      )}
-
+      {/* ── System Permissions (macOS only): at the top while missing, at the bottom once granted ── */}
+      {IS_MAC && isAccessibilityGranted !== true && permissions}
       <UpdatesSection t={t} />
 
       {/* ── Input Section ── */}
@@ -358,53 +354,6 @@ export default function GeneralTab({ t }: { t: Tokens }) {
             t={t}
           />
         </Row>
-
-        <Row
-          label="Translation"
-          hint={
-            translationMode === "off"
-              ? "Never translate. Text is pasted in the language you speak"
-              : translationMode === "hotkey"
-                ? `Only recordings started with the translate hotkey are translated to ${targetName}`
-                : `The launch hotkey translates ${spokenOnly ?? "anything not in " + targetName} to ${targetName}`
-          }
-          t={t}
-        >
-          <Segmented
-            options={TRANSLATION_MODE_OPTIONS}
-            value={translationMode}
-            onChange={(v) => updateSettings({ translation_mode: v })}
-            t={t}
-          />
-        </Row>
-
-        {translationMode === "hotkey" && (
-          <Row
-            label="Translate hotkey"
-            hint={
-              translateHotkeyConflict
-                ? "That's already the launch hotkey — pick a different key"
-                : translateHotkey
-                  ? `Records and translates to ${targetName}`
-                  : `Set a key to record and translate to ${targetName}`
-            }
-            t={t}
-          >
-            <HotkeyRecorder
-              value={translateHotkey}
-              clearable
-              onChange={(v) => {
-                if (v && v === settings.hotkey) {
-                  setTranslateHotkeyConflict(true);
-                  return;
-                }
-                setTranslateHotkeyConflict(false);
-                updateSettings({ translate_hotkey: v });
-              }}
-              t={t}
-            />
-          </Row>
-        )}
 
         <Row label="Microphone input" hint="Audio capture device" t={t}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -542,36 +491,6 @@ export default function GeneralTab({ t }: { t: Tokens }) {
           </div>
         )}
 
-        <Row label="Audio output" hint="Chime and playback speaker" t={t}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <FieldSelect
-              value={settings.output_device || ""}
-              onChange={(v) => updateSettings({ output_device: v || null })}
-              options={outputOptions}
-              t={t}
-            />
-            <button
-              type="button"
-              onClick={handleTestSound}
-              disabled={isPlayingTestSound}
-              style={{
-                padding: "6px 12px",
-                borderRadius: 7,
-                border: `1px solid ${t.border}`,
-                background: isPlayingTestSound ? `${t.accent}20` : t.surface,
-                color: isPlayingTestSound ? t.accent : t.textMuted,
-                fontSize: 11,
-                fontFamily: "Inter, sans-serif",
-                cursor: isPlayingTestSound ? "default" : "pointer",
-                whiteSpace: "nowrap",
-                transition: "all 0.15s",
-              }}
-            >
-              {isPlayingTestSound ? "Playing…" : "Test Sound"}
-            </button>
-          </div>
-        </Row>
-
         <Row
           label="Noise reduction"
           hint="Removes fans, hum and room noise from each recording (RNNoise)"
@@ -599,61 +518,112 @@ export default function GeneralTab({ t }: { t: Tokens }) {
         </Row>
       </Section>
 
+      {/* ── Sounds ── */}
+      <Section title="Sounds" t={t}>
+        <Row
+          label="Sounds"
+          hint="Chimes when recording starts and stops, and an alert on errors"
+          t={t}
+          last={!anySound}
+        >
+          <Toggle
+            value={anySound}
+            onChange={(v) => updateSettings({ sound_start: v, sound_stop: v, sound_error: v })}
+            accent={t.accent}
+          />
+        </Row>
+        {anySound && (
+          <>
+            <Row label="Start sound" hint="When recording starts — you can talk" t={t}>
+              <Toggle
+                value={settings.sound_start}
+                onChange={(v) => updateSettings({ sound_start: v })}
+                accent={t.accent}
+              />
+            </Row>
+            <Row label="Stop sound" hint="When recording stops" t={t}>
+              <Toggle
+                value={settings.sound_stop}
+                onChange={(v) => updateSettings({ sound_stop: v })}
+                accent={t.accent}
+              />
+            </Row>
+            <Row
+              label="Error sound"
+              hint="On errors and mic warnings, so you hear them without looking"
+              t={t}
+            >
+              <Toggle
+                value={settings.sound_error}
+                onChange={(v) => updateSettings({ sound_error: v })}
+                accent={t.accent}
+              />
+            </Row>
+            <Row label="Audio output" hint="Speaker for the sounds" t={t} last>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <FieldSelect
+                  value={settings.output_device || ""}
+                  onChange={(v) => updateSettings({ output_device: v || null })}
+                  options={outputOptions}
+                  t={t}
+                />
+                <button
+                  type="button"
+                  onClick={handleTestSound}
+                  disabled={isPlayingTestSound}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 7,
+                    border: `1px solid ${t.border}`,
+                    background: isPlayingTestSound ? `${t.accent}20` : t.surface,
+                    color: isPlayingTestSound ? t.accent : t.textMuted,
+                    fontSize: 11,
+                    fontFamily: "Inter, sans-serif",
+                    cursor: isPlayingTestSound ? "default" : "pointer",
+                    whiteSpace: "nowrap",
+                    transition: "all 0.15s",
+                  }}
+                >
+                  {isPlayingTestSound ? "Playing…" : "Test Sound"}
+                </button>
+              </div>
+            </Row>
+          </>
+        )}
+      </Section>
+
       {/* ── Behavior Section ── */}
       <Section title="Behavior" t={t}>
         <Row
-          label="Open at login"
-          hint={launchAtLoginError ?? "Start RevFly automatically when you log in"}
+          label="Auto-paste"
+          hint="Paste the text into the app you're in. Off: it's only copied"
           t={t}
         >
-          <Toggle value={launchAtLogin} onChange={toggleLaunchAtLogin} accent={t.accent} />
-        </Row>
-        <Row label="Start sound" hint="Chime when recording starts — you can talk" t={t}>
-          <Toggle
-            value={settings.sound_start}
-            onChange={(v) => updateSettings({ sound_start: v })}
-            accent={t.accent}
-          />
-        </Row>
-        <Row label="Stop sound" hint="Chime when recording stops" t={t}>
-          <Toggle
-            value={settings.sound_stop}
-            onChange={(v) => updateSettings({ sound_stop: v })}
-            accent={t.accent}
-          />
-        </Row>
-        <Row
-          label="Error sound"
-          hint="Alert on errors and mic warnings, so you hear them without looking"
-          t={t}
-        >
-          <Toggle
-            value={settings.sound_error}
-            onChange={(v) => updateSettings({ sound_error: v })}
-            accent={t.accent}
-          />
-        </Row>
-        <Row label="Auto-paste" hint="Paste translation automatically into frontmost window" t={t}>
           <Toggle
             value={settings.auto_paste}
             onChange={(v) => updateSettings({ auto_paste: v })}
             accent={t.accent}
           />
         </Row>
+        {settings.auto_paste && (
+          <Row
+            label="Keep my clipboard"
+            hint="After pasting, put back what you had copied: text, images or files"
+            t={t}
+          >
+            <Toggle
+              value={settings.keep_clipboard ?? false}
+              onChange={(v) => updateSettings({ keep_clipboard: v })}
+              accent={t.accent}
+            />
+          </Row>
+        )}
         <Row
-          label="Keep my clipboard"
-          hint={
-            settings.auto_paste
-              ? "After auto-paste, put back what was on the clipboard: text, images or files you copied"
-              : "Works with Auto-paste: without it, the dictated text has to stay on the clipboard for you to paste"
-          }
+          label="Open at login"
+          hint={launchAtLoginError ?? "Start RevFly automatically when you log in"}
           t={t}
         >
-          <Toggle
-            value={settings.keep_clipboard ?? false}
-            onChange={(v) => updateSettings({ keep_clipboard: v })}
-            accent={t.accent}
-          />
+          <Toggle value={launchAtLogin} onChange={toggleLaunchAtLogin} accent={t.accent} />
         </Row>
         <Row
           label="Show hints"
@@ -668,6 +638,8 @@ export default function GeneralTab({ t }: { t: Tokens }) {
           />
         </Row>
       </Section>
+
+      {IS_MAC && isAccessibilityGranted === true && permissions}
     </div>
   );
 }

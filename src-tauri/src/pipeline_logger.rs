@@ -226,13 +226,20 @@ fn session_audio_dir(data_dir: &Path) -> PathBuf {
     data_dir.join(SESSION_AUDIO_DIR)
 }
 
-/// Saves the entire recording of one session and returns its path relative to the data dir.
+/// Saves the entire recording of one session and returns its path relative to the data dir. The
+/// file is written on a thread of its own (~150 ms for 3 minutes at 48 kHz), off the dictation's
+/// path; it's only opened later, from the log or history.
 pub fn save_session_audio(data_dir: &Path, audio: &crate::audio::CapturedAudio) -> Option<String> {
     let dir = session_audio_dir(data_dir);
     fs::create_dir_all(&dir).ok()?;
     let filename = format!("session_{}.wav", Local::now().format("%Y%m%d_%H%M%S_%3f"));
     let (samples, sample_rate) = audio.playback();
-    crate::history::write_wav_file(&dir.join(&filename), &samples, sample_rate).ok()?;
+    let path = dir.join(&filename);
+    std::thread::spawn(move || {
+        if let Err(e) = crate::history::write_wav_file(&path, &samples, sample_rate) {
+            log::warn!("Couldn't save the session audio {:?}: {}", path, e);
+        }
+    });
     Some(format!("{}/{}", SESSION_AUDIO_DIR, filename))
 }
 
