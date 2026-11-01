@@ -111,6 +111,23 @@ def main():
                          "/".join(str(x) for x in rates) or None])
         table("By input device (since 1.0.6; all outcomes)", ["device", "n", "ok", "empty", "speed", "rate Hz"], rows)
 
+    # Translation speed per service, model and language pair. Failed runs count, so they're shown.
+    translated = [r for r in runs if r.get("translation_ms") is not None]
+    if translated:
+        groups = defaultdict(list)
+        for r in translated:
+            groups[(r["translation"], r.get("translation_model") or "-", r.get("translation_pair") or "-")].append(r)
+        rows = []
+        for (service, model, pair), rs in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+            done = [r for r in rs if r.get("translation_out_chars")]
+            ms = sorted(r["translation_ms"] for r in done)
+            rows.append([service, model, pair, len(rs), len(rs) - len(done),
+                         median(ms), ms[int(len(ms) * 0.9)] if ms else None,
+                         median(r["translation_ms"] * 100 / max(r["translation_in_chars"], 1) for r in done),
+                         median(r["translation_out_chars"] / max(r["translation_in_chars"], 1) for r in done)])
+        table("Translation (since 1.0.6; model and pair for every service since 1.0.8)",
+              ["service", "model", "pair", "n", "failed", "median ms", "p90 ms", "ms/100 chars", "out/in chars"], rows)
+
     if beats:
         table("App memory between dictations (heartbeats, first / last / max)", ["", "first", "last", "max"], [
             ["app RAM MB", beats[0]["app_rss_mb"], beats[-1]["app_rss_mb"], max(b["app_rss_mb"] for b in beats)],

@@ -294,8 +294,18 @@ struct Translated {
     via: String,
     /// Short service name for the pill and the performance log: "LLM", "Custom API" or "Apple".
     label: &'static str,
-    /// Languages as codes, e.g. "uk → en" (Apple only; LLMs are given names in the prompt).
+    /// Languages as codes, e.g. "uk → en"; "auto → en" when the spoken language wasn't known.
     pair: Option<String>,
+    /// The model that translated, for the performance log: the LLM's name, or Apple's "fast" or
+    /// "quality".
+    model: Option<String>,
+}
+
+/// The languages as codes ("uk → en"). The spoken one is the detected one while it's set to Auto.
+fn language_pair(settings: &AppSettings, from_lang: &str) -> Option<String> {
+    let target = crate::apple_translate::to_bcp47(&settings.target_lang)?;
+    let source = crate::apple_translate::source_code(&settings.source_lang, from_lang).unwrap_or_else(|| "auto".to_string());
+    Some(format!("{} → {}", source, target))
 }
 
 /// True for an endpoint on this computer (Ollama, LM Studio), which needs no API key.
@@ -459,7 +469,8 @@ impl TranslationRoute {
     async fn translate(&self, settings: &AppSettings, text: &str, from_lang: &str) -> Result<Translated, String> {
         if !(self.is_apple || self.is_offline) {
             let text = self.translate_llm(settings, text).await?;
-            return Ok(Translated { text, via: self.describe(settings), label: self.label(), pair: None });
+            let model = (!self.is_intelligence).then(|| self.model.clone());
+            return Ok(Translated { text, via: self.describe(settings), label: self.label(), pair: language_pair(settings, from_lang), model });
         }
         let first = if self.is_offline {
             self.translate_offline(settings, text, from_lang).await
@@ -483,7 +494,8 @@ impl TranslationRoute {
                 text,
                 via: format!("{} (after {} failed: {})", fallback.describe(settings), self.describe(settings), reason),
                 label: fallback.label(),
-                pair: None,
+                pair: language_pair(settings, from_lang),
+                model: Some(fallback.model.clone()),
             }),
             Err(e) => Err(format!("{}; {} failed too: {}", reason, fallback.label(), e)),
         }
@@ -498,7 +510,13 @@ impl TranslationRoute {
         match crate::apple_translate::translate(text, source.as_deref(), &target, model, TRANSLATION_TIMEOUT).await {
             Ok(done) => {
                 let pair = format!("{} → {}", done.source, target);
-                Ok(Translated { text: done.text, via: format!("{} {}", self.describe(settings), pair), label: self.label(), pair: Some(pair) })
+                Ok(Translated {
+                    text: done.text,
+                    via: format!("{} {}", self.describe(settings), pair),
+                    label: self.label(),
+                    pair: Some(pair),
+                    model: Some(settings.apple_translation_model.clone()),
+                })
             }
             Err(e) => Err(e.describe(&crate::apple_translate::pair_name(source.as_deref(), &target))),
         }
@@ -514,7 +532,7 @@ impl TranslationRoute {
         };
         let text = crate::offline_translate::translate(text, &source, &target, TRANSLATION_TIMEOUT).await?;
         let pair = format!("{} → {}", source, target);
-        Ok(Translated { text, via: format!("{} {}", self.describe(settings), pair), label: self.label(), pair: Some(pair) })
+        Ok(Translated { text, via: format!("{} {}", self.describe(settings), pair), label: self.label(), pair: Some(pair), model: None })
     }
 
     async fn translate_llm(&self, settings: &AppSettings, text: &str) -> Result<String, String> {
@@ -2782,7 +2800,7 @@ impl AppController {
             // Only service translations can be retried; local Whisper translation needs the audio.
             let mut retryable = false;
             // The service that translated (the fallback's when Apple Translation failed over to it).
-            let mut translated_via: Option<(String, &'static str, Option<String>)> = None;
+            let mut translated_via: Option<(String, &'static str, Option<String>, Option<String>)> = None;
 
             let trans_start = Instant::now();
             let (final_text, translation_ms) = if skip_translation {
@@ -2831,7 +2849,7 @@ impl AppController {
                                 t.text
                             ),
                         );
-                        translated_via = Some((t.via, t.label, t.pair));
+                        translated_via = Some((t.via, t.label, t.pair, t.model));
                         (t.text, ms)
                     }
                     Err(e) => {
@@ -2925,10 +2943,11 @@ impl AppController {
 
             perf.lap("translation");
             perf.translation = (!skip_translation).then(|| {
-                translated_via.as_ref().map(|(_, label, _)| *label).unwrap_or(route.label()).to_string()
+                translated_via.as_ref().map(|(_, label, _, _)| *label).unwrap_or(route.label()).to_string()
             });
             if can_translate && !skip_translation {
-                perf.translation_pair = translated_via.as_ref().and_then(|(_, _, pair)| pair.clone());
+                perf.translation_pair = translated_via.as_ref().and_then(|(_, _, pair, _)| pair.clone());
+                perf.translation_model = translated_via.as_ref().and_then(|(_, _, _, model)| model.clone());
                 perf.translation_ms = Some(translation_ms);
                 perf.translation_chars = Some((
                     pre_translate_text.chars().count(),
@@ -3065,7 +3084,7 @@ impl AppController {
                     actions.push("[TRANSLATION] Retry available from the pill or the tray menu".to_string());
                 }
             } else if can_translate {
-                let via = translated_via.as_ref().map(|(via, _, _)| via.clone()).unwrap_or_else(|| route.describe(&settings));
+                let via = translated_via.as_ref().map(|(via, _, _, _)| via.clone()).unwrap_or_else(|| route.describe(&settings));
                 actions.push(format!(
                     "[TRANSLATION] Translated in {} ms via {} ({} → {} chars)",
                     translation_ms,
@@ -3104,7 +3123,7 @@ impl AppController {
                 translation_ms,
                 translation_error: translation_error_detail.clone(),
                 translation_provider: (!skip_translation).then(|| match &translated_via {
-                    Some((via, _, _)) => via.clone(),
+                    Some((via, _, _, _)) => via.clone(),
                     None if can_translate => route.describe(&settings),
                     None => "Whisper (local)".to_string(),
                 }),

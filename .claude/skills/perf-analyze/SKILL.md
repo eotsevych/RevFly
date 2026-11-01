@@ -1,6 +1,6 @@
 ---
 name: perf-analyze
-description: Analyze RevFly's performance log (performance.jsonl) for slowdowns, memory growth and their causes. Use when the user runs /perf-analyze or asks to analyze RevFly performance, dictation speed, CPU/RAM usage or performance degradation.
+description: Analyze RevFly's performance log (performance.jsonl) for slowdowns, memory growth and their causes, and its translations for speed and accuracy per service. Use when the user runs /perf-analyze or asks to analyze RevFly performance, dictation speed, CPU/RAM usage, performance degradation, or how fast and how good translations are.
 ---
 
 # Analyze RevFly performance
@@ -10,8 +10,9 @@ RevFly writes one JSON line per dictation (`"type": "dictation"`) and one every 
 (rotated to `performance.1.jsonl` at 10 MB). The writer is `src-tauri/src/perf.rs`; the stage laps
 are set in `stop_listening_and_process` in `src-tauri/src/app_controller.rs`.
 
-Arguments (optional): a time window such as `today`, `last 3 days`, `since 2026-10-07`, or a path
-to a different log. Default: all data, with extra attention to the last 24 hours.
+Arguments (optional): a time window such as `today`, `last 3 days`, `since 2026-10-07`, a path
+to a different log, or `translation` to look at translations only. Default: all data, with extra
+attention to the last 24 hours.
 
 ## Steps
 
@@ -34,7 +35,15 @@ to a different log. Default: all data, with extra attention to the last 24 hours
      (`app_uptime_sec` dropping back near 0)
    - `inference_ms` against `speech_sec` (inference should scale roughly linearly with speech)
 
-3. For specific slow runs, cross-check `transcription_pipeline.log` in the same folder around the
+3. Translations (skip if the report's Translation table is missing): run
+   ```bash
+   python3 scripts/translation_samples.py --per 8
+   ```
+   (`--since YYYY-MM-DD` for a window.) It pairs each translation with what was said, per service,
+   and flags `failed`, `unchanged`, `script` (wrong alphabet) and `length` outliers. Then judge the
+   samples yourself, as a bilingual reviewer would; see "Translation accuracy" below.
+
+4. For specific slow runs, cross-check `transcription_pipeline.log` in the same folder around the
    same timestamp (`[PERF]`, `[MODEL_LOAD]`, `[IDLE_CLEANUP]`, `[VAD]`, `[PARAKEET_DONE]` lines).
 
 ## How to read the fields
@@ -48,9 +57,13 @@ to a different log. Default: all data, with extra attention to the last 24 hours
 - `input_device`, `input_rate_hz` (since 1.0.6): the microphone that recorded and its rate. A
   Bluetooth headset in call mode records at 16 or 24 kHz. The report's "By input device" table
   counts every outcome per mic, so a mic that often hears nothing shows up as `empty` runs.
-- `translation`: the service that translated ("LLM", "Custom API", "Apple"; null when skipped).
-  Lines written after 1.0.6 also have `translation_ms` (time in the service), `translation_in_chars` /
-  `translation_out_chars` (0 out when it failed) and `translation_pair` ("uk → en", Apple only).
+- `translation`: the service that translated ("LLM", "Custom API", "Apple", "Apple Intelligence",
+  "Offline"; null when skipped). Lines written after 1.0.6 also have `translation_ms` (time in the
+  service), `translation_in_chars` / `translation_out_chars` (0 out when it failed) and
+  `translation_pair` ("uk → en"; Apple and Offline only before 1.0.8, every service since, with
+  "auto" when the spoken language wasn't known). Since 1.0.8 `translation_model` names the LLM, or
+  Apple's `fast` / `quality` model. Offline (Firefox Translations models) translates a pair without
+  English through English (uk → en → de), so such pairs take about twice as long.
   Apple's on-device translation takes tens of ms per sentence with the Fast model and about half a
   second with Best quality; its first call after launch also starts the `revfly-translate` helper
   and loads the model (2-3 s), which RevFly does while the user is still talking.
@@ -80,9 +93,28 @@ to a different log. Default: all data, with extra attention to the last 24 hours
   runs for both latency and `app_rss_peak_mb`.
 - **Failures/cancellations clustering** at a stage or time.
 
+## Translation accuracy
+
+The history has no reference translation, so accuracy is your judgment of the samples. For each
+service, rate every sample on:
+- **Meaning**: all of it kept, nothing added (4 = all, 3 = a detail off, 2 = part lost or wrong,
+  1 = wrong or not translated).
+- **Fluency**: reads like a native speaker wrote it (same 1-4 scale).
+Note the errors that repeat: names and product words translated or mangled, English words in mixed
+speech dropped, tone changed, sentences cut off (often the speech model's fault: compare with
+"said"), or a prompt-following service (LLM, Apple Intelligence) answering or adding notes instead
+of translating. Errors already in "said" are transcription errors; don't count them against the
+translator.
+
+Compare services only on similar text. For a fair head-to-head, ask the user to translate the same
+few sentences with each service in Settings › Audio Labs › Translate Again (it runs the chosen
+service on any text), then rate those side by side. Report speed and accuracy together: a service
+that's 10x faster but loses meaning isn't the better one.
+
 ## Report back
 
-Lead with the answer: is there degradation, how big, and the most likely cause, backed by numbers
+Lead with the answer: is there degradation, how big, and the most likely cause (for translations:
+which service is fastest and which is most accurate, per language pair), backed by numbers
 (medians and counts, with the time range and n). Then list notable findings in order of impact,
 each with the evidence and a concrete next step (a code location to look at, a setting to change,
 or more data to collect). Say clearly when there's too little data to conclude something. Don't

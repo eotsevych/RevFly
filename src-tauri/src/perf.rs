@@ -97,8 +97,10 @@ pub struct PerfRun {
     pub inference_ms: Option<u64>,
     pub threads: Option<i32>,
     pub translation: Option<String>,
-    /// Languages translated, as codes ("uk → en"); set by services that report them (Apple).
+    /// Languages translated, as codes ("uk → en", "auto → en" when the spoken one wasn't known).
     pub translation_pair: Option<String>,
+    /// The LLM that translated, or Apple's "fast" / "quality" model.
+    pub translation_model: Option<String>,
     /// Time the translation service took, and characters sent and received (0 received when it
     /// failed). Set when a service was called.
     pub translation_ms: Option<u64>,
@@ -130,6 +132,7 @@ impl PerfRun {
             threads: None,
             translation: None,
             translation_pair: None,
+            translation_model: None,
             translation_ms: None,
             translation_chars: None,
             text_chars: 0,
@@ -210,6 +213,7 @@ impl PerfRun {
             "vad_no_speech": self.vad_no_speech,
             "translation": self.translation,
             "translation_pair": self.translation_pair,
+            "translation_model": self.translation_model,
             "translation_ms": self.translation_ms,
             "translation_in_chars": self.translation_chars.map(|(sent, _)| sent),
             "translation_out_chars": self.translation_chars.map(|(_, got)| got),
