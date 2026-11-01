@@ -70,34 +70,51 @@ const MODES: { value: TranslationMode; label: string; desc: string }[] = [
   },
 ];
 
-// Which service translates: LLM (both local & cloud), a custom API, or one of Apple's on-device engines
-const PROVIDERS = [
-  {
-    value: "LLM",
-    label: "LLM (both local & cloud)",
-    desc: "Any AI model: Gemini, OpenAI, or local with Ollama or LM Studio. Follows your prompt below",
-  },
-  {
-    value: "Custom API",
-    label: "Custom API",
-    desc: "Custom REST translation endpoint",
-  },
-  {
-    value: "Offline",
-    label: "Offline (on-device)",
-    desc: "Firefox's translation models. Free, private, works on any computer. Pairs without English go through English",
-  },
+// Which service translates, and what each is good at: `pros` are its strengths, `notes` what to
+// know before choosing it.
+const PROVIDERS: {
+  value: string;
+  label: string;
+  bestFor: string;
+  pros: string[];
+  notes: string[];
+}[] = [
   {
     value: "Apple",
     label: "Apple Native",
-    desc: "Apple's translation engine. Fast and faithful: translates exactly what you said. Free, offline",
+    bestFor: "Everyday messages: an exact translation of what you said, in a blink",
+    pros: ["Fastest", "On your Mac", "Free", "Works offline"],
+    notes: ["Download each language once"],
   },
   {
     value: "Apple Intelligence",
     label: "Apple Intelligence",
-    desc: "Apple's on-device AI. Translates and also follows your prompt below, e.g. a friendlier tone or fixed grammar. Slower. Free, offline",
+    bestFor: "Translating and polishing at once: a friendlier tone, fixed grammar",
+    pros: ["Follows your prompt", "On your Mac", "Free", "Works offline"],
+    notes: ["About a second per dictation"],
   },
-] as const;
+  {
+    value: "Offline",
+    label: "Offline (on-device)",
+    bestFor: "Private translation on any computer, Windows and Linux included",
+    pros: ["Fast", "On your computer", "Free", "Works offline"],
+    notes: ["Pairs without English go through English"],
+  },
+  {
+    value: "LLM",
+    label: "LLM (both local & cloud)",
+    bestFor: "The best wording and full control: Gemini, OpenAI, or local Ollama and LM Studio",
+    pros: ["Best quality", "Follows your prompt", "Any language"],
+    notes: ["Cloud needs an API key", "Local needs Ollama or LM Studio"],
+  },
+  {
+    value: "Custom API",
+    label: "Custom API",
+    bestFor: "Your own or your company's translation server (OpenAI-compatible)",
+    pros: ["Your own server", "Follows your prompt"],
+    notes: ["Needs an endpoint and key"],
+  },
+];
 
 const LLM_PRESETS = [
   {
@@ -208,6 +225,120 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
 
   const insertVariable = (varName: string) => {
     updateSettings({ prompt_template: `${currentPrompt} ${varName}` });
+  };
+
+  const tag = (text: string, good: boolean) => (
+    <span
+      key={text}
+      style={{
+        padding: "2px 8px",
+        borderRadius: 999,
+        fontSize: 11,
+        fontFamily: "Inter, sans-serif",
+        fontWeight: 500,
+        whiteSpace: "nowrap",
+        color: good ? t.successColor : t.textDim,
+        background: good ? `${t.successColor}14` : t.surface,
+        border: `1px solid ${good ? `${t.successColor}33` : t.border}`,
+      }}
+    >
+      {good ? "✓ " : ""}
+      {text}
+    </span>
+  );
+
+  // One service: what it's best for and its strengths, or why it can't run here.
+  const serviceCard = (p: (typeof PROVIDERS)[number], active: boolean, problem: string | null) => {
+    const disabled = problem !== null && !active;
+    return (
+      <button
+        key={p.value}
+        type="button"
+        role="radio"
+        aria-checked={active}
+        onClick={() => setProvider(p.value)}
+        disabled={disabled}
+        style={{
+          display: "flex",
+          gap: 12,
+          alignItems: "flex-start",
+          width: "100%",
+          padding: "12px 14px",
+          borderRadius: 10,
+          cursor: disabled ? "not-allowed" : "pointer",
+          opacity: disabled ? 0.55 : 1,
+          background: active ? `${t.accent}14` : t.inputBg,
+          border: `1px solid ${active ? `${t.accent}66` : t.border}`,
+          textAlign: "left",
+          transition: "background 0.15s, border-color 0.15s",
+        }}
+      >
+        <span
+          aria-hidden
+          style={{
+            width: 16,
+            height: 16,
+            marginTop: 1,
+            flexShrink: 0,
+            borderRadius: "50%",
+            border: `1.5px solid ${active ? t.accent : t.inputBorder}`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {active && (
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: t.accent }} />
+          )}
+        </span>
+        <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                color: active ? t.accent : t.text,
+                fontFamily: "Inter, sans-serif",
+              }}
+            >
+              {p.label}
+            </span>
+            {p.value === recommended && (
+              <span
+                style={{
+                  padding: "1px 7px",
+                  borderRadius: 999,
+                  fontSize: 10,
+                  fontWeight: 600,
+                  letterSpacing: "0.04em",
+                  color: t.accent,
+                  border: `1px solid ${t.accent}55`,
+                  fontFamily: "Inter, sans-serif",
+                }}
+              >
+                RECOMMENDED FOR THIS COMPUTER
+              </span>
+            )}
+          </span>
+          <span
+            style={{
+              fontSize: 12,
+              lineHeight: 1.45,
+              color: problem ? t.warnColor : t.textMuted,
+              fontFamily: "Inter, sans-serif",
+            }}
+          >
+            {problem || p.bestFor}
+          </span>
+          {!problem && (
+            <span style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {p.pros.map((x) => tag(x, true))}
+              {p.notes.map((x) => tag(x, false))}
+            </span>
+          )}
+        </span>
+      </button>
+    );
   };
 
   const card = (
@@ -347,7 +478,9 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
       {!translationOff && (
         <Section title="Translation Service" t={t}>
           <div
-            style={{ padding: 12, display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}
+            role="radiogroup"
+            aria-label="Translation service"
+            style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8 }}
           >
             {PROVIDERS.map((p) => {
               // Apple's engines only where Apple Translation runs (macOS 26+). The chosen one
@@ -365,14 +498,8 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
                       ? appleInfo.intelligence_reason
                       : ""
                     : null;
-              const unavailable = reason !== null;
-              const shown = reason ? { ...p, desc: reason } : p;
-              return card(
-                shown,
-                activeProvider === p.value,
-                () => setProvider(p.value),
-                unavailable && activeProvider !== p.value,
-              );
+              // "" while Apple's support is still being checked: not a problem yet.
+              return serviceCard(p, activeProvider === p.value, reason || null);
             })}
           </div>
         </Section>
