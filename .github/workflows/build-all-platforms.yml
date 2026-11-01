@@ -138,6 +138,8 @@ jobs:
         env:
           # Fail instead of shipping the Apple translation provider without its helper.
           REVFLY_REQUIRE_APPLE_TRANSLATE: "1"
+          # And without the Neural Engine speech recognition helper (Parakeet on Apple Silicon).
+          REVFLY_REQUIRE_APPLE_ASR: "1"
           # Notarization (skipped when unset) with an App Store Connect API key.
           # Only on release tags and manual runs; it adds ~15 minutes.
           APPLE_API_KEY: ${{ (env.IS_RELEASE == 'true' || github.event_name == 'workflow_dispatch') && secrets.APPLE_API_KEY || '' }}
@@ -188,6 +190,23 @@ jobs:
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
+
+      # Whisper's Vulkan GPU backend builds against the Vulkan SDK. The Vulkan loader (vulkan-1.dll)
+      # ships next to RevFly.exe, so the app also starts on PCs without one and uses the CPU there.
+      - name: Install Vulkan SDK
+        shell: pwsh
+        env:
+          VULKAN_VERSION: 1.4.313.2
+        run: |
+          curl.exe -o "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" -L "https://sdk.lunarg.com/sdk/download/$env:VULKAN_VERSION/windows/vulkansdk-windows-X64-$env:VULKAN_VERSION.exe"
+          & "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" --accept-licenses --default-answer --confirm-command install
+          $sdk = "C:\VulkanSDK\$env:VULKAN_VERSION"
+          if (-not (Test-Path "$sdk\Lib\vulkan-1.lib")) { throw "Vulkan SDK not installed at $sdk" }
+          Add-Content $env:GITHUB_ENV "VULKAN_SDK=$sdk"
+          Add-Content $env:GITHUB_PATH "$sdk\Bin"
+          $loader = @("$sdk\Bin\vulkan-1.dll", "C:\Windows\System32\vulkan-1.dll") | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $loader) { throw "vulkan-1.dll not found" }
+          Copy-Item $loader src-tauri\vulkan-1.dll
 
       - name: Build Windows installers
         run: |
@@ -255,7 +274,9 @@ jobs:
             libssl-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
-            libasound2-dev
+            libasound2-dev \
+            libvulkan-dev \
+            glslc
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable

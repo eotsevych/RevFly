@@ -21,6 +21,7 @@ export interface BackendSettings {
   sound_stop: boolean;
   sound_error: boolean;
   auto_paste: boolean;
+  keep_clipboard?: boolean;
   show_hints?: boolean;
   storage_mode: string;
   storage_cap_mb: number;
@@ -49,16 +50,14 @@ export interface BackendSettings {
   collapse_redundancy?: boolean;
   annotate_ambiguity?: boolean;
   normalize_structured_values?: boolean;
-  /** "LLM", "Custom API" or "Apple" (Apple's on-device Translation, macOS 26+). */
+  /** "LLM", "Custom API", "Apple" (Apple's on-device Translation, macOS 26+), "Apple Intelligence"
+   * or "Offline" (Firefox Translations models on the CPU, any OS). */
   translation_provider?: string;
-  /** With the Apple provider: "LLM" or "Custom API" translates when Apple Translation fails; "" = none. */
+  /** With the Apple or Offline provider: "LLM" or "Custom API" translates when it fails; "" = none. */
   apple_fallback_provider?: string;
   /** Apple Translation model to use when both are downloaded: "fast" or "quality". */
   apple_translation_model?: "fast" | "quality";
   device_backend?: string;
-  chunk_pause_ms?: number;
-  chunk_safety_sec?: number;
-  chunk_overlap_ms?: number;
   audio_chunking?: boolean;
   noise_reduction?: NoiseReduction;
   gemini_model?: string;
@@ -95,6 +94,18 @@ export interface HardwareProfile {
   has_neon: boolean;
   has_metal: boolean;
   summary: string;
+}
+
+/** The GPUs Whisper can run on (Metal on a Mac, Vulkan on Windows and Linux); empty without one. */
+export async function fetchGpuDevices(): Promise<string[]> {
+  if (!isTauri()) return ["Apple M2"];
+  return await invoke<string[]>("get_gpu_devices");
+}
+
+/** Where Parakeet runs, e.g. "the Neural Engine" or "the CPU (6 threads)". */
+export async function fetchParakeetEngine(): Promise<string> {
+  if (!isTauri()) return "the Neural Engine";
+  return await invoke<string>("get_parakeet_engine");
 }
 
 export async function fetchHardwareProfile(): Promise<HardwareProfile | null> {
@@ -766,6 +777,8 @@ export interface LabExperimentRequest {
   annotate_ambiguity?: boolean;
   normalize_structured_values?: boolean;
   noise_reduction?: NoiseReduction;
+  /** Same as dictation: long audio is transcribed in chunks cut at pauses. */
+  chunking?: boolean;
 }
 
 /** Audio Lab's "Translate Again" result. */
@@ -782,6 +795,8 @@ export interface AppleTranslationInfo {
   reason: string | null;
   os_version: string | null;
   min_os: number;
+  /** Why the Apple Intelligence provider can't be used; null when it can. */
+  intelligence_reason: string | null;
 }
 
 export async function fetchAppleTranslationInfo(): Promise<AppleTranslationInfo> {
@@ -791,6 +806,7 @@ export async function fetchAppleTranslationInfo(): Promise<AppleTranslationInfo>
       reason: "Works only in the desktop app.",
       os_version: null,
       min_os: 26,
+      intelligence_reason: "Works only in the desktop app.",
     };
   }
   return await invoke<AppleTranslationInfo>("apple_translation_info");
@@ -803,20 +819,28 @@ export interface AppleLanguagePack {
   status: "installed" | "supported" | "unsupported";
 }
 
-/** Apple's language packs for translating into `targetLang` (a RevFly language name). Throws
- * when Apple Translation can't be asked. */
+/** Apple's language packs for translating into `targetLang` (a RevFly language name), or the
+ * Offline provider's with `offline`. Throws when they can't be listed. */
 export async function fetchAppleLanguagePacks(
   targetLang: string,
+  offline = false,
 ): Promise<{ target: string; languages: AppleLanguagePack[] }> {
   if (!isTauri()) throw new Error("Works only in the desktop app.");
-  return await invoke("apple_translation_languages", { targetLang });
+  const command = offline ? "offline_translation_languages" : "apple_translation_languages";
+  return await invoke(command, { targetLang });
 }
 
-/** Shows Apple's download prompt for `source` → `target` (codes such as "uk", "en") and resolves
- * when it's downloaded. Throws when it's cancelled or fails. */
-export async function downloadAppleLanguagePack(source: string, target: string): Promise<void> {
+/** Shows Apple's download prompt for `source` → `target` (codes such as "uk", "en"), or downloads
+ * the Offline provider's models with `offline`, and resolves when it's downloaded. Throws when
+ * it's cancelled or fails. */
+export async function downloadAppleLanguagePack(
+  source: string,
+  target: string,
+  offline = false,
+): Promise<void> {
   if (!isTauri()) throw new Error("Works only in the desktop app.");
-  await invoke("apple_translation_download", { source, target });
+  const command = offline ? "offline_translation_download" : "apple_translation_download";
+  await invoke(command, { source, target });
 }
 
 /** Opens System Settings at Language & Region, where Translation Languages are managed. */
@@ -890,10 +914,14 @@ export async function triggerRunLabExperiment(
   }
 }
 
-export async function triggerSaveLabCustomAudio(base64Wav: string): Promise<string | null> {
+/** Saves an audio file for the Audio Lab; `fileName` keeps its extension so its format is known. */
+export async function triggerSaveLabCustomAudio(
+  base64Wav: string,
+  fileName?: string,
+): Promise<string | null> {
   if (!isTauri()) return null;
   try {
-    return await invoke<string>("save_lab_custom_audio", { base64Wav });
+    return await invoke<string>("save_lab_custom_audio", { base64Wav, fileName });
   } catch (err) {
     console.error("Failed to save custom lab audio:", err);
     return null;

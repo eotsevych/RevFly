@@ -267,16 +267,22 @@ const TRANSLATION_MODES: [(&str, &str); 3] = [
     ("hotkey", "With the Translate Hotkey"),
     ("auto", "Automatic (Launch Hotkey)"),
 ];
-/// Apple Native is listed only where it works (macOS 26+).
-const TRANSLATION_PROVIDERS: [(&str, &str); 3] = [
+/// Apple's providers are listed only where they can run (macOS 26+); Offline only where they can't.
+const TRANSLATION_PROVIDERS: [(&str, &str); 5] = [
     ("LLM", "LLM (both local & cloud)"),
     ("Custom API", "Custom API"),
+    (crate::offline_translate::PROVIDER, "Offline (on-device)"),
     (crate::apple_translate::PROVIDER, "Apple Native"),
+    (crate::apple_translate::INTELLIGENCE_PROVIDER, "Apple Intelligence"),
 ];
 
 fn provider_key(settings: &AppSettings) -> &'static str {
     if crate::apple_translate::is_apple(&settings.translation_provider) {
         crate::apple_translate::PROVIDER
+    } else if crate::apple_translate::is_apple_intelligence(&settings.translation_provider) {
+        crate::apple_translate::INTELLIGENCE_PROVIDER
+    } else if crate::offline_translate::is_offline(&settings.translation_provider) {
+        crate::offline_translate::PROVIDER
     } else if settings.translation_provider.to_lowercase().contains("custom") {
         "Custom API"
     } else {
@@ -515,10 +521,15 @@ pub fn create_tray(app: &AppHandle, settings: &AppSettings) -> Result<TrayIcon, 
         translation_items.push((format!("mode:{}", mode), item));
     }
     for (provider, label) in TRANSLATION_PROVIDERS {
-        if crate::apple_translate::is_apple(provider) && !crate::apple_translate::is_available() {
+        // Apple's engines where Apple Translation runs, the offline models everywhere else; the
+        // chosen one always stays listed.
+        let apple = crate::apple_translate::is_apple(provider) || crate::apple_translate::is_apple_intelligence(provider);
+        let offline = crate::offline_translate::is_offline(provider);
+        let checked = provider_key(settings) == provider;
+        let fits = if apple || offline { apple == crate::apple_translate::is_available() } else { true };
+        if !fits && !checked {
             continue;
         }
-        let checked = provider_key(settings) == provider;
         let item = CheckMenuItem::with_id(app, format!("trans_provider:{}", provider), label, !settings.translation_off(), checked, None::<&str>)?;
         translation_items.push((format!("provider:{}", provider), item));
     }

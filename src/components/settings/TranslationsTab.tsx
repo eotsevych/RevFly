@@ -68,7 +68,7 @@ const MODES: { value: TranslationMode; label: string; desc: string }[] = [
   },
 ];
 
-// Which service translates: LLM (both local & cloud), a custom API, or Apple's on-device engine
+// Which service translates: LLM (both local & cloud), a custom API, or one of Apple's on-device engines
 const PROVIDERS = [
   {
     value: "LLM",
@@ -81,9 +81,19 @@ const PROVIDERS = [
     desc: "Custom REST translation endpoint",
   },
   {
+    value: "Offline",
+    label: "Offline (on-device)",
+    desc: "Free, private, works on any computer. Download languages below",
+  },
+  {
     value: "Apple",
     label: "Apple Native",
     desc: "Built into macOS. Free, offline, private. Download languages below",
+  },
+  {
+    value: "Apple Intelligence",
+    label: "Apple Intelligence",
+    desc: "Apple's on-device LLM. Free and offline, and it follows your prompt below",
   },
 ] as const;
 
@@ -148,9 +158,13 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
   const activeProvider =
     rawProvider.toLowerCase() === "apple"
       ? "Apple"
-      : rawProvider.toLowerCase().includes("custom")
-        ? "Custom API"
-        : "LLM";
+      : rawProvider.toLowerCase() === "apple intelligence"
+        ? "Apple Intelligence"
+        : rawProvider.toLowerCase() === "offline"
+          ? "Offline"
+          : rawProvider.toLowerCase().includes("custom")
+            ? "Custom API"
+            : "LLM";
 
   // Apple's provider needs macOS 26; elsewhere its card is disabled and says why.
   const [appleInfo, setAppleInfo] = useState<AppleTranslationInfo | null>(null);
@@ -291,16 +305,36 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
       {!translationOff && (
         <Section title="Translation Service" t={t}>
           <div
-            style={{ padding: 12, display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}
+            style={{ padding: 12, display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}
           >
             {PROVIDERS.map((p) => {
-              const unavailable = p.value === "Apple" && !appleInfo?.available;
-              const shown = unavailable && appleInfo?.reason ? { ...p, desc: appleInfo.reason } : p;
+              // Apple's engines where Apple Translation runs (macOS 26+), the offline models
+              // everywhere else (older Macs, Windows, Linux). The chosen one always stays visible.
+              const native = p.value === "Apple" || p.value === "Apple Intelligence";
+              const fits =
+                p.value === "Offline"
+                  ? appleInfo?.available === false
+                  : native
+                    ? appleInfo?.available === true
+                    : true;
+              if (!fits && activeProvider !== p.value) return null;
+              const reason =
+                p.value === "Apple"
+                  ? appleInfo?.available
+                    ? null
+                    : (appleInfo?.reason ?? "")
+                  : p.value === "Apple Intelligence"
+                    ? appleInfo
+                      ? appleInfo.intelligence_reason
+                      : ""
+                    : null;
+              const unavailable = reason !== null;
+              const shown = reason ? { ...p, desc: reason } : p;
               return card(
                 shown,
                 activeProvider === p.value,
                 () => setProvider(p.value),
-                unavailable && activeProvider !== "Apple",
+                unavailable && activeProvider !== p.value,
               );
             })}
           </div>
@@ -315,7 +349,11 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
               ? "LLM Provider Configuration (Local & Cloud)"
               : activeProvider === "Apple"
                 ? "Apple Native Translation"
-                : "Custom API Configuration"
+                : activeProvider === "Apple Intelligence"
+                  ? "Apple Intelligence"
+                  : activeProvider === "Offline"
+                    ? "Offline Translation"
+                    : "Custom API Configuration"
           }
           t={t}
         >
@@ -337,6 +375,24 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
               ) : (
                 <AppleTranslationPanel t={t} />
               ))}
+
+            {activeProvider === "Offline" && <AppleTranslationPanel t={t} offline />}
+
+            {activeProvider === "Apple Intelligence" && (
+              <p
+                style={{
+                  fontSize: 12,
+                  color: appleInfo?.intelligence_reason ? t.warnColor : t.textMuted,
+                  fontFamily: "Inter, sans-serif",
+                  lineHeight: 1.5,
+                  margin: 0,
+                }}
+              >
+                {appleInfo?.intelligence_reason
+                  ? `${appleInfo.intelligence_reason} Recordings that need translation fail until it's available or you choose another service.`
+                  : "Translates on this Mac with Apple's on-device language model: no API key, no cost, nothing leaves your Mac. It follows the prompt template below, so it can also fix grammar or change the tone. Slower than Apple Native (about a second or more per dictation) and weaker than large cloud models."}
+              </p>
+            )}
 
             {/* Combined LLM Mode (Both Local & Cloud) */}
             {activeProvider === "LLM" && (
@@ -573,8 +629,8 @@ export default function TranslationsTab({ t }: { t: Tokens }) {
         </Section>
       )}
 
-      {/* ── Prompt Template Configuration (Apple's engine takes no prompt) ── */}
-      {!translationOff && activeProvider !== "Apple" && (
+      {/* ── Prompt Template Configuration (Apple's and the offline engines take no prompt) ── */}
+      {!translationOff && activeProvider !== "Apple" && activeProvider !== "Offline" && (
         <Section title="Prompt Template (LLM Instructions)" t={t}>
           <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
             <div>

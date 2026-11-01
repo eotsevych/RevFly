@@ -12,6 +12,8 @@ import {
   downloadCustomModel,
   getModelsDirPath,
   fetchHardwareProfile,
+  fetchGpuDevices,
+  fetchParakeetEngine,
   type HardwareProfile,
 } from "@/lib/tauri";
 
@@ -77,14 +79,22 @@ export default function TranscriptionTab({ t }: { t: Tokens }) {
   const [isDownloadingCustom, setIsDownloadingCustom] = useState(false);
   const [importFeedback, setImportFeedback] = useState<string | null>(null);
   const [hwProfile, setHwProfile] = useState<HardwareProfile | null>(null);
+  const [gpus, setGpus] = useState<string[] | null>(null);
+  const [parakeetEngine, setParakeetEngine] = useState("the CPU");
 
   useEffect(() => {
+    fetchParakeetEngine()
+      .then(setParakeetEngine)
+      .catch(() => {});
     getModelsDirPath()
       .then(setModelsFolderPath)
       .catch(() => {});
     fetchHardwareProfile()
       .then(setHwProfile)
       .catch(() => {});
+    fetchGpuDevices()
+      .then(setGpus)
+      .catch(() => setGpus([]));
   }, []);
 
   const modelOptions =
@@ -149,31 +159,29 @@ export default function TranscriptionTab({ t }: { t: Tokens }) {
         <Row
           label="Hardware acceleration"
           hint={
-            hwProfile
-              ? `Detected: ${hwProfile.os.toUpperCase()} ${hwProfile.arch} (${hwProfile.logical_cores} cores) · ${hwProfile.has_metal ? "Apple Metal / ANE supported" : "Standard CPU SIMD"}`
-              : "Detecting computer hardware…"
+            !hwProfile || !gpus
+              ? "Detecting computer hardware…"
+              : `${hwProfile.os.toUpperCase()} ${hwProfile.arch} (${hwProfile.logical_cores} cores) · ${
+                  gpus.length > 0
+                    ? `GPU: ${gpus.join(", ")}`
+                    : "No GPU found, Whisper runs on the CPU"
+                }. Whisper models use the GPU (this setting); Parakeet runs on ${parakeetEngine}`
           }
           t={t}
           last={false}
         >
           <FieldSelect
-            value={settings.device_backend || "auto"}
+            value={settings.device_backend === "cpu" ? "cpu" : "auto"}
             onChange={(v) => updateSettings({ device_backend: v })}
             options={[
               {
                 value: "auto",
-                label: hwProfile?.has_metal
-                  ? "Auto (Recommended — ANE on Apple Silicon)"
-                  : "Auto (Recommended — Optimized CPU)",
+                label:
+                  gpus && gpus.length > 0
+                    ? `GPU when available (${gpus[0]})`
+                    : "GPU when available",
               },
-              {
-                value: "ane",
-                label: "Apple Neural Engine (ANE / Metal)",
-              },
-              {
-                value: "cpu",
-                label: "Standard CPU / RAM",
-              },
+              { value: "cpu", label: "CPU only" },
             ]}
             t={t}
           />
@@ -525,11 +533,11 @@ export default function TranscriptionTab({ t }: { t: Tokens }) {
           label="Audio chunking"
           hint={
             settings.audio_chunking
-              ? "On: long recordings are cut at pauses and transcribed piece by piece"
+              ? "On: a recording over 40 s is cut in the middle of pauses, about every 30 s, and transcribed piece by piece. Shorter recordings are never cut"
               : "Off: each recording is kept and transcribed as one whole track"
           }
           t={t}
-          last={!settings.audio_chunking}
+          last
         >
           <Toggle
             value={settings.audio_chunking ?? false}
@@ -537,65 +545,6 @@ export default function TranscriptionTab({ t }: { t: Tokens }) {
             accent={t.accent}
           />
         </Row>
-
-        {settings.audio_chunking && (
-          <>
-            <Row
-              label="Pause detection trigger"
-              hint="Silence duration that cuts a speech chunk cleanly (default 500 ms)"
-              t={t}
-            >
-              <Segmented
-                options={[
-                  { value: "300", label: "300 ms" },
-                  { value: "500", label: "500 ms" },
-                  { value: "700", label: "700 ms" },
-                  { value: "1000", label: "1 s" },
-                ]}
-                value={String(settings.chunk_pause_ms ?? 500)}
-                onChange={(v) => updateSettings({ chunk_pause_ms: Number(v) })}
-                t={t}
-              />
-            </Row>
-
-            <Row
-              label="Safety cut limit"
-              hint="Maximum continuous speech length before forcing a chunk cut (default 10 s)"
-              t={t}
-            >
-              <Segmented
-                options={[
-                  { value: "5", label: "5 s" },
-                  { value: "8", label: "8 s" },
-                  { value: "10", label: "10 s" },
-                  { value: "15", label: "15 s" },
-                ]}
-                value={String(settings.chunk_safety_sec ?? 10)}
-                onChange={(v) => updateSettings({ chunk_safety_sec: Number(v) })}
-                t={t}
-              />
-            </Row>
-
-            <Row
-              label="Safety cut overlap"
-              hint="Audio slice preserved across forced cuts to prevent severed words (default 400 ms)"
-              t={t}
-              last
-            >
-              <Segmented
-                options={[
-                  { value: "200", label: "200 ms" },
-                  { value: "300", label: "300 ms" },
-                  { value: "400", label: "400 ms" },
-                  { value: "500", label: "500 ms" },
-                ]}
-                value={String(settings.chunk_overlap_ms ?? 400)}
-                onChange={(v) => updateSettings({ chunk_overlap_ms: Number(v) })}
-                t={t}
-              />
-            </Row>
-          </>
-        )}
       </Section>
     </div>
   );

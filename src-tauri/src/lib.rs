@@ -1,5 +1,7 @@
 pub mod app_controller;
 pub mod audio;
+pub mod chunking;
+pub mod clipboard_snapshot;
 pub mod cli;
 pub mod cpu_features;
 pub mod custom_models;
@@ -18,6 +20,7 @@ pub mod masker;
 pub mod transcribe;
 pub mod translate;
 pub mod apple_translate;
+pub mod offline_translate;
 pub mod tray;
 pub mod updater;
 pub mod vad;
@@ -494,16 +497,19 @@ struct AppleTranslationInfo {
     /// e.g. "26.1"; None off macOS.
     os_version: Option<String>,
     min_os: u32,
+    /// Why the Apple Intelligence provider can't be used; None when it can.
+    intelligence_reason: Option<String>,
 }
 
 #[tauri::command]
-fn apple_translation_info() -> AppleTranslationInfo {
+async fn apple_translation_info() -> AppleTranslationInfo {
     let reason = apple_translate::unavailable_reason();
     AppleTranslationInfo {
         available: reason.is_none(),
         reason,
         os_version: apple_translate::macos_version().map(|(major, minor)| format!("{major}.{minor}")),
         min_os: apple_translate::MIN_MACOS,
+        intelligence_reason: apple_translate::intelligence_unavailable_reason().await,
     }
 }
 
@@ -534,6 +540,23 @@ async fn apple_translation_download(state: State<'_, AppState>, source: String, 
     apple_translate::download(&source, &target, model).await.map_err(|e| e.describe(&pair))
 }
 
+/// The offline models' language packs for translating into `target_lang` (a RevFly language name),
+/// and the target's code; the same shape as Apple's.
+#[tauri::command]
+async fn offline_translation_languages(target_lang: String) -> Result<AppleLanguagePacks, String> {
+    let target = apple_translate::to_bcp47(&target_lang)
+        .ok_or_else(|| format!("Offline translation can't translate into {}", target_lang))?;
+    let languages = offline_translate::languages(&target).await?;
+    Ok(AppleLanguagePacks { target, languages })
+}
+
+/// Downloads the offline models for `source` → `target` (codes).
+#[tauri::command]
+async fn offline_translation_download(source: String, target: String) -> Result<(), String> {
+    log::info!("Offline translation: downloading {}", apple_translate::pair_name(Some(&source), &target));
+    offline_translate::download(&source, &target).await
+}
+
 #[tauri::command]
 fn apple_translation_open_settings() -> Result<(), String> {
     apple_translate::open_system_settings()
@@ -554,13 +577,26 @@ fn lab_save_result(
 fn save_lab_custom_audio(
     state: State<'_, AppState>,
     base64_wav: String,
+    file_name: Option<String>,
 ) -> Result<String, String> {
-    state.controller.save_lab_custom_audio(base64_wav)
+    state.controller.save_lab_custom_audio(base64_wav, file_name)
 }
 
 #[tauri::command]
 fn get_hardware_profile() -> cpu_features::HardwareProfile {
     cpu_features::detect_hardware_profile()
+}
+
+/// The GPUs Whisper can run on, for Settings → Hardware acceleration.
+#[tauri::command]
+fn get_gpu_devices() -> Vec<String> {
+    transcribe::gpu_devices()
+}
+
+/// Where Parakeet runs (Neural Engine or CPU), for Settings → Hardware acceleration.
+#[tauri::command]
+fn get_parakeet_engine() -> String {
+    parakeet::ParakeetTranscriber::engine_label()
 }
 
 #[tauri::command]
@@ -755,9 +791,13 @@ pub fn run() {
             apple_translation_languages,
             apple_translation_download,
             apple_translation_open_settings,
+            offline_translation_languages,
+            offline_translation_download,
             lab_save_result,
             save_lab_custom_audio,
             get_hardware_profile,
+            get_gpu_devices,
+            get_parakeet_engine,
             post_process_transcript,
             start_mic_test,
             stop_mic_test,

@@ -195,6 +195,65 @@ fn classify_ydotool_help(help: &str) -> Option<YdotoolSyntax> {
     }
 }
 
+/// The richest format on the Wayland clipboard and its data: files, then an image, then HTML,
+/// then text, else the first one offered. `None` when the clipboard is empty.
+pub fn wl_snapshot() -> Result<Option<(String, Vec<u8>)>, String> {
+    let listed = Command::new("wl-paste").arg("--list-types").stdin(Stdio::null()).stderr(Stdio::null()).output().map_err(|e| e.to_string())?;
+    if !listed.status.success() {
+        return Ok(None);
+    }
+    let listed = String::from_utf8_lossy(&listed.stdout);
+    let kinds: Vec<&str> = listed.lines().map(str::trim).filter(|k| !k.is_empty()).collect();
+    let rank = |kind: &&str| match *kind {
+        "text/uri-list" => 0,
+        k if k.starts_with("image/png") => 1,
+        k if k.starts_with("image/") => 2,
+        "text/html" => 3,
+        k if k.starts_with("text/plain") => 4,
+        _ => 5,
+    };
+    let Some(kind) = kinds.into_iter().min_by_key(rank) else {
+        return Ok(None);
+    };
+    let data = Command::new("wl-paste").args(["--no-newline", "--type", kind]).stdin(Stdio::null()).stderr(Stdio::null()).output().map_err(|e| e.to_string())?;
+    Ok(data.status.success().then(|| (kind.to_string(), data.stdout)))
+}
+
+/// Puts a `wl_snapshot` back on the Wayland clipboard; `None` empties it.
+pub fn wl_restore(saved: Option<&(String, Vec<u8>)>) -> Result<(), String> {
+    use std::io::Write;
+    let Some((kind, data)) = saved else {
+        return Command::new("wl-copy").arg("--clear").status().map(|_| ()).map_err(|e| e.to_string());
+    };
+    // wl-copy forks a process that keeps serving the data once stdin closes.
+    let mut child = Command::new("wl-copy")
+        .args(["--type", kind])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    child.stdin.take().ok_or("wl-copy has no stdin")?.write_all(data).map_err(|e| e.to_string())?;
+    let status = child.wait().map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("wl-copy exited with {}", status))
+    }
+}
+
+/// The text on the Wayland clipboard; `None` when it holds no text.
+pub fn wl_paste() -> Result<Option<String>, String> {
+    let output = Command::new("wl-paste")
+        .args(["--no-newline", "--type", "text"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .map_err(|e| e.to_string())?;
+    // wl-paste fails when the clipboard is empty or holds no text.
+    Ok(output.status.success().then(|| String::from_utf8_lossy(&output.stdout).into_owned()))
+}
+
 /// Copies `text` with wl-copy, which serves it to native Wayland apps.
 pub fn wl_copy(text: &str) -> Result<(), String> {
     // wl-copy forks a process that keeps serving the text; don't wait on its output.

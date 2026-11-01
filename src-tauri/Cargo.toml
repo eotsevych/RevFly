@@ -20,6 +20,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 log = "0.4"
 tokio = { version = "1", features = ["full"] }
+# whisper-rs's own bindings, for ggml's list of GPU devices.
+whisper-rs-sys = "0.15"
 cpal = "0.15"
 silero-vad-crs = "0.4.0"
 reqwest = { version = "0.12", features = ["json", "stream"] }
@@ -30,6 +32,8 @@ arboard = "3"
 enigo = "0.3"
 dirs = "6.0"
 hound = "3.5"
+# Decodes audio files opened in the Audio Lab: WAV, MP3, M4A/MP4 (AAC, ALAC), FLAC, Ogg Vorbis, AIFF.
+symphonia = { version = "0.5", features = ["aac", "alac", "isomp4", "mp3", "aiff"] }
 chrono = { version = "0.4", features = ["serde"] }
 parakeet-rs = "0.3"
 base64 = "0.22"
@@ -42,8 +46,15 @@ tauri-plugin-single-instance = "2"
 nnnoiseless = { version = "0.5.2", default-features = false }
 rubato = "1.0.1"
 audioadapter-buffers = "2"
+# Offline translation on Windows/Linux (offline_translate.rs): Firefox Translations models on the
+# CPU. Pinned: young crate. "net" adds its model download (Remote Settings + verified cache).
+fxtranslate = { version = "=0.5.0", features = ["net"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# "Keep my clipboard" saves and restores every pasteboard item and type (clipboard_snapshot.rs).
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSString"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard", "NSPasteboardItem"] }
 tauri = { version = "2", features = ["tray-icon", "macos-private-api", "custom-protocol", "devtools", "image-png"] }
 whisper-rs = { version = "0.16.0", features = ["metal"] }
 
@@ -52,4 +63,11 @@ libc = "0.2"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 tauri = { version = "2", features = ["macos-private-api", "tray-icon", "custom-protocol", "devtools", "image-png"] }
-whisper-rs = { version = "0.16.0" }
+# Vulkan runs Whisper on any GPU with a Vulkan driver (NVIDIA, AMD, Intel) and falls back to the
+# CPU without one. Building it needs the Vulkan SDK (Windows) or libvulkan-dev and glslc (Linux).
+whisper-rs = { version = "0.16.0", features = ["vulkan"] }
+
+[target.'cfg(windows)'.dependencies]
+# "Keep my clipboard" saves and restores every clipboard format (clipboard_snapshot.rs); the
+# version arboard already uses.
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_System_DataExchange", "Win32_System_Memory"] }

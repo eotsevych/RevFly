@@ -278,6 +278,10 @@ struct TranslationRoute {
     is_custom: bool,
     /// Apple's on-device Translation (see `apple_translate`); the LLM fields are then unused.
     is_apple: bool,
+    /// Apple Intelligence's on-device LLM: takes the prompt template, but no endpoint, key or model.
+    is_intelligence: bool,
+    /// Firefox Translations' on-device models (see `offline_translate`); like Apple's, no fields.
+    is_offline: bool,
     endpoint: String,
     key: String,
     model: String,
@@ -305,7 +309,7 @@ fn is_local_endpoint(url: &str) -> bool {
 /// provider has no fields; see `apple_setup_problem`.
 fn missing_translation_settings(settings: &AppSettings) -> Vec<&'static str> {
     let route = TranslationRoute::from_settings(settings);
-    if route.is_apple {
+    if route.is_apple || route.is_intelligence || route.is_offline {
         return Vec::new();
     }
     let (url, model) = if route.is_custom {
@@ -331,10 +335,14 @@ fn missing_translation_settings(settings: &AppSettings) -> Vec<&'static str> {
 /// With the Apple provider: what is known to keep this recording from being translated (an old
 /// macOS, a language pair Apple doesn't support), unless a fallback service is
 /// set up to translate instead. `None` for the other providers.
+/// The same for the Offline provider (a language pair that isn't downloaded).
 fn apple_setup_problem(settings: &AppSettings) -> Option<String> {
     let route = TranslationRoute::from_settings(settings);
-    if !route.is_apple || route.fallback(settings).is_some() {
+    if !(route.is_apple || route.is_offline) || route.fallback(settings).is_some() {
         return None;
+    }
+    if route.is_offline {
+        return crate::offline_translate::setup_problem(&settings.source_lang, &settings.target_lang);
     }
     crate::apple_translate::setup_problem(&settings.source_lang, &settings.target_lang)
 }
@@ -351,6 +359,8 @@ fn list_missing(missing: &[&str]) -> String {
 impl TranslationRoute {
     fn from_settings(settings: &AppSettings) -> Self {
         let is_apple = crate::apple_translate::is_apple(&settings.translation_provider);
+        let is_intelligence = crate::apple_translate::is_apple_intelligence(&settings.translation_provider);
+        let is_offline = crate::offline_translate::is_offline(&settings.translation_provider);
         let is_custom = !is_apple && settings.translation_provider.to_lowercase().contains("custom");
         let endpoint = if !settings.llm_endpoint.trim().is_empty() {
             settings.llm_endpoint.trim().to_string()
@@ -381,12 +391,16 @@ impl TranslationRoute {
         } else {
             "gemini-3.6-flash".to_string()
         };
-        Self { is_custom, is_apple, endpoint, key, model }
+        Self { is_custom, is_apple, is_intelligence, is_offline, endpoint, key, model }
     }
 
     fn label(&self) -> &'static str {
         if self.is_apple {
             "Apple"
+        } else if self.is_intelligence {
+            "Apple Intelligence"
+        } else if self.is_offline {
+            "Offline"
         } else if self.is_custom {
             "Custom API"
         } else {
@@ -399,6 +413,12 @@ impl TranslationRoute {
         if self.is_apple {
             return "Apple Translation (on-device)".to_string();
         }
+        if self.is_intelligence {
+            return "Apple Intelligence (on-device)".to_string();
+        }
+        if self.is_offline {
+            return "Offline translation (on-device)".to_string();
+        }
         let url = if self.is_custom { settings.custom_api_url.trim() } else { self.endpoint.as_str() };
         format!("{} {} at {}", self.label(), self.model, url)
     }
@@ -408,18 +428,23 @@ impl TranslationRoute {
     fn is_ready(&self, settings: &AppSettings) -> bool {
         if self.is_apple {
             crate::apple_translate::is_available() || self.fallback(settings).is_some()
+        } else if self.is_intelligence {
+            crate::apple_translate::is_available()
+        } else if self.is_offline {
+            true
         } else {
             missing_translation_settings(settings).is_empty()
         }
     }
 
-    /// The service that translates when Apple Translation fails, if one is chosen and filled in.
+    /// The service that translates when Apple Translation (or the Offline provider) fails, if one
+    /// is chosen and filled in.
     fn fallback(&self, settings: &AppSettings) -> Option<TranslationRoute> {
-        if !self.is_apple {
+        if !(self.is_apple || self.is_offline) {
             return None;
         }
         let provider = settings.apple_fallback_provider.trim();
-        if provider.is_empty() || crate::apple_translate::is_apple(provider) {
+        if provider.is_empty() || crate::apple_translate::is_apple(provider) || crate::offline_translate::is_offline(provider) {
             return None;
         }
         let mut with_fallback = settings.clone();
@@ -432,11 +457,16 @@ impl TranslationRoute {
     /// Translates `text`, spoken in `from_lang` (the detected language; Apple's provider uses it
     /// when the spoken language is set to Auto, the LLMs get the configured one in their prompt).
     async fn translate(&self, settings: &AppSettings, text: &str, from_lang: &str) -> Result<Translated, String> {
-        if !self.is_apple {
+        if !(self.is_apple || self.is_offline) {
             let text = self.translate_llm(settings, text).await?;
             return Ok(Translated { text, via: self.describe(settings), label: self.label(), pair: None });
         }
-        let reason = match self.translate_apple(settings, text, from_lang).await {
+        let first = if self.is_offline {
+            self.translate_offline(settings, text, from_lang).await
+        } else {
+            self.translate_apple(settings, text, from_lang).await
+        };
+        let reason = match first {
             Ok(done) => return Ok(done),
             Err(reason) => reason,
         };
@@ -451,7 +481,7 @@ impl TranslationRoute {
         match fallback.translate_llm(settings, text).await {
             Ok(text) => Ok(Translated {
                 text,
-                via: format!("{} (after Apple Translation failed: {})", fallback.describe(settings), reason),
+                via: format!("{} (after {} failed: {})", fallback.describe(settings), self.describe(settings), reason),
                 label: fallback.label(),
                 pair: None,
             }),
@@ -474,7 +504,24 @@ impl TranslationRoute {
         }
     }
 
+    async fn translate_offline(&self, settings: &AppSettings, text: &str, from_lang: &str) -> Result<Translated, String> {
+        let Some(target) = crate::apple_translate::to_bcp47(&settings.target_lang) else {
+            return Err(format!("Offline translation can't translate into {}", settings.target_lang));
+        };
+        // The models can't detect the language; the transcriber's detected one stands in for Auto.
+        let Some(source) = crate::apple_translate::source_code(&settings.source_lang, from_lang) else {
+            return Err("Offline translation needs to know the spoken language; set it in Settings → Transcription".to_string());
+        };
+        let text = crate::offline_translate::translate(text, &source, &target, TRANSLATION_TIMEOUT).await?;
+        let pair = format!("{} → {}", source, target);
+        Ok(Translated { text, via: format!("{} {}", self.describe(settings), pair), label: self.label(), pair: Some(pair) })
+    }
+
     async fn translate_llm(&self, settings: &AppSettings, text: &str) -> Result<String, String> {
+        if self.is_intelligence {
+            let prompt = crate::translate::render_prompt_template(&settings.prompt_template, text, &settings.source_lang, &settings.target_lang);
+            return crate::apple_translate::generate(&prompt, TRANSLATION_TIMEOUT).await;
+        }
         let request = async {
             if self.is_custom {
                 crate::translate::translate_with_openai_compatible(
@@ -783,18 +830,17 @@ fn capitalize(s: &str) -> String {
 
 /// True when a recording carries no signal at all. A live microphone always has some noise floor, so
 /// this means the OS blocked or muted the input (e.g. Windows microphone privacy settings).
-/// Simulated chunk events, or none when chunking is off and the recording went to the model whole.
+/// The chunks a recording was transcribed in, or none when chunking is off and it went to the model whole.
 fn chunk_diagnostics(
     chunking: bool,
     total_audio_sec: f32,
-    vad_trimmed_sec: f32,
-    silence_removed_sec: f32,
+    vad: &crate::vad::VadResult,
     raw_samples_count: usize,
 ) -> (Vec<crate::pipeline_logger::ChunkDiagnosticEvent>, Vec<String>) {
     if chunking {
-        crate::pipeline_logger::generate_chunk_diagnostics(total_audio_sec, vad_trimmed_sec, silence_removed_sec, raw_samples_count)
+        crate::pipeline_logger::chunk_diagnostics(total_audio_sec, vad, raw_samples_count)
     } else {
-        let actions = crate::pipeline_logger::whole_track_diagnostics(total_audio_sec, vad_trimmed_sec, silence_removed_sec, raw_samples_count);
+        let actions = crate::pipeline_logger::whole_track_diagnostics(total_audio_sec, vad.trimmed_duration_sec, vad.silence_removed_sec, raw_samples_count);
         (Vec::new(), actions)
     }
 }
@@ -835,8 +881,7 @@ fn keep_failed_recording(
     let (chunks, mut actions) = chunk_diagnostics(
         settings.audio_chunking,
         duration_sec,
-        vad.trimmed_duration_sec,
-        vad.silence_removed_sec,
+        &vad,
         captured.speech.len(),
     );
     actions.push(format!("[FAILED] {}", reason));
@@ -942,6 +987,7 @@ pub struct AppController {
 impl AppController {
     pub fn new(app_handle: AppHandle) -> Result<Self, String> {
         let settings = AppSettings::load();
+        crate::transcribe::set_device_backend(&settings.device_backend);
         let history = Arc::new(HistoryManager::new()?);
 
         // Run retention policy on startup
@@ -1082,6 +1128,8 @@ impl AppController {
             let mut s = self.settings.lock().unwrap();
             *s = new_settings.clone();
         }
+        // A loaded Whisper model is moved to or off the GPU when it is next used.
+        crate::transcribe::set_device_backend(&new_settings.device_backend);
         crate::tray::sync_translation_menu(&new_settings);
         if devices_changed {
             crate::tray::update_tray_audio_devices(&self.app_handle, &new_settings);
@@ -1308,14 +1356,31 @@ impl AppController {
         Ok(())
     }
 
-    pub fn save_lab_custom_audio(&self, base64_wav: String) -> Result<String, String> {
+    /// Saves a file opened in the Audio Lab as `lab_custom.<its extension>`, so the decoder can
+    /// tell its format, and returns that name.
+    // shortcut: the file crosses IPC as base64 in memory; a native file picker passing a path would scale past ~100 MB files.
+    pub fn save_lab_custom_audio(&self, base64_wav: String, file_name: Option<String>) -> Result<String, String> {
         use base64::Engine;
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(&base64_wav)
             .map_err(|e| format!("Base64 decode error: {}", e))?;
-        let p = get_data_dir().join("lab_custom.wav");
-        std::fs::write(&p, bytes).map_err(|e| format!("Failed to write custom audio: {}", e))?;
-        Ok("lab_custom.wav".to_string())
+        let ext = file_name
+            .as_deref()
+            .and_then(|n| std::path::Path::new(n).extension()?.to_str().map(str::to_ascii_lowercase))
+            .filter(|e| !e.is_empty() && e.len() <= 5 && e.chars().all(|c| c.is_ascii_alphanumeric()))
+            .unwrap_or_else(|| "wav".to_string());
+        let data_dir = get_data_dir();
+        // One custom file at a time: drop the last one, whatever its format.
+        if let Ok(entries) = std::fs::read_dir(&data_dir) {
+            for entry in entries.flatten() {
+                if entry.path().file_stem().and_then(|s| s.to_str()) == Some("lab_custom") {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+        let name = format!("lab_custom.{}", ext);
+        std::fs::write(data_dir.join(&name), bytes).map_err(|e| format!("Failed to write custom audio: {}", e))?;
+        Ok(name)
     }
 
     pub fn cancel(&self, trigger: &'static str) {
@@ -1554,7 +1619,7 @@ impl AppController {
                     log_stage_event(&data_dir, "TRANSLATE_RETRY_DONE", &format!("Translated in {} ms via {}: \"{}\"", ms, translated.via, final_text));
                     *phase_arc.lock().unwrap() = AssistantPhase::Done;
                     let pasted = if settings.auto_paste {
-                        copy_and_paste(&final_text).map(|_| ())
+                        copy_and_paste(&final_text, settings.keep_clipboard).map(|_| ())
                     } else {
                         crate::paste::copy_to_clipboard(&final_text)
                     };
@@ -1671,7 +1736,12 @@ impl AppController {
                     };
                     show_main_window(&self.app_handle, &settings);
                     let session = self.session_id.load(Ordering::SeqCst);
-                    show_long_error(&self.app_handle, &self.session_id, session, "Apple Translation Not Ready", &subtitle);
+                    let title = if crate::offline_translate::is_offline(&settings.translation_provider) {
+                        "Offline Translation Not Ready"
+                    } else {
+                        "Apple Translation Not Ready"
+                    };
+                    show_long_error(&self.app_handle, &self.session_id, session, title, &subtitle);
                     return Ok(());
                 }
             }
@@ -1737,7 +1807,8 @@ impl AppController {
         // the chime to completion first lost 1.5-2.5 s of speech on Bluetooth headsets.)
         let mic_open_started = Instant::now();
         crate::audio::set_no_speech_alert(settings.no_speech_alert_sec);
-        let stream = self.recorder.start_recording(self.app_handle.clone(), settings.input_device.clone());
+        let denoise = crate::denoise::strength_wet(&settings.noise_reduction).is_some();
+        let stream = self.recorder.start_recording(self.app_handle.clone(), settings.input_device.clone(), denoise);
         let mic_open_ms = mic_open_started.elapsed().as_millis();
 
         // 4. Then the chime, once the mic delivers its first audio. Playback and capture are never
@@ -1775,6 +1846,24 @@ impl AppController {
                 let model = crate::apple_translate::model_name(&settings.apple_translation_model);
                 tauri::async_runtime::spawn(crate::apple_translate::warm_up(source, target, model));
             }
+        }
+        // Offline provider: load the pair's models (a few hundred ms from disk) while the user talks.
+        if stream.is_ok()
+            && !mode.transcribe_only(&settings)
+            && crate::offline_translate::is_offline(&settings.translation_provider)
+        {
+            let target = crate::apple_translate::to_bcp47(&settings.target_lang);
+            if let (Some(source), Some(target)) = (crate::apple_translate::to_bcp47(&settings.source_lang), target) {
+                tauri::async_runtime::spawn(crate::offline_translate::warm_up(source, target));
+            }
+        }
+        // Apple Intelligence: the same, for its language model (about 2.6 s → 0.9 s on the first one).
+        if stream.is_ok()
+            && !mode.transcribe_only(&settings)
+            && crate::apple_translate::is_apple_intelligence(&settings.translation_provider)
+            && crate::apple_translate::is_available()
+        {
+            tauri::async_runtime::spawn(crate::apple_translate::warm_up_intelligence());
         }
 
         if let Ok(info) = &stream {
@@ -1846,9 +1935,17 @@ impl AppController {
                     tr.unload();
                 }
                 if let Ok(dir) = crate::parakeet::ParakeetTranscriber::ensure_model(&app_handle_cl).await {
-                    let mut pk = parakeet_cl.lock().unwrap();
-                    let _ = pk.prewarm(&dir);
+                    {
+                        let mut pk = parakeet_cl.lock().unwrap();
+                        let _ = pk.prewarm(&dir);
+                    }
                     crate::tray::update_tray_model_status(&app_handle_cl, true);
+                    // On Apple Silicon, fetch the Neural Engine build once, then switch to it.
+                    if crate::parakeet::ParakeetTranscriber::download_neural_engine_model(&app_handle_cl).await {
+                        let dir = crate::parakeet::ParakeetTranscriber::get_model_dir();
+                        let mut pk = parakeet_cl.lock().unwrap();
+                        let _ = pk.prewarm(&dir);
+                    }
                 }
             } else {
                 // Single Model Policy: unload Parakeet
@@ -2073,6 +2170,7 @@ impl AppController {
                 perf.lap("model_ready");
                 let parakeet_clone = Arc::clone(&parakeet_arc);
                 let vad_samples = vad_res.samples.clone();
+                let chunks = vad_res.ranges(settings.audio_chunking);
                 let model_dir_clone = model_dir.clone();
 
                 let timeout = inference_timeout(vad_res.trimmed_duration_sec);
@@ -2080,7 +2178,7 @@ impl AppController {
                     timeout,
                     tokio::task::spawn_blocking(move || {
                         let mut pk = parakeet_clone.lock().unwrap();
-                        pk.transcribe(&vad_samples, &model_dir_clone)
+                        pk.transcribe(&vad_samples, &chunks, &model_dir_clone)
                     }),
                 )
                 .await;
@@ -2218,6 +2316,7 @@ impl AppController {
                 perf.lap("model_ready");
                 log_stage_event(&data_dir, "WHISPER_START", &format!("Starting transcription on {} samples ({:.2} s)...", vad_res.samples.len(), vad_res.trimmed_duration_sec));
                 let samples_clone = vad_res.samples.clone();
+                let chunks = vad_res.ranges(settings.audio_chunking);
                 let model_path_clone = model_path.clone();
                 let transcriber_clone = Arc::clone(&transcriber_arc);
 
@@ -2227,7 +2326,7 @@ impl AppController {
                     timeout,
                     tokio::task::spawn_blocking(move || {
                         let mut tr = transcriber_clone.lock().unwrap();
-                        tr.transcribe_detailed(&samples_clone, &model_path_clone, false, lang_hint)
+                        tr.transcribe_detailed(&samples_clone, &chunks, &model_path_clone, false, lang_hint)
                     }),
                 )
                 .await;
@@ -2258,6 +2357,7 @@ impl AppController {
                             );
 
                             let samples_retry = vad_res.samples.clone();
+                            let chunks_retry = vad_res.ranges(settings.audio_chunking);
                             let model_retry = model_path.clone();
                             let transcriber_retry = Arc::clone(&transcriber_arc);
                             let forced_hint = crate::transcribe::map_language_hint(&fallback_lang);
@@ -2266,7 +2366,7 @@ impl AppController {
                                 timeout,
                                 tokio::task::spawn_blocking(move || {
                                     let mut tr = transcriber_retry.lock().unwrap();
-                                    tr.transcribe_detailed(&samples_retry, &model_retry, false, forced_hint)
+                                    tr.transcribe_detailed(&samples_retry, &chunks_retry, &model_retry, false, forced_hint)
                                 }),
                             )
                             .await;
@@ -2374,8 +2474,7 @@ impl AppController {
                 let (chunks, mut actions) = chunk_diagnostics(
                     settings.audio_chunking,
                     duration_sec,
-                    vad_res.trimmed_duration_sec,
-                    vad_res.silence_removed_sec,
+                    &vad_res,
                     raw_samples.len(),
                 );
                 actions.push("[RESULT] Audio was blank or below confidence threshold".to_string());
@@ -2692,7 +2791,7 @@ impl AppController {
 
                 let (translated, _, _, _) = {
                     let mut tr = transcriber_arc.lock().unwrap();
-                    match tr.transcribe(&vad_res.samples, &whisper_model_path, true) {
+                    match tr.transcribe(&vad_res.samples, &vad_res.ranges(settings.audio_chunking), &whisper_model_path, true) {
                         Ok(res) => res,
                         Err(e) => {
                             let detail = format!("{} → English via local Whisper ({:?}) failed: {}", detected_lang, whisper_model_path, e);
@@ -2760,7 +2859,7 @@ impl AppController {
             // Err: not pasted (the text is on the clipboard). Ok(Some): pasted with a fallback
             // that may miss some apps; the note says what to do.
             let pasted = if settings.auto_paste {
-                copy_and_paste(&final_text)
+                copy_and_paste(&final_text, settings.keep_clipboard)
             } else {
                 crate::paste::copy_to_clipboard(&final_text).map(|_| None)
             };
@@ -2869,10 +2968,9 @@ impl AppController {
 
             let (chunks, mut actions) = chunk_diagnostics(
                     settings.audio_chunking,
-                duration_sec,
-                vad_res.trimmed_duration_sec,
-                vad_res.silence_removed_sec,
-                raw_samples.len(),
+                    duration_sec,
+                    &vad_res,
+                    raw_samples.len(),
             );
             actions.push(format!("[MODEL] Transcribed with {} in {} ms ({:.1}x real-time)", settings.model_name, whisper_inference_ms, speed_factor));
             if skip_translation {
@@ -3105,6 +3203,22 @@ mod tests {
     }
 
     #[test]
+    fn apple_intelligence_routes_as_an_llm_without_fields_and_can_be_apples_fallback() {
+        let mut s = apple_settings();
+        s.translation_provider = "Apple Intelligence".into();
+        let route = TranslationRoute::from_settings(&s);
+        assert!(route.is_intelligence && !route.is_apple && !route.is_custom);
+        assert_eq!(route.label(), "Apple Intelligence");
+        assert_eq!(route.describe(&s), "Apple Intelligence (on-device)");
+        assert!(missing_translation_settings(&s).is_empty());
+
+        let mut apple = apple_settings();
+        apple.apple_fallback_provider = "Apple Intelligence".into();
+        let fallback = TranslationRoute::from_settings(&apple).fallback(&apple).expect("needs no fields");
+        assert!(fallback.is_intelligence);
+    }
+
+    #[test]
     fn apple_provider_routes_to_apple_translation() {
         let s = apple_settings();
         let route = TranslationRoute::from_settings(&s);
@@ -3121,6 +3235,27 @@ mod tests {
         assert!(!TranslationRoute::from_settings(&llm).is_apple);
         llm.translation_provider = "Custom API".into();
         assert!(TranslationRoute::from_settings(&llm).is_custom);
+    }
+
+    #[test]
+    fn offline_provider_routes_like_apple_with_its_own_fallback() {
+        let mut s = apple_settings();
+        s.translation_provider = "Offline".into();
+        let route = TranslationRoute::from_settings(&s);
+        assert!(route.is_offline && !route.is_apple && !route.is_custom && !route.is_intelligence);
+        assert_eq!(route.label(), "Offline");
+        assert!(missing_translation_settings(&s).is_empty());
+        assert!(route.is_ready(&s));
+        assert!(route.fallback(&s).is_none());
+
+        s.apple_fallback_provider = "LLM".into();
+        s.llm_endpoint = "http://localhost:11434/v1/chat/completions".into();
+        s.llm_model = "llama3.2".into();
+        assert_eq!(route.fallback(&s).map(|f| f.label()), Some("LLM"));
+        // With a fallback, a missing language pack doesn't stop a recording.
+        assert_eq!(apple_setup_problem(&s), None);
+        s.apple_fallback_provider = "Offline".into();
+        assert!(route.fallback(&s).is_none(), "it can't fall back to itself");
     }
 
     #[test]

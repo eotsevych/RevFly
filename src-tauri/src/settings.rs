@@ -28,6 +28,10 @@ pub struct AppSettings {
     #[serde(default = "default_true")]
     pub sound_error: bool,
     pub auto_paste: bool,
+    /// After auto-paste, put back the text that was on the clipboard, so text copied while
+    /// recording is still what Cmd+V pastes next.
+    #[serde(default)]
+    pub keep_clipboard: bool,
     /// Shows how to finish a recording on the pill while listening.
     #[serde(default = "default_true")]
     pub show_hints: bool,
@@ -99,13 +103,8 @@ pub struct AppSettings {
     pub apple_translation_model: String,
     #[serde(default = "default_device_backend")]
     pub device_backend: String,
-    #[serde(default = "default_pause_ms")]
-    pub chunk_pause_ms: u32,
-    #[serde(default = "default_safety_sec")]
-    pub chunk_safety_sec: u32,
-    #[serde(default = "default_overlap_ms")]
-    pub chunk_overlap_ms: u32,
-    /// Off: a recording is sent to the model as one whole track and logged as such.
+    /// On: a recording over 40 s is transcribed in chunks cut in the middle of pauses (see
+    /// `chunking`). Off: it is sent to the model as one whole track and logged as such.
     #[serde(default)]
     pub audio_chunking: bool,
     /// "off" | "light" | "balanced" | "strong": RNNoise strength applied when recording stops.
@@ -196,9 +195,6 @@ fn default_gemini_model() -> String {
     "gemini-3.6-flash".to_string()
 }
 
-fn default_pause_ms() -> u32 { 500 }
-fn default_safety_sec() -> u32 { 10 }
-fn default_overlap_ms() -> u32 { 400 }
 
 fn default_device_backend() -> String {
     "auto".to_string()
@@ -256,6 +252,7 @@ impl Default for AppSettings {
             sound_stop: true,
             sound_error: true,
             auto_paste: true,
+            keep_clipboard: false,
             show_hints: true,
             no_speech_alert_sec: default_no_speech_alert_sec(),
             storage_mode: "text_only".to_string(),
@@ -284,9 +281,6 @@ impl Default for AppSettings {
             apple_fallback_provider: String::new(),
             apple_translation_model: default_apple_translation_model(),
             device_backend: "auto".to_string(),
-            chunk_pause_ms: 500,
-            chunk_safety_sec: 10,
-            chunk_overlap_ms: 400,
             audio_chunking: false,
             noise_reduction: default_noise_reduction(),
             gemini_model: "gemini-3.6-flash".to_string(),

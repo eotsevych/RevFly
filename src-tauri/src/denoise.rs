@@ -48,27 +48,68 @@ pub fn denoise(samples: &[f32], sample_rate: u32, wet: f32) -> Vec<f32> {
 }
 
 fn denoise_48k(samples: &[f32], wet: f32) -> Vec<f32> {
-    let n = samples.len();
-    let mut state = DenoiseState::new();
-    let mut input = [0.0f32; FRAME];
-    let mut output = [0.0f32; FRAME];
-    // One extra frame flushes the one-frame delay of RNNoise's overlap-add.
-    let frames = n.div_ceil(FRAME) + 1;
-    let mut clean = Vec::with_capacity(frames * FRAME);
-    for f in 0..frames {
-        for (i, slot) in input.iter_mut().enumerate() {
-            let x = samples.get(f * FRAME + i).copied().unwrap_or(0.0);
+    LiveDenoise::new().finish(samples, wet)
+}
+
+/// RNNoise on 48 kHz audio that can be fed while it's being recorded, so stopping leaves only the
+/// last frames to do. `finish` returns exactly what denoising the whole recording at once does.
+pub struct LiveDenoise {
+    state: Box<DenoiseState<'static>>,
+    /// Samples denoised so far, in whole frames from the start of the recording.
+    fed: usize,
+    /// RNNoise's output so far; it lags the input by one frame.
+    clean: Vec<f32>,
+}
+
+impl LiveDenoise {
+    pub fn new() -> Self {
+        Self { state: DenoiseState::new(), fed: 0, clean: Vec::new() }
+    }
+
+    /// How many samples of the recording were fed: the next `feed` starts there.
+    pub fn fed(&self) -> usize {
+        self.fed
+    }
+
+    /// Denoises the whole frames of `more`, the recording's samples from `fed()` on. A part frame
+    /// at the end is left for the next call.
+    pub fn feed(&mut self, more: &[f32]) {
+        for frame in more.chunks_exact(FRAME) {
+            self.frame(frame);
+        }
+    }
+
+    /// Runs one frame; a short `samples` is padded with silence.
+    fn frame(&mut self, samples: &[f32]) {
+        let mut input = [0.0f32; FRAME];
+        let mut output = [0.0f32; FRAME];
+        for (slot, &x) in input.iter_mut().zip(samples) {
             *slot = if x.is_finite() { x.clamp(-1.0, 1.0) * I16_SCALE } else { 0.0 };
         }
-        state.process_frame(&mut output, &input);
-        clean.extend(output.iter().map(|&y| y / I16_SCALE));
+        self.state.process_frame(&mut output, &input);
+        self.clean.extend(output.iter().map(|&y| y / I16_SCALE));
+        self.fed += FRAME;
     }
-    // Output lags input by one frame; the first frame also holds RNNoise's fade-in.
-    clean[FRAME..FRAME + n]
-        .iter()
-        .zip(samples)
-        .map(|(&c, &dry)| c * wet + dry * (1.0 - wet))
-        .collect()
+
+    /// Denoises the rest of `samples` (the whole recording, whose first `fed()` samples were fed)
+    /// and mixes in `wet` of the result.
+    pub fn finish(mut self, samples: &[f32], wet: f32) -> Vec<f32> {
+        let wet = if wet.is_finite() { wet.clamp(0.0, 1.0) } else { DEFAULT_WET };
+        let n = samples.len();
+        // One extra frame flushes the one-frame delay of RNNoise's overlap-add.
+        let frames = n.div_ceil(FRAME) + 1;
+        while self.clean.len() < frames * FRAME {
+            let start = self.fed.min(n);
+            let end = (self.fed + FRAME).min(n);
+            self.frame(&samples[start..end]);
+        }
+        // Output lags input by one frame; the first frame also holds RNNoise's fade-in.
+        self.clean[FRAME..FRAME + n]
+            .iter()
+            .zip(samples)
+            .map(|(&c, &dry)| c * wet + dry * (1.0 - wet))
+            .collect()
+    }
 }
 
 /// High-quality fixed-ratio (FFT) resampling of a whole mono clip.
@@ -146,6 +187,21 @@ mod tests {
         let out = denoise(&input, 48000, 1.0);
         let kept_db = 20.0 * (rms(&out[4800..]) / rms(&input[4800..])).log10();
         assert!(kept_db > -6.0, "voice lost {kept_db:.1} dB");
+    }
+
+    #[test]
+    fn denoising_while_recording_matches_denoising_at_the_end() {
+        let input = voice(48000, 1.3);
+        let whole = denoise(&input, 48000, 0.98);
+        // Fed in uneven pieces, as the recorder's ticks deliver them.
+        let mut live = LiveDenoise::new();
+        let mut have = 0;
+        for step in [1000, 7, 4800, 13_000, 2] {
+            have = (have + step).min(input.len());
+            live.feed(&input[live.fed()..have]);
+        }
+        assert!(live.fed() > 0 && live.fed() < input.len());
+        assert_eq!(live.finish(&input, 0.98), whole);
     }
 
     #[test]

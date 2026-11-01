@@ -99,57 +99,8 @@ export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
     await refreshLogs();
   };
 
-  const getLogChunks = (log: LogDisplayItem): ChunkDiagnosticEvent[] => {
-    if (log.whole_track) return [];
-    if (log.chunk_events && log.chunk_events.length > 0) {
-      return log.chunk_events;
-    }
-    const dur = log.audioDurationSec || 0;
-    if (dur <= 0) return [];
-    if (dur > 10) {
-      return [
-        {
-          chunk_index: 1,
-          trigger_reason: "Safety Limit (10.0s continuous)",
-          duration_sec: 10.0,
-          has_overlap: false,
-          overlap_ms: 400,
-          silence_detected_ms: 0,
-          rms_energy: 0.048,
-          timestamp: log.time,
-          detail:
-            "Continuous speech reached 10.0s safety cap without pause. Cut chunk #1 with 400ms overlap retained.",
-        },
-        {
-          chunk_index: 2,
-          trigger_reason: "Flush (Recording ended)",
-          duration_sec: Number((dur - 9.6).toFixed(2)),
-          has_overlap: true,
-          overlap_ms: 400,
-          silence_detected_ms: 0,
-          rms_energy: 0.032,
-          timestamp: log.time,
-          detail: "Recording ended. Flushed final audio segment with 400ms overlap preserved.",
-        },
-      ];
-    }
-    return [
-      {
-        chunk_index: 1,
-        trigger_reason: dur > 4.5 ? "Silence Pause (500ms detected)" : "Flush (Recording ended)",
-        duration_sec: Number(dur.toFixed(2)),
-        has_overlap: false,
-        overlap_ms: 0,
-        silence_detected_ms: dur > 4.5 ? 520 : 0,
-        rms_energy: 0.036,
-        timestamp: log.time,
-        detail:
-          dur > 4.5
-            ? "Silence pause >= 500ms detected. Cut audio chunk for background transcription."
-            : "Speech completed. Emitted single audio chunk.",
-      },
-    ];
-  };
+  const getLogChunks = (log: LogDisplayItem): ChunkDiagnosticEvent[] =>
+    log.whole_track ? [] : (log.chunk_events ?? []);
 
   const getLogActions = (log: LogDisplayItem): string[] => {
     if (log.action_logs && log.action_logs.length > 0) {
@@ -573,7 +524,7 @@ export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
                         >
                           {log.whole_track
                             ? "🎧 Whole Track: chunking off, recorded and transcribed as one continuous track"
-                            : `📦 Chunk Creation Details (${chunks.length} Created During Recording):`}
+                            : `📦 Chunks (${chunks.length}), cut after the recording stopped:`}
                         </p>
                         {chunks.length > 0 && (
                           <CopyButton
@@ -620,10 +571,10 @@ export default function LogsTab({ t, onOpenInAudioLab }: LogsTabProps) {
                                   fontSize: 10,
                                   padding: "1px 6px",
                                   borderRadius: 4,
-                                  background: ch.trigger_reason.includes("Safety")
+                                  background: ch.trigger_reason.includes("Hard")
                                     ? `${t.warnColor || "#eab308"}20`
                                     : `${t.successColor || "#22c55e"}20`,
-                                  color: ch.trigger_reason.includes("Safety")
+                                  color: ch.trigger_reason.includes("Hard")
                                     ? t.warnColor || "#eab308"
                                     : t.successColor || "#22c55e",
                                 }}

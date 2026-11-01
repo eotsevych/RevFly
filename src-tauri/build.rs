@@ -2,55 +2,95 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
-  build_apple_translate();
+  // revfly-translate: the helper for the "Apple" translation provider. Universal; needs the macOS 26 SDK.
+  build_helper(Helper {
+    name: "revfly-translate",
+    inputs: &["apple-translate/revfly-translate.swift"],
+    script: "../scripts/build_apple_translate.sh",
+    require_env: "REVFLY_REQUIRE_APPLE_TRANSLATE",
+    skip_env: None,
+    needs: "Xcode with the macOS 26 SDK",
+    missing: "the Apple translation provider won't work in this build",
+  });
+  // revfly-asr: runs Parakeet on the Neural Engine (Apple Silicon). Needs Swift 6 and, on the
+  // first build, network access to fetch FluidAudio. Without it RevFly runs Parakeet on the CPU.
+  build_helper(Helper {
+    name: "revfly-asr",
+    inputs: &["apple-asr/Package.swift", "apple-asr/Sources/main.swift"],
+    script: "../scripts/build_apple_asr.sh",
+    require_env: "REVFLY_REQUIRE_APPLE_ASR",
+    skip_env: Some("REVFLY_SKIP_APPLE_ASR"),
+    needs: "Xcode with Swift 6 and network access for FluidAudio",
+    missing: "Parakeet will run on the CPU instead of the Neural Engine",
+  });
   tauri_build::build()
 }
 
-/// Builds revfly-translate, the helper for the "Apple" translation provider, which
-/// tauri.macos.conf.json bundles as a sidecar (`binaries/revfly-translate-<target triple>`). The
-/// helper is universal, so one build serves every macOS target.
+struct Helper {
+  name: &'static str,
+  inputs: &'static [&'static str],
+  script: &'static str,
+  /// Set (release builds do) to fail the build instead of going on with a stand-in.
+  require_env: &'static str,
+  /// Set to use the stand-in without trying to build (e.g. offline).
+  skip_env: Option<&'static str>,
+  needs: &'static str,
+  missing: &'static str,
+}
+
+/// Builds a Swift helper that tauri.macos.conf.json bundles as a sidecar
+/// (`binaries/<name>-<target triple>`). One build serves every macOS target.
 ///
-/// It needs the macOS 26 SDK. Without it the build goes on with a stand-in that answers every
-/// request with an error, and the Apple provider fails with that message; set
-/// REVFLY_REQUIRE_APPLE_TRANSLATE=1 (release builds do) to fail the build instead.
-fn build_apple_translate() {
+/// When it can't be built, the build goes on with a stand-in that answers every request with an
+/// error (RevFly treats it as missing), unless `require_env` is set.
+fn build_helper(helper: Helper) {
   let target = std::env::var("TARGET").unwrap_or_default();
   if !target.ends_with("apple-darwin") {
     return;
   }
-  let source = Path::new("apple-translate/revfly-translate.swift");
-  let script = Path::new("../scripts/build_apple_translate.sh");
-  println!("cargo:rerun-if-changed={}", source.display());
-  println!("cargo:rerun-if-changed={}", script.display());
-  println!("cargo:rerun-if-env-changed=REVFLY_REQUIRE_APPLE_TRANSLATE");
+  let script = Path::new(helper.script);
+  let mut inputs: Vec<&Path> = helper.inputs.iter().map(Path::new).collect();
+  inputs.push(script);
+  for input in &inputs {
+    println!("cargo:rerun-if-changed={}", input.display());
+  }
+  println!("cargo:rerun-if-env-changed={}", helper.require_env);
+  let skip = helper.skip_env.is_some_and(|env| {
+    println!("cargo:rerun-if-env-changed={env}");
+    std::env::var_os(env).is_some()
+  });
 
-  let universal = PathBuf::from("binaries/revfly-translate-universal-apple-darwin");
-  let sidecar = PathBuf::from(format!("binaries/revfly-translate-{}", target));
-  if !is_newer(&universal, &[source, script]) || is_stand_in(&universal) {
+  let universal = PathBuf::from(format!("binaries/{}-universal-apple-darwin", helper.name));
+  let sidecar = PathBuf::from(format!("binaries/{}-{}", helper.name, target));
+  if skip {
+    if !universal.exists() {
+      write_stand_in(&universal, helper.name);
+    }
+  } else if !is_newer(&universal, &inputs) || is_stand_in(&universal) {
     let built = Command::new("bash").arg(script).arg(&universal).status().map(|s| s.success()).unwrap_or(false);
     if !built {
-      if std::env::var_os("REVFLY_REQUIRE_APPLE_TRANSLATE").is_some() {
-        panic!("Couldn't build the Apple Translation helper (scripts/build_apple_translate.sh); it needs Xcode with the macOS 26 SDK");
+      if std::env::var_os(helper.require_env).is_some() {
+        panic!("Couldn't build {} ({}); it needs {}", helper.name, helper.script, helper.needs);
       }
-      println!("cargo:warning=Couldn't build the Apple Translation helper (needs Xcode with the macOS 26 SDK); the Apple translation provider won't work in this build.");
-      write_stand_in(&universal);
+      println!("cargo:warning=Couldn't build {} (needs {}); {}.", helper.name, helper.needs, helper.missing);
+      write_stand_in(&universal, helper.name);
     }
   }
   if sidecar != universal {
-    std::fs::copy(&universal, &sidecar).expect("copy the Apple Translation helper");
+    std::fs::copy(&universal, &sidecar).expect("copy the helper");
   }
 }
 
-const STAND_IN_MARK: &str = "revfly-translate stand-in";
+const STAND_IN_MARK: &str = "stand-in";
 
 /// Answers every request (and a download) with an error saying why the helper is missing.
-fn write_stand_in(path: &Path) {
-  let message = "This RevFly build has no Apple Translation helper (it was built without the macOS 26 SDK)";
+fn write_stand_in(path: &Path, name: &str) {
+  let message = format!("This RevFly build has no {name} helper (it couldn't be built)");
   let script = format!(
-    "#!/bin/sh\n# {STAND_IN_MARK}\nanswer='{{\"ok\":false,\"error\":\"internal\",\"message\":\"{message}\"}}'\nif [ \"$1\" = download ]; then echo \"$answer\"; exit 1; fi\nwhile read -r _; do echo \"$answer\"; done\n"
+    "#!/bin/sh\n# {name} {STAND_IN_MARK}\nanswer='{{\"ok\":false,\"error\":\"internal\",\"message\":\"{message}\"}}'\nif [ \"$1\" = download ]; then echo \"$answer\"; exit 1; fi\nwhile read -r _; do echo \"$answer\"; done\n"
   );
   std::fs::create_dir_all(path.parent().unwrap()).expect("create src-tauri/binaries");
-  std::fs::write(path, script).expect("write the Apple Translation helper stand-in");
+  std::fs::write(path, script).expect("write the helper stand-in");
   #[cfg(unix)]
   {
     use std::os::unix::fs::PermissionsExt;

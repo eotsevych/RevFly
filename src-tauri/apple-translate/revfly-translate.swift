@@ -10,6 +10,11 @@
 //   {"op":"languages","target":"en"}                        → {"ok":true,"languages":[{"code","name","status"}]}
 //   {"op":"warm","source":"uk","target":"en"}               → {"ok":true,"source":"uk","ms":…}
 //   {"op":"translate","text":…,"source":"uk","target":"en"} → {"ok":true,"text":…,"source":"uk","ms":…}
+//   {"op":"llm_status"}                                     → {"ok":true,"status":"available|device_not_eligible|not_enabled|model_not_ready|unavailable","message":…}
+//   {"op":"generate","text":…}                              → {"ok":true,"text":…,"ms":…}
+//   {"op":"llm_warm"}                                       → {"ok":true} (loads the model ahead of a "generate")
+// "llm_status" and "generate" use Apple Intelligence's on-device language model (FoundationModels);
+// "generate" answers the prompt in "text" in a fresh session, so nothing carries over between requests.
 // A missing or empty "source" is detected from the text. Any request may add
 // "model":"lowLatency"|"highFidelity", the model to prefer when both are downloaded (macOS 26.4+;
 // lowLatency when absent). Failures are
@@ -23,6 +28,9 @@
 
 import AppKit
 import Foundation
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 import NaturalLanguage
 import SwiftUI
 import Translation
@@ -170,6 +178,57 @@ func describe(_ error: Error, source: String, target: String) -> [String: Any] {
     return failure("internal", message)
 }
 
+// MARK: - Apple Intelligence
+
+/// Whether Apple Intelligence's on-device model can answer, or why not.
+func llmStatus() -> String {
+    #if canImport(FoundationModels)
+    if #available(macOS 26.0, *) {
+        switch SystemLanguageModel.default.availability {
+        case .available: return "available"
+        case .unavailable(.deviceNotEligible): return "device_not_eligible"
+        case .unavailable(.appleIntelligenceNotEnabled): return "not_enabled"
+        case .unavailable(.modelNotReady): return "model_not_ready"
+        case .unavailable: return "unavailable"
+        }
+    }
+    #endif
+    return "unavailable"
+}
+
+/// Why Apple Intelligence can't answer, for a status other than "available".
+func llmUnavailableMessage(_ status: String) -> String {
+    switch status {
+    case "device_not_eligible": return "This Mac can't run Apple Intelligence (it needs Apple silicon)."
+    case "not_enabled": return "Apple Intelligence is turned off. Turn it on in System Settings › Apple Intelligence & Siri."
+    case "model_not_ready": return "Apple Intelligence is still downloading its model. Try again in a few minutes."
+    default: return "Apple Intelligence isn't available on this Mac."
+    }
+}
+
+@MainActor
+func generate(_ prompt: String) async -> [String: Any] {
+    #if canImport(FoundationModels)
+    if #available(macOS 26.0, *) {
+        let status = llmStatus()
+        guard status == "available" else {
+            return failure("llm_unavailable", llmUnavailableMessage(status))
+        }
+        let started = Date()
+        do {
+            let response = try await LanguageModelSession().respond(to: prompt, options: GenerationOptions(temperature: 0.1))
+            return ["ok": true, "text": response.content, "ms": elapsedMs(since: started)]
+        } catch {
+            let message = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+            var result = failure("internal", message)
+            result["ms"] = elapsedMs(since: started)
+            return result
+        }
+    }
+    #endif
+    return failure("llm_unavailable", "Apple Intelligence needs macOS 26 or later")
+}
+
 // MARK: - Worker
 
 struct Request: Decodable {
@@ -275,6 +334,24 @@ func handle(_ request: Request) async -> [String: Any] {
             result["ms"] = elapsedMs(since: started)
             return result
         }
+
+    case "llm_status":
+        let status = llmStatus()
+        return ["ok": true, "status": status, "message": status == "available" ? "" : llmUnavailableMessage(status)]
+
+    case "llm_warm":
+        #if canImport(FoundationModels)
+        if llmStatus() == "available" {
+            LanguageModelSession().prewarm()
+        }
+        #endif
+        return ["ok": true]
+
+    case "generate":
+        guard let prompt = request.text, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return failure("nothing_to_translate", "There is no text to translate")
+        }
+        return await generate(prompt)
 
     default:
         return failure("bad_request", "Unknown op '\(request.op)'")

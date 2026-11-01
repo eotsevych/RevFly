@@ -26,6 +26,8 @@ dist/
 dist-ssr/
 **/dist-ssr/
 build_deps/
+# The Vulkan loader CI copies in for Windows builds (see tauri.windows.conf.json).
+src-tauri/vulkan-1.dll
 
 # Temp & logs
 .env*

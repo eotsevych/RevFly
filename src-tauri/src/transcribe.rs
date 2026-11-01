@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use tauri::AppHandle;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
@@ -95,10 +97,16 @@ pub fn get_model_catalog() -> Vec<ModelCatalogItem> {
                 (downloaded, file_size_bytes)
             };
 
+            // Parakeet's download is the Neural Engine build on Apple Silicon, smaller than the CPU one.
+            let size_desc = if *id == "parakeet" {
+                format_size(crate::parakeet::ParakeetTranscriber::download_size())
+            } else {
+                size_desc.to_string()
+            };
             ModelCatalogItem {
                 id: id.to_string(),
                 name: name.to_string(),
-                size_desc: size_desc.to_string(),
+                size_desc,
                 speed_desc: speed_desc.to_string(),
                 filename: filename.to_string(),
                 downloaded,
@@ -193,9 +201,42 @@ pub fn map_language_hint(lang: &str) -> Option<&'static str> {
     }
 }
 
+/// Whether Whisper may run on the GPU: Settings → Hardware acceleration isn't "CPU only".
+static USE_GPU: AtomicBool = AtomicBool::new(true);
+
+pub fn set_device_backend(device_backend: &str) {
+    USE_GPU.store(device_backend != "cpu", Ordering::Relaxed);
+}
+
+/// Whether the next Whisper model loads onto the GPU. Intel Macs stay on the CPU, as before.
+fn gpu_wanted() -> bool {
+    USE_GPU.load(Ordering::Relaxed) && !cfg!(all(target_os = "macos", target_arch = "x86_64"))
+}
+
+/// The GPUs Whisper can run on: Metal on a Mac, Vulkan on Windows and Linux. Empty without one.
+pub fn gpu_devices() -> Vec<String> {
+    use whisper_rs_sys as sys;
+    // SAFETY: ggml's device registry is built once and lives for the whole process; each
+    // description is a NUL-terminated string it owns.
+    unsafe {
+        (0..sys::ggml_backend_dev_count())
+            .map(|i| sys::ggml_backend_dev_get(i))
+            .filter(|&dev| {
+                matches!(
+                    sys::ggml_backend_dev_type(dev),
+                    sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_GPU | sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_IGPU
+                )
+            })
+            .map(|dev| std::ffi::CStr::from_ptr(sys::ggml_backend_dev_description(dev)).to_string_lossy().into_owned())
+            .collect()
+    }
+}
+
 pub struct Transcriber {
     context: Option<WhisperContext>,
     current_model: String,
+    /// Whether the loaded model was put on the GPU; a change in the setting reloads it.
+    current_gpu: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -221,6 +262,7 @@ impl Transcriber {
         Self {
             context: None,
             current_model: String::new(),
+            current_gpu: false,
         }
     }
 
@@ -238,7 +280,7 @@ impl Transcriber {
 
     pub fn is_loaded(&self, model_path: &Path) -> bool {
         if let Some(s) = model_path.to_str() {
-            self.context.is_some() && self.current_model == s
+            self.context.is_some() && self.current_model == s && self.current_gpu == gpu_wanted()
         } else {
             false
         }
@@ -336,7 +378,8 @@ impl Transcriber {
             .ok_or_else(|| "Invalid model path characters".to_string())?;
 
         let mut cparams = WhisperContextParameters::default();
-        cparams.use_gpu(Self::is_metal_supported());
+        let gpu = gpu_wanted();
+        cparams.use_gpu(gpu);
 
         let rss_before = crate::vitals::process_rss_mb();
         let started = Instant::now();
@@ -345,13 +388,15 @@ impl Transcriber {
 
         self.context = Some(ctx);
         self.current_model = path_str.to_string();
+        self.current_gpu = gpu;
         let name = model_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         crate::pipeline_logger::log_stage_event(
             &get_data_dir(),
             "MODEL_LOAD",
             &format!(
-                "Loaded Whisper {} in {} ms; app memory {} → {} MB",
+                "Loaded Whisper {} on the {} in {} ms; app memory {} → {} MB",
                 name,
+                if gpu { "GPU" } else { "CPU" },
                 started.elapsed().as_millis(),
                 rss_before,
                 crate::vitals::process_rss_mb()
@@ -360,10 +405,13 @@ impl Transcriber {
         Ok(())
     }
 
-    /// Transcribes with full diagnostic details (segments, probabilities, raw string).
+    /// Transcribes with full diagnostic details (segments, probabilities, raw string). Each of
+    /// `chunks` (ranges of `samples`) is decoded on its own and the texts are joined; the first
+    /// chunk picks the language the rest are decoded in, unless `language_override` sets one.
     pub fn transcribe_detailed(
         &mut self,
         samples: &[f32],
+        chunks: &[Range<usize>],
         model_path: &Path,
         translate_to_english: bool,
         language_override: Option<&str>,
@@ -379,8 +427,7 @@ impl Transcriber {
             });
         }
 
-        let path_str = model_path.to_str().unwrap_or_default();
-        if self.context.is_none() || self.current_model != path_str {
+        if !self.is_loaded(model_path) {
             self.load_context(model_path)?;
         }
 
@@ -389,77 +436,84 @@ impl Transcriber {
             .create_state()
             .map_err(|e| format!("Failed to create Whisper state: {:?}", e))?;
 
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         let hw = crate::cpu_features::detect_hardware_profile();
         let thread_count = hw.recommended_threads;
 
-        params.set_n_threads(thread_count);
-        params.set_no_timestamps(false);
-        params.set_single_segment(false);
-
-        // Auto-detect language properly:
-        // Set language to "auto" and detect_language to false so Whisper runs LID
-        // AND then decodes speech into text. Setting detect_language(true) in whisper.cpp
-        // aborts decoding immediately after language detection.
-        let lang_to_use = language_override.and_then(|s| {
+        let mut lang_to_use = language_override.and_then(|s| {
             let t = s.trim().to_lowercase();
             if t.is_empty() || t == "auto" || t == "detect" { None } else { Some(t) }
         });
-        if let Some(ref l) = lang_to_use {
-            params.set_language(Some(l.as_str()));
-            params.set_detect_language(false);
-        } else {
-            params.set_language(Some("auto"));
-            params.set_detect_language(false);
-        }
-
-        params.set_translate(translate_to_english);
-        params.set_print_progress(false);
-        params.set_print_special(false); // Do not inject special tokens into segments
-        params.set_print_realtime(false);
-        params.set_print_timestamps(false);
 
         let t0 = Instant::now();
-        state
-            .full(params, samples)
-            .map_err(|e| format!("Whisper transcription failed: {:?}", e))?;
-        let inference_ms = t0.elapsed().as_millis() as u64;
-
-        let mut full_text = String::new();
+        let mut texts = Vec::new();
         let mut segments = Vec::new();
         let mut raw_debug_lines = Vec::new();
+        let mut detected_lang = "auto";
 
-        for segment in state.as_iter() {
-            let start_ms = segment.start_timestamp() * 10;
-            let end_ms = segment.end_timestamp() * 10;
-            let prob = segment.no_speech_probability();
-            let seg_text = segment.to_str().unwrap_or("").to_string();
+        for (i, chunk) in chunks.iter().enumerate() {
+            let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+            params.set_n_threads(thread_count);
+            params.set_no_timestamps(false);
+            params.set_single_segment(false);
 
-            raw_debug_lines.push(format!(
-                "[{:.2}s - {:.2}s] (no_speech_prob: {:.1}%): {:?}",
-                start_ms as f32 / 1000.0,
-                end_ms as f32 / 1000.0,
-                prob * 100.0,
-                seg_text
-            ));
+            // Auto-detect language properly:
+            // Set language to "auto" and detect_language to false so Whisper runs LID
+            // AND then decodes speech into text. Setting detect_language(true) in whisper.cpp
+            // aborts decoding immediately after language detection.
+            params.set_language(Some(lang_to_use.as_deref().unwrap_or("auto")));
+            params.set_detect_language(false);
 
-            let clean_seg = strip_special_tokens(&seg_text);
-            full_text.push_str(&clean_seg);
+            params.set_translate(translate_to_english);
+            params.set_print_progress(false);
+            params.set_print_special(false); // Do not inject special tokens into segments
+            params.set_print_realtime(false);
+            params.set_print_timestamps(false);
 
-            segments.push(DiagnosticSegment {
-                start_ms,
-                end_ms,
-                text: clean_seg,
-                no_speech_prob: prob,
-            });
+            state
+                .full(params, &samples[chunk.clone()])
+                .map_err(|e| format!("Whisper transcription failed: {:?}", e))?;
+
+            // Segment times are within the chunk; shifted to times in the whole recording.
+            let offset_ms = (chunk.start * 1000 / 16000) as i64;
+            let mut chunk_text = String::new();
+            for segment in state.as_iter() {
+                let start_ms = segment.start_timestamp() * 10 + offset_ms;
+                let end_ms = segment.end_timestamp() * 10 + offset_ms;
+                let prob = segment.no_speech_probability();
+                let seg_text = segment.to_str().unwrap_or("").to_string();
+
+                raw_debug_lines.push(format!(
+                    "[{:.2}s - {:.2}s] (no_speech_prob: {:.1}%): {:?}",
+                    start_ms as f32 / 1000.0,
+                    end_ms as f32 / 1000.0,
+                    prob * 100.0,
+                    seg_text
+                ));
+
+                let clean_seg = strip_special_tokens(&seg_text);
+                chunk_text.push_str(&clean_seg);
+
+                segments.push(DiagnosticSegment {
+                    start_ms,
+                    end_ms,
+                    text: clean_seg,
+                    no_speech_prob: prob,
+                });
+            }
+            texts.push(chunk_text);
+
+            if i == 0 {
+                let detected_lang_id = state.full_lang_id_from_state();
+                if detected_lang_id >= 0 {
+                    detected_lang = whisper_rs::get_lang_str(detected_lang_id).unwrap_or("auto");
+                }
+                // Later chunks keep this language, so a long recording can't switch midway.
+                if lang_to_use.is_none() && detected_lang != "auto" {
+                    lang_to_use = Some(detected_lang.to_string());
+                }
+            }
         }
-
-        let detected_lang_id = state.full_lang_id_from_state();
-        let detected_lang = if detected_lang_id >= 0 {
-            whisper_rs::get_lang_str(detected_lang_id).unwrap_or("auto")
-        } else {
-            "auto"
-        };
+        let inference_ms = t0.elapsed().as_millis() as u64;
 
         let raw_output = if segments.is_empty() {
             format!("0 segments returned by model (detected lang: {})", detected_lang)
@@ -468,7 +522,7 @@ impl Transcriber {
         };
 
         Ok(DetailedWhisperResult {
-            text: full_text.trim().to_string(),
+            text: crate::chunking::join_transcripts(&texts),
             detected_lang: detected_lang.to_string(),
             inference_ms,
             thread_count,
@@ -477,15 +531,16 @@ impl Transcriber {
         })
     }
 
-    /// Transcribes 16 kHz float32 mono audio directly in RAM.
+    /// Transcribes 16 kHz float32 mono audio directly in RAM, chunk by chunk.
     /// Returns (transcribed_text, detected_language, inference_duration_ms, thread_count).
     pub fn transcribe(
         &mut self,
         samples: &[f32],
+        chunks: &[Range<usize>],
         model_path: &Path,
         translate_to_english: bool,
     ) -> Result<(String, String, u64, i32), String> {
-        let res = self.transcribe_detailed(samples, model_path, translate_to_english, None)?;
+        let res = self.transcribe_detailed(samples, chunks, model_path, translate_to_english, None)?;
         Ok((res.text, res.detected_lang, res.inference_ms, res.thread_count))
     }
 }
@@ -520,3 +575,16 @@ pub fn strip_special_tokens(s: &str) -> String {
     out
 }
 
+
+#[cfg(test)]
+mod tests {
+    /// Lists this computer's GPUs: `cargo test --lib gpu_devices -- --ignored --nocapture`. Ignored
+    /// because CI runners have no GPU.
+    #[test]
+    #[ignore]
+    fn gpu_devices_lists_this_computers_gpu() {
+        let gpus = super::gpu_devices();
+        println!("GPUs: {:?}", gpus);
+        assert!(!gpus.is_empty());
+    }
+}

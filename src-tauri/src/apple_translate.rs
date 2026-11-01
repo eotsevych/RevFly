@@ -463,6 +463,54 @@ pub async fn download(source: &str, target: &str, model: &str) -> Result<(), App
     result
 }
 
+// ── Apple Intelligence ──
+//
+// The same helper answers prompts with Apple Intelligence's on-device language model
+// (FoundationModels): free, offline, no API key. It is an LLM, so unlike Apple Translation it
+// follows the prompt template ("translate and fix grammar", "make it polite").
+
+/// `translation_provider` value for Apple Intelligence.
+pub const INTELLIGENCE_PROVIDER: &str = "Apple Intelligence";
+
+pub fn is_apple_intelligence(provider: &str) -> bool {
+    provider.trim().eq_ignore_ascii_case(INTELLIGENCE_PROVIDER)
+}
+
+/// Why Apple Intelligence can't be used on this Mac (old macOS, not turned on, no Apple silicon),
+/// or `None` when it can.
+pub async fn intelligence_unavailable_reason() -> Option<String> {
+    if let Some(reason) = unavailable_reason() {
+        return Some(reason.replace("Apple Translation", "Apple Intelligence"));
+    }
+    match request(json!({ "op": "llm_status" }), QUERY_TIMEOUT).await {
+        Ok(answer) if answer.get("status").and_then(Value::as_str) == Some("available") => None,
+        Ok(answer) => Some(answer.get("message").and_then(Value::as_str).unwrap_or("Apple Intelligence isn't available on this Mac.").to_string()),
+        Err(e) => Some(format!("Couldn't ask Apple Intelligence: {}", e.describe(""))),
+    }
+}
+
+/// Loads Apple Intelligence's model while the user is still talking. Errors are only logged: the
+/// translation reports them.
+pub async fn warm_up_intelligence() {
+    if let Err(e) = request(json!({ "op": "llm_warm" }), QUERY_TIMEOUT).await {
+        log::warn!("Apple Intelligence warm-up: {}", e.describe(""));
+    }
+}
+
+/// Apple Intelligence's answer to `prompt` (a rendered prompt template).
+pub async fn generate(prompt: &str, timeout: Duration) -> Result<String, String> {
+    let answer = request(json!({ "op": "generate", "text": prompt }), timeout).await.map_err(|e| match e {
+        AppleError::Unavailable(reason) => reason.replace("Apple Translation", "Apple Intelligence"),
+        AppleError::Other(message) => message,
+        other => other.describe(""),
+    })?;
+    let text = answer.get("text").and_then(Value::as_str).unwrap_or("").trim().to_string();
+    if text.is_empty() {
+        return Err("Apple Intelligence returned an empty answer".to_string());
+    }
+    Ok(text)
+}
+
 /// Opens System Settings at Language & Region, where Translation Languages are managed.
 pub fn open_system_settings() -> Result<(), String> {
     std::process::Command::new("open")
@@ -568,6 +616,18 @@ mod tests {
         let packs = languages("en").await.unwrap();
         assert!(packs.iter().any(|p| p.code == "uk"));
         assert!(packs.iter().all(|p| p.code != "en"));
+    }
+
+    /// Through the real helper and Apple Intelligence, when this Mac has it turned on.
+    #[tokio::test]
+    async fn apple_intelligence_answers_a_translation_prompt() {
+        assert!(is_apple_intelligence("apple intelligence") && !is_apple_intelligence("Apple"));
+        if intelligence_unavailable_reason().await.is_some() {
+            return;
+        }
+        let prompt = crate::translate::render_prompt_template("", "Привіт, як справи?", "Ukrainian", "English");
+        let text = generate(&prompt, Duration::from_secs(60)).await.expect("Apple Intelligence answers");
+        assert!(text.to_lowercase().contains("hello") || text.to_lowercase().contains("hi"), "{text}");
     }
 
     #[test]

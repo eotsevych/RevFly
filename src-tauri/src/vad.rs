@@ -1,6 +1,8 @@
+use crate::chunking::{self, Chunk};
 use silero_vad_crs::{
-    get_timestamps_from_probs_with_config, SileroVad, TimestampConfig,
+    get_timestamps_from_probs_with_config, SileroVad, TimestampConfig, DEFAULT_CHUNK_SAMPLES,
 };
+use std::ops::Range;
 use std::time::Instant;
 
 #[derive(Debug, Clone)]
@@ -14,6 +16,20 @@ pub struct VadResult {
     pub duration_ms: u64,
     /// Silero found no speech, so the whole recording was kept. False when VAD couldn't run.
     pub no_speech: bool,
+    /// Where `samples` is cut for chunked transcription: one chunk when it is 40 s or less, or
+    /// when VAD couldn't run.
+    pub chunks: Vec<Chunk>,
+}
+
+impl VadResult {
+    /// The parts of `samples` to transcribe one by one: the chunks with chunking on, else all of it.
+    pub fn ranges(&self, chunking: bool) -> Vec<Range<usize>> {
+        if chunking {
+            self.chunks.iter().map(|c| c.range.clone()).collect()
+        } else {
+            vec![0..self.samples.len()]
+        }
+    }
 }
 
 /// Trims silence from 16 kHz mono audio using Silero VAD.
@@ -34,6 +50,7 @@ pub fn trim_silence(samples: &[f32], sample_rate: u32) -> VadResult {
             silence_removed_sec: 0.0,
             duration_ms: t0.elapsed().as_millis() as u64,
             no_speech: false,
+            chunks: Vec::new(),
         };
     }
 
@@ -51,6 +68,7 @@ pub fn trim_silence(samples: &[f32], sample_rate: u32) -> VadResult {
                 silence_removed_sec: 0.0,
                 duration_ms: ms,
                 no_speech: false,
+                chunks: chunking::whole(0..original_len),
             };
         }
     };
@@ -69,6 +87,7 @@ pub fn trim_silence(samples: &[f32], sample_rate: u32) -> VadResult {
                 silence_removed_sec: 0.0,
                 duration_ms: ms,
                 no_speech: false,
+                chunks: chunking::whole(0..original_len),
             };
         }
     };
@@ -76,22 +95,22 @@ pub fn trim_silence(samples: &[f32], sample_rate: u32) -> VadResult {
     let segments = get_timestamps_from_probs_with_config(&probs, samples.len(), timestamp_config(sample_rate));
 
     let no_speech = segments.is_empty();
-    let trimmed = if no_speech {
+    let start = if no_speech {
         log::info!("Silero VAD detected no active speech, preserving full buffer as fallback.");
-        samples.to_vec()
+        0
     } else {
         // Head-only trimming:
         // Trim silence before the first word (saving model inference time).
         // NEVER trim the ending of user-triggered audio recordings to avoid cutting off trailing syllables or words.
-        let first = segments.first().unwrap();
-        let start = first.start.min(samples.len());
-
-        if start < samples.len() {
-            samples[start..].to_vec()
-        } else {
-            samples.to_vec()
-        }
+        let start = segments[0].start;
+        if start < samples.len() { start } else { 0 }
     };
+    let trimmed = samples[start..].to_vec();
+    // Planned on the whole recording's scores, then moved to positions in `trimmed`.
+    let chunks = chunking::plan(&probs, DEFAULT_CHUNK_SAMPLES, samples.len(), start)
+        .into_iter()
+        .map(|c| Chunk { range: c.range.start - start..c.range.end - start, ending: c.ending })
+        .collect();
 
     let trimmed_len = trimmed.len();
     let trimmed_dur = trimmed_len as f32 / sample_rate as f32;
@@ -107,6 +126,25 @@ pub fn trim_silence(samples: &[f32], sample_rate: u32) -> VadResult {
         silence_removed_sec: silence_removed,
         duration_ms: ms,
         no_speech,
+        chunks,
+    }
+}
+
+/// Chunks of 16 kHz mono audio that didn't go through `trim_silence`. Audio of 40 s or less, or
+/// that VAD can't score, is one chunk.
+pub fn plan_chunks(samples: &[f32]) -> Vec<Chunk> {
+    let whole = chunking::whole(0..samples.len());
+    // Short audio is never cut, so it needs no VAD.
+    if samples.len() <= chunking::MAX_CHUNK_SAMPLES {
+        return whole;
+    }
+    let probs = SileroVad::new().map_err(|e| format!("{:?}", e)).and_then(|mut vad| vad.forward_audio(samples).map_err(|e| format!("{:?}", e)));
+    match probs {
+        Ok(probs) => chunking::plan(&probs, DEFAULT_CHUNK_SAMPLES, samples.len(), 0),
+        Err(e) => {
+            log::warn!("Silero VAD error: {}. Transcribing the audio in one piece.", e);
+            whole
+        }
     }
 }
 
@@ -133,4 +171,26 @@ pub fn has_speech(samples: &[f32]) -> bool {
         return true;
     };
     !get_timestamps_from_probs_with_config(&probs, samples.len(), timestamp_config(16000)).is_empty()
+}
+
+#[cfg(test)]
+mod tests {
+    /// Plans chunks for a real recording: `REVFLY_WAV=path cargo test --lib real_recording -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn real_recording_chunks_cover_it_in_pieces_of_at_most_40_s() {
+        let path = std::env::var("REVFLY_WAV").expect("set REVFLY_WAV to a recording");
+        let (samples, rate) = crate::lab::read_wav_file(std::path::Path::new(&path)).unwrap();
+        let samples = crate::audio::resample_to_16k(&samples, rate);
+        let vad = super::trim_silence(&samples, 16000);
+        assert_eq!(vad.chunks.first().unwrap().range.start, 0);
+        assert_eq!(vad.chunks.last().unwrap().range.end, vad.samples.len());
+        for pair in vad.chunks.windows(2) {
+            assert_eq!(pair[0].range.end, pair[1].range.start);
+        }
+        for c in &vad.chunks {
+            println!("{:7.2}s - {:7.2}s  {:?}", c.range.start as f32 / 16000.0, c.range.end as f32 / 16000.0, c.ending);
+            assert!(c.range.len() <= crate::chunking::MAX_CHUNK_SAMPLES);
+        }
+    }
 }

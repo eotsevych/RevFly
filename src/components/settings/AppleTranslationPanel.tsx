@@ -32,6 +32,7 @@ const FALLBACKS = [
   { value: "", label: "Paste the spoken text" },
   { value: "LLM", label: "Translate with the LLM provider" },
   { value: "Custom API", label: "Translate with the Custom API" },
+  { value: "Apple Intelligence", label: "Translate with Apple Intelligence (on-device)" },
 ];
 
 const STATUS_LABEL: Record<AppleLanguagePack["status"], string> = {
@@ -49,8 +50,16 @@ const text = (t: Tokens, size = 12): React.CSSProperties => ({
 });
 
 /** Settings for Apple's on-device translation: which model, which languages are downloaded for the
- * target language (with a Download action), and what happens when it fails. */
-export default function AppleTranslationPanel({ t }: { t: Tokens }) {
+ * target language (with a Download action), and what happens when it fails. With `offline`, the
+ * same for the Offline provider (Firefox Translations models), which has one model and no System
+ * Settings. */
+export default function AppleTranslationPanel({
+  t,
+  offline = false,
+}: {
+  t: Tokens;
+  offline?: boolean;
+}) {
   const { settings, updateSettings } = useSettingsContext();
   const targetLang = settings.target_lang || "English";
   const sourceCode = LANG_CODES[settings.source_lang || ""] ?? null;
@@ -66,7 +75,7 @@ export default function AppleTranslationPanel({ t }: { t: Tokens }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetchAppleLanguagePacks(targetLang);
+      const res = await fetchAppleLanguagePacks(targetLang, offline);
       setPacks(res.languages);
       setTargetCode(res.target);
     } catch (e) {
@@ -75,7 +84,7 @@ export default function AppleTranslationPanel({ t }: { t: Tokens }) {
     } finally {
       setLoading(false);
     }
-  }, [targetLang]);
+  }, [targetLang, offline]);
 
   useEffect(() => {
     void refresh();
@@ -94,7 +103,7 @@ export default function AppleTranslationPanel({ t }: { t: Tokens }) {
     setNotice(null);
     setError(null);
     try {
-      await downloadAppleLanguagePack(pack.code, targetCode);
+      await downloadAppleLanguagePack(pack.code, targetCode, offline);
       setNotice(`${pack.name} → ${targetLang} is downloaded.`);
     } catch (e) {
       const msg = String(e);
@@ -151,53 +160,55 @@ export default function AppleTranslationPanel({ t }: { t: Tokens }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <p style={text(t)}>
-        Translates with the engine behind Apple's Translate app. It runs on your Mac: no API key, no
-        cost, works offline, and nothing leaves the computer. Each language pair is downloaded once.
-        It translates as-is; for rephrasing or formatting, use an LLM provider.
+        {offline
+          ? "Translates with the models behind Firefox's translations. They run on this computer's CPU: no API key, no cost, works offline, and nothing leaves the computer. Each language is a 20-55 MB download, done once. Languages other than English go through English (Ukrainian → English → German), so a pair like that needs both. It translates as-is; for rephrasing or formatting, use an LLM provider."
+          : "Translates with the engine behind Apple's Translate app. It runs on your Mac: no API key, no cost, works offline, and nothing leaves the computer. Each language pair is downloaded once. It translates as-is; for rephrasing or formatting, use an LLM provider."}
       </p>
 
       {/* ── Model ── */}
-      <FormGroup>
-        <FormLabel t={t}>Model</FormLabel>
-        <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-          {MODELS.map((m) => {
-            const active = model === m.value;
-            return (
-              <button
-                key={m.value}
-                type="button"
-                onClick={() => updateSettings({ apple_translation_model: m.value })}
-                style={{
-                  flex: 1,
-                  padding: "8px 12px",
-                  borderRadius: 8,
-                  textAlign: "left",
-                  cursor: "pointer",
-                  background: active ? `${t.accent}18` : t.inputBg,
-                  border: `1px solid ${active ? `${t.accent}66` : t.border}`,
-                }}
-              >
-                <span
+      {!offline && (
+        <FormGroup>
+          <FormLabel t={t}>Model</FormLabel>
+          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            {MODELS.map((m) => {
+              const active = model === m.value;
+              return (
+                <button
+                  key={m.value}
+                  type="button"
+                  onClick={() => updateSettings({ apple_translation_model: m.value })}
                   style={{
-                    display: "block",
-                    fontSize: 12,
-                    fontWeight: 600,
-                    color: active ? t.accent : t.text,
-                    fontFamily: "Inter, sans-serif",
+                    flex: 1,
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    textAlign: "left",
+                    cursor: "pointer",
+                    background: active ? `${t.accent}18` : t.inputBg,
+                    border: `1px solid ${active ? `${t.accent}66` : t.border}`,
                   }}
                 >
-                  {m.label}
-                </span>
-                <span style={text(t, 11)}>{m.desc}</span>
-              </button>
-            );
-          })}
-        </div>
-        <span style={{ ...text(t, 11), marginTop: 4, display: "block" }}>
-          macOS 26.4 and later have both. When only one is downloaded for a language pair, RevFly
-          uses that one.
-        </span>
-      </FormGroup>
+                  <span
+                    style={{
+                      display: "block",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: active ? t.accent : t.text,
+                      fontFamily: "Inter, sans-serif",
+                    }}
+                  >
+                    {m.label}
+                  </span>
+                  <span style={text(t, 11)}>{m.desc}</span>
+                </button>
+              );
+            })}
+          </div>
+          <span style={{ ...text(t, 11), marginTop: 4, display: "block" }}>
+            macOS 26.4 and later have both. When only one is downloaded for a language pair, RevFly
+            uses that one.
+          </span>
+        </FormGroup>
+      )}
 
       {/* ── Language packs ── */}
       <FormGroup>
@@ -205,7 +216,7 @@ export default function AppleTranslationPanel({ t }: { t: Tokens }) {
           <FormLabel t={t}>Language packs → {targetLang}</FormLabel>
           <div style={{ flex: 1 }} />
           {button(loading ? "Checking…" : "Refresh", () => void refresh(), { disabled: loading })}
-          {button("Open System Settings", () => void openAppleTranslationSettings())}
+          {!offline && button("Open System Settings", () => void openAppleTranslationSettings())}
         </div>
 
         {spoken && (
@@ -301,19 +312,23 @@ export default function AppleTranslationPanel({ t }: { t: Tokens }) {
             )}
           </div>
         )}
-        <span style={{ ...text(t, 11), marginTop: 8, display: "block" }}>
-          Download asks macOS to fetch the languages in a small window. You can also manage them in
-          System Settings › General › Language &amp; Region › Translation Languages.
-        </span>
+        {!offline && (
+          <span style={{ ...text(t, 11), marginTop: 8, display: "block" }}>
+            Download asks macOS to fetch the languages in a small window. You can also manage them
+            in System Settings › General › Language &amp; Region › Translation Languages.
+          </span>
+        )}
       </FormGroup>
 
       {/* ── When it fails ── */}
       <FormGroup>
-        <FormLabel t={t}>If Apple Translation fails</FormLabel>
+        <FormLabel t={t}>
+          If {offline ? "offline translation" : "Apple Translation"} fails
+        </FormLabel>
         <FieldSelect
           value={settings.apple_fallback_provider || ""}
           onChange={(v) => updateSettings({ apple_fallback_provider: v })}
-          options={FALLBACKS}
+          options={offline ? FALLBACKS.filter((f) => f.value !== "Apple Intelligence") : FALLBACKS}
           t={t}
         />
         <span style={{ ...text(t, 11), marginTop: 4, display: "block" }}>

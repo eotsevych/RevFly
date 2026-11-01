@@ -641,6 +641,21 @@ export default function GeneralTab({ t }: { t: Tokens }) {
           />
         </Row>
         <Row
+          label="Keep my clipboard"
+          hint={
+            settings.auto_paste
+              ? "After auto-paste, put back what was on the clipboard: text, images or files you copied"
+              : "Works with Auto-paste: without it, the dictated text has to stay on the clipboard for you to paste"
+          }
+          t={t}
+        >
+          <Toggle
+            value={settings.keep_clipboard ?? false}
+            onChange={(v) => updateSettings({ keep_clipboard: v })}
+            accent={t.accent}
+          />
+        </Row>
+        <Row
           label="Show hints"
           hint="Show how to finish a recording on the pill for your first few recordings, and again after you change a hotkey"
           t={t}

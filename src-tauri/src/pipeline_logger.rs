@@ -276,80 +276,44 @@ pub fn log_stage_event(data_dir: &Path, tag: &str, message: &str) {
     }
 }
 
-pub fn generate_chunk_diagnostics(
+/// Diagnostics for a recording transcribed chunk by chunk (chunking on): the chunks `vad` planned.
+pub fn chunk_diagnostics(
     total_audio_sec: f32,
-    vad_trimmed_sec: f32,
-    silence_removed_sec: f32,
+    vad: &crate::vad::VadResult,
     raw_samples_count: usize,
 ) -> (Vec<ChunkDiagnosticEvent>, Vec<String>) {
+    use crate::chunking::Ending;
     let mut chunks = Vec::new();
-    let mut actions = Vec::new();
-
-    actions.push(format!("[CAPTURE] Mic recording completed: {:.2}s ({} samples @ 16kHz)", total_audio_sec, raw_samples_count));
-    actions.push(format!("[VAD] Silence analysis: cut {:.2}s dead air, kept {:.2}s active voice", silence_removed_sec, vad_trimmed_sec));
-
-    let active_duration = if vad_trimmed_sec > 0.0 { vad_trimmed_sec } else { total_audio_sec };
-
-    if active_duration <= 0.0 {
-        return (chunks, actions);
+    let mut actions = vec![
+        format!("[CAPTURE] Mic recording completed: {:.2}s ({} samples @ 16kHz)", total_audio_sec, raw_samples_count),
+        format!("[VAD] Silence analysis: cut {:.2}s dead air, kept {:.2}s active voice", vad.silence_removed_sec, vad.trimmed_duration_sec),
+    ];
+    if vad.chunks.len() == 1 {
+        actions.push(format!("[TRACK] {:.2}s is 40 s or less, so it went to the model in one piece", vad.trimmed_duration_sec));
     }
-
-    let mut remaining = active_duration;
-    let mut current_offset = 0.0f32;
-    let mut idx = 1;
-
-    while remaining > 0.0 {
-        if remaining > 10.0 {
-            // Cut by 10s safety limit
-            chunks.push(ChunkDiagnosticEvent {
-                chunk_index: idx,
-                trigger_reason: "Safety Limit (10.0s continuous)".to_string(),
-                duration_sec: 10.0,
-                has_overlap: idx > 1,
-                overlap_ms: 400,
-                silence_detected_ms: 0,
-                rms_energy: 0.048,
-                timestamp: current_timestamp(),
-                detail: format!("Continuous speech reached 10.0s safety cap without pause. Cut chunk #{} with 400ms overlap retained for continuity.", idx),
-            });
-            actions.push(format!("[CHUNK #{}] Cut at 10.0s safety limit (Continuous speech, buffered 400ms overlap)", idx));
-            remaining -= 9.6;
-            current_offset += 9.6;
-        } else if remaining > 4.5 {
-            // Cut by natural silence pause
-            let chunk_dur = (remaining * 0.6).min(8.0).max(3.0);
-            chunks.push(ChunkDiagnosticEvent {
-                chunk_index: idx,
-                trigger_reason: "Silence Pause (500ms detected)".to_string(),
-                duration_sec: chunk_dur,
-                has_overlap: idx > 1,
-                overlap_ms: if idx > 1 { 400 } else { 0 },
-                silence_detected_ms: 520,
-                rms_energy: 0.035,
-                timestamp: current_timestamp(),
-                detail: format!("Silence pause >= 500ms detected at {:.1}s. Emitted chunk #{} for background transcription.", current_offset + chunk_dur, idx),
-            });
-            actions.push(format!("[CHUNK #{}] Emitted {:.2}s chunk on 500ms silence pause trigger", idx, chunk_dur));
-            remaining -= chunk_dur;
-            current_offset += chunk_dur;
-        } else {
-            // Final chunk flushed at end
-            chunks.push(ChunkDiagnosticEvent {
-                chunk_index: idx,
-                trigger_reason: "Flush (Recording ended)".to_string(),
-                duration_sec: remaining,
-                has_overlap: idx > 1,
-                overlap_ms: if idx > 1 { 400 } else { 0 },
-                silence_detected_ms: 0,
-                rms_energy: 0.028,
-                timestamp: current_timestamp(),
-                detail: format!("Recording ended. Flushed final {:.2}s chunk to complete transcription pipeline.", remaining),
-            });
-            actions.push(format!("[CHUNK #{}] Flushed final {:.2}s audio segment to pipeline", idx, remaining));
-            remaining = 0.0;
-        }
-        idx += 1;
+    let secs = |samples: usize| samples as f32 / 16000.0;
+    for (i, chunk) in vad.chunks.iter().enumerate() {
+        let audio = &vad.samples[chunk.range.clone()];
+        let rms = (audio.iter().map(|x| x * x).sum::<f32>() / audio.len().max(1) as f32).sqrt();
+        let (start, end) = (secs(chunk.range.start), secs(chunk.range.end));
+        let (trigger_reason, silence_detected_ms, ends) = match chunk.ending {
+            Ending::Pause { gap_ms } => ("Pause", gap_ms, format!("cut in the middle of a {} ms pause", gap_ms)),
+            Ending::HardCut => ("Hard cut", 0, "cut without a pause: 40 s of speech with no usable pause".to_string()),
+            Ending::End => ("End of recording", 0, "ends with the recording".to_string()),
+        };
+        let detail = format!("{:.2}s to {:.2}s, {}.", start, end, ends);
+        actions.push(format!("[CHUNK #{}] {:.2}s ({})", i + 1, end - start, detail));
+        chunks.push(ChunkDiagnosticEvent {
+            chunk_index: i + 1,
+            trigger_reason: trigger_reason.to_string(),
+            duration_sec: end - start,
+            has_overlap: false,
+            overlap_ms: 0,
+            silence_detected_ms,
+            rms_energy: rms,
+            timestamp: current_timestamp(),
+            detail,
+        });
     }
-
     (chunks, actions)
 }

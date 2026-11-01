@@ -25,8 +25,11 @@ const TRANSLATION_SERVICES = [
   { value: "LLM", label: "LLM" },
   { value: "Custom API", label: "Custom API" },
 ];
-// Offered only where Apple's on-device translation works (macOS 26+).
-const APPLE_SERVICE = { value: "Apple", label: "Apple Native" };
+// Offered only where Apple's on-device engines work (macOS 26+).
+const APPLE_SERVICES = [
+  { value: "Apple", label: "Apple Native" },
+  { value: "Apple Intelligence", label: "Apple Intelligence" },
+];
 
 const TARGET_LANGUAGES = [
   "English",
@@ -86,7 +89,13 @@ export default function AudioLabTab({
   const [rawUploadName, setRawUploadName] = useState<string | null>(null);
   const [trService, setTrService] = useState(() => {
     const provider = (settings.translation_provider || "").toLowerCase();
-    return provider === "apple" ? "Apple" : provider.includes("custom") ? "Custom API" : "LLM";
+    return provider === "apple"
+      ? "Apple"
+      : provider === "apple intelligence"
+        ? "Apple Intelligence"
+        : provider.includes("custom")
+          ? "Custom API"
+          : "LLM";
   });
   const [appleAvailable, setAppleAvailable] = useState(false);
   useEffect(() => {
@@ -95,7 +104,7 @@ export default function AudioLabTab({
       .catch(() => setAppleAvailable(false));
   }, []);
   const trServices = appleAvailable
-    ? [...TRANSLATION_SERVICES, APPLE_SERVICE]
+    ? [...TRANSLATION_SERVICES, ...APPLE_SERVICES]
     : TRANSLATION_SERVICES;
   const [trTarget, setTrTarget] = useState(settings.target_lang || "English");
   const [trFrom, setTrFrom] = useState<"spoken" | "result">("spoken");
@@ -169,7 +178,7 @@ export default function AudioLabTab({
     const buf = await f.arrayBuffer();
     const b64 = arrayBufferToBase64(buf);
     try {
-      const saved = await triggerSaveLabCustomAudio(b64);
+      const saved = await triggerSaveLabCustomAudio(b64, f.name);
       setRawUploadName(f.name);
       await refreshLab();
       if (saved) setSelected(saved);
@@ -216,6 +225,7 @@ export default function AudioLabTab({
         annotate_ambiguity: ambiguity,
         normalize_structured_values: structured,
         noise_reduction: noiseReduction,
+        chunking: !!settings.audio_chunking,
       });
       if (res) {
         setResult(res);
@@ -585,7 +595,7 @@ export default function AudioLabTab({
             <input
               ref={fileRef}
               type="file"
-              accept="audio/*,video/*,.wav,.mp3,.m4a,.ogg,.webm"
+              accept=".wav,.mp3,.m4a,.mp4,.mov,.aac,.flac,.ogg,.aiff,.aif"
               onChange={handleFile}
               style={{ display: "none" }}
             />
@@ -598,10 +608,13 @@ export default function AudioLabTab({
                 fontWeight: rawUploadName ? 600 : 400,
               }}
             >
-              {rawUploadName ? "Uploaded: " + rawUploadName : "Drop a .wav/.mp3 or click to upload"}
+              {rawUploadName
+                ? "Uploaded: " + rawUploadName
+                : "Drop an audio file (WAV, MP3, M4A, FLAC, Ogg, AIFF) or click to upload"}
             </p>
             <p style={{ fontSize: 11, color: t.textDim, margin: "4px 0 0" }}>
-              Saved as lab_custom.wav
+              Listed as "Opened File"; long files are transcribed in chunks when Audio chunking is
+              on
             </p>
           </div>
         </div>

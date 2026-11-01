@@ -513,6 +513,8 @@ enum AudioCmd {
     Start {
         app_handle: AppHandle,
         device_name: Option<String>,
+        /// Noise reduction is on: the audio is denoised while it's recorded.
+        denoise: bool,
         reply: Sender<Result<StreamInfo, String>>,
     },
     Stop {
@@ -591,11 +593,15 @@ impl CaptureStats {
 }
 
 impl CapturedAudio {
-    fn new(speech_raw: Vec<f32>, native: Vec<f32>, native_rate: u32, denoise: Option<f32>) -> Self {
+    /// `live` is the 48 kHz `native` audio's denoising done while recording, if it was.
+    fn new(speech_raw: Vec<f32>, native: Vec<f32>, native_rate: u32, denoise: Option<f32>, live: Option<crate::denoise::LiveDenoise>) -> Self {
         let (speech_raw, native) = match denoise {
             // Denoise the full-bandwidth copy, then derive the 16 kHz speech from it.
             Some(wet) if !native.is_empty() => {
-                let clean = crate::denoise::denoise(&native, native_rate, wet);
+                let clean = match live {
+                    Some(live) if native_rate == 48000 => live.finish(&native, wet),
+                    _ => crate::denoise::denoise(&native, native_rate, wet),
+                };
                 let speech = crate::denoise::resample(&clean, native_rate, 16000).unwrap_or(speech_raw);
                 (speech, clean)
             }
@@ -650,7 +656,9 @@ impl AudioRecorder {
 
         // Dedicated audio recording thread so cpal::Stream stays on one thread
         thread::spawn(move || {
-            let mut active_stream: Option<cpal::Stream> = None;
+            let mut active_stream: Option<OpenStream> = None;
+            // The last recording's stream, paused, for the next one (see keep_warm).
+            let mut warm: Option<OpenStream> = None;
             let buffer = buffer_thread;
             let native_buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
             let mut native_rate = 16000;
@@ -665,15 +673,33 @@ impl AudioRecorder {
             // window in the buffer is measured from here).
             let mut capture_started: Option<Instant> = None;
             let mut restarts = 0u32;
+            // Denoising of this recording's 48 kHz audio done while recording (see feed_live_denoise).
+            let mut live: Option<crate::denoise::LiveDenoise> = None;
+            let mut live_wanted = false;
+            // The start chime was already notched out of the 48 kHz audio, before it was denoised.
+            let mut native_chime_done = false;
 
-            while let Ok(cmd) = cmd_rx.recv() {
+            loop {
+                let cmd = match cmd_rx.recv_timeout(LIVE_DENOISE_TICK) {
+                    Ok(cmd) => cmd,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        if live_wanted && native_valid && native_rate == 48000 && is_rec_thread.load(Ordering::SeqCst) {
+                            feed_live_denoise(&mut live, &mut native_chime_done, &native_buffer, &chime_until_thread, capture_started);
+                        }
+                        continue;
+                    }
+                    Err(_) => break,
+                };
                 match cmd {
-                    AudioCmd::Start { app_handle, device_name, reply } => {
+                    AudioCmd::Start { app_handle, device_name, denoise, reply } => {
+                        live = None;
+                        live_wanted = denoise;
+                        native_chime_done = false;
                         stop_mic_test();
                         // A stream still open here was never stopped; it would keep appending to
                         // the shared buffers alongside the new one and double the audio.
                         if let Some(stale) = active_stream.take() {
-                            let _ = stale.pause();
+                            let _ = stale.stream.pause();
                             log::warn!("Closed a microphone stream left open by an earlier recording");
                         }
                         if let Ok(mut b) = buffer.lock() {
@@ -703,24 +729,35 @@ impl AudioRecorder {
                             can_reopen: true,
                         };
 
-                        let res = start_stream_inner(
-                            &mut active_stream,
-                            Arc::clone(&buffer),
-                            Arc::clone(&native_buffer),
-                            Arc::clone(&is_rec_thread),
-                            Arc::clone(&stop_at_thread),
-                            app_handle,
-                            device_name,
-                            control,
-                        );
+                        let resumed = warm.take().and_then(|w| resume_stream(w, &device_name, control.id));
+                        let was_warm = resumed.is_some();
+                        let res = match resumed {
+                            Some(open) => {
+                                let info = open.info.clone();
+                                spawn_monitor(Arc::clone(&is_rec_thread), Arc::clone(&buffer), app_handle, info.clone(), control);
+                                active_stream = Some(open);
+                                Ok(info)
+                            }
+                            None => start_stream_inner(
+                                &mut active_stream,
+                                Arc::clone(&buffer),
+                                Arc::clone(&native_buffer),
+                                Arc::clone(&is_rec_thread),
+                                Arc::clone(&stop_at_thread),
+                                app_handle,
+                                device_name,
+                                control,
+                            ),
+                        };
 
                         match &res {
                             Ok(info) => {
                                 native_rate = info.sample_rate;
                                 capture_started = Some(Instant::now());
                                 log::info!(
-                                    "Microphone stream \"{}\" opened in {} ms at {} Hz, {} ch",
+                                    "Microphone stream \"{}\" {} in {} ms at {} Hz, {} ch",
                                     info.device,
+                                    if was_warm { "resumed" } else { "opened" },
                                     open_started.elapsed().as_millis(),
                                     info.sample_rate,
                                     info.channels
@@ -742,8 +779,14 @@ impl AudioRecorder {
                         is_rec_thread.store(false, Ordering::SeqCst);
                         generation.fetch_add(1, Ordering::SeqCst);
                         current = None;
-                        if let Some(stream) = active_stream.take() {
-                            let _ = stream.pause();
+                        // A stream that had to be reopened mid-recording isn't trusted for the next one.
+                        if let Some(open) = active_stream.take() {
+                            warm = if restarts == 0 {
+                                keep_warm(open)
+                            } else {
+                                let _ = open.stream.pause();
+                                None
+                            };
                         }
                         let mut speech = buffer.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
                         let stats = CaptureStats::measure(&speech);
@@ -754,15 +797,23 @@ impl AudioRecorder {
                         if let (Some(until), Some(started)) = (chime_until, capture_started.take()) {
                             let window = until.saturating_duration_since(started).as_secs_f64();
                             remove_start_chime(&mut speech, 16000, (window * 16000.0) as usize);
-                            remove_start_chime(&mut native, native_rate, (window * native_rate as f64) as usize);
+                            if !native_chime_done {
+                                remove_start_chime(&mut native, native_rate, (window * native_rate as f64) as usize);
+                            }
                         }
+                        // Usable only when it saw exactly this audio: same stream, chime already out.
+                        let live = live.take().filter(|l| {
+                            native_valid && native_rate == 48000 && l.fed() <= native.len() && (native_chime_done || chime_until.is_none())
+                        });
+                        let while_recording = live.is_some();
                         let processing_started = Instant::now();
-                        let mut captured = CapturedAudio::new(speech, native, native_rate, denoise);
+                        let mut captured = CapturedAudio::new(speech, native, native_rate, denoise, live);
                         captured.stats = stats;
                         let plan = captured.level_plan();
                         log::info!(
-                            "Noise reduction {:?}, voice leveling gain {:+.1} dB, make-up {:+.1} dB, in {} ms",
+                            "Noise reduction {:?}{}, voice leveling gain {:+.1} dB, make-up {:+.1} dB, in {} ms",
                             denoise,
+                            if while_recording { " (mostly done while recording)" } else { "" },
                             plan.gain_db,
                             plan.makeup_db,
                             processing_started.elapsed().as_millis()
@@ -770,11 +821,14 @@ impl AudioRecorder {
                         let _ = reply.send(captured);
                     }
                     AudioCmd::Cancel => {
+                        live = None;
                         is_rec_thread.store(false, Ordering::SeqCst);
                         generation.fetch_add(1, Ordering::SeqCst);
                         current = None;
-                        if let Some(stream) = active_stream.take() {
-                            let _ = stream.pause();
+                        // Cancelled recordings include microphone failures: the next one opens afresh.
+                        warm = None;
+                        if let Some(open) = active_stream.take() {
+                            let _ = open.stream.pause();
                         }
                         if let Ok(mut b) = buffer.lock() {
                             b.clear();
@@ -790,8 +844,8 @@ impl AudioRecorder {
                         };
                         // Closing and reopening the input makes macOS bring back e.g. a Bluetooth
                         // headset's dropped call-audio link. Audio keeps appending to the same buffers.
-                        if let Some(stream) = active_stream.take() {
-                            let _ = stream.pause();
+                        if let Some(open) = active_stream.take() {
+                            let _ = open.stream.pause();
                         }
                         restarts += 1;
                         let reopen_started = Instant::now();
@@ -890,12 +944,14 @@ impl AudioRecorder {
         self.is_recording.load(Ordering::SeqCst)
     }
 
-    pub fn start_recording(&self, app_handle: AppHandle, device_name: Option<String>) -> Result<StreamInfo, String> {
+    /// `denoise`: noise reduction is on, so the audio is denoised while it's recorded.
+    pub fn start_recording(&self, app_handle: AppHandle, device_name: Option<String>, denoise: bool) -> Result<StreamInfo, String> {
         let (reply_tx, reply_rx) = channel();
         self.cmd_tx
             .send(AudioCmd::Start {
                 app_handle,
                 device_name,
+                denoise,
                 reply: reply_tx,
             })
             .map_err(|e| format!("Failed to send start command to audio thread: {}", e))?;
@@ -923,6 +979,59 @@ impl AudioRecorder {
     }
 }
 
+/// An input stream and what's needed to play it again for the next recording.
+struct OpenStream {
+    stream: cpal::Stream,
+    info: StreamInfo,
+    /// The microphone the recording asked for (None: the system default).
+    requested: Option<String>,
+    resampler: Arc<Mutex<ResamplerState>>,
+    /// Generation of the recording this stream serves, which its error callback reports for.
+    id: Arc<AtomicU64>,
+    /// When it was paused, and `DEVICE_CHANGES` then.
+    paused: Option<(Instant, u64)>,
+}
+
+/// A paused stream is played again only this long after the last recording.
+const WARM_STREAM_FOR: Duration = Duration::from_secs(30 * 60);
+/// Bumped whenever the audio devices change, so a paused stream on a changed setup isn't reused.
+static DEVICE_CHANGES: AtomicU64 = AtomicU64::new(0);
+
+/// Pauses a stream that finished a recording, to be played again by the next one: that skips
+/// opening the microphone (about 150 ms). A stream that can't pause is closed instead.
+fn keep_warm(mut open: OpenStream) -> Option<OpenStream> {
+    if let Err(e) = open.stream.pause() {
+        log::warn!("Couldn't pause the microphone stream, closing it: {}", e);
+        return None;
+    }
+    open.paused = Some((Instant::now(), DEVICE_CHANGES.load(Ordering::SeqCst)));
+    Some(open)
+}
+
+/// The paused stream playing again for recording `id`, when it's still what opening the
+/// microphone now would give: same choice, device and format, no device changes, not too old.
+fn resume_stream(open: OpenStream, device_name: &Option<String>, id: u64) -> Option<OpenStream> {
+    let (paused_at, changes) = open.paused?;
+    if &open.requested != device_name || paused_at.elapsed() > WARM_STREAM_FOR || changes != DEVICE_CHANGES.load(Ordering::SeqCst) {
+        return None;
+    }
+    let (device, missing) = resolve_input_device_reporting_fallback(device_name.as_deref())?;
+    let config = device.default_input_config().ok()?;
+    let same = device.name().ok().as_deref() == Some(open.info.device.as_str())
+        && missing == open.info.missing_device
+        && config.sample_rate().0 == open.info.sample_rate
+        && config.channels() == open.info.channels;
+    if !same {
+        return None;
+    }
+    if let Ok(mut r) = open.resampler.lock() {
+        *r = ResamplerState::new();
+    }
+    open.id.store(id, Ordering::SeqCst);
+    open.stream.play().ok()?;
+    Some(OpenStream { paused: None, ..open })
+}
+
 /// How a stream's monitor may ask the recorder thread to reopen it.
 struct StreamControl {
     reopen_tx: Sender<AudioCmd>,
@@ -938,7 +1047,7 @@ struct StreamControl {
 
 #[allow(clippy::too_many_arguments)]
 fn start_stream_inner(
-    active_stream: &mut Option<cpal::Stream>,
+    active_stream: &mut Option<OpenStream>,
     buffer: Arc<Mutex<Vec<f32>>>,
     native_buffer: Arc<Mutex<Vec<f32>>>,
     is_rec: Arc<AtomicBool>,
@@ -986,7 +1095,10 @@ fn start_stream_inner(
     let err_rec = Arc::clone(&is_rec);
     let err_reopen_tx = control.reopen_tx.clone();
     let err_generation = Arc::clone(&control.generation);
-    let (err_id, err_can_reopen) = (control.id, control.can_reopen);
+    // Shared so a stream resumed for a later recording reports for that one (see resume_stream).
+    let stream_id = Arc::new(AtomicU64::new(control.id));
+    let err_stream_id = Arc::clone(&stream_id);
+    let err_can_reopen = control.can_reopen;
     let err_report = MicReport {
         problem: MicProblem::Disconnected,
         device: device_label.clone(),
@@ -995,6 +1107,7 @@ fn start_stream_inner(
     };
     let err_fn = move |err: cpal::StreamError| {
         log::error!("Audio stream error: {}", err);
+        let err_id = err_stream_id.load(Ordering::SeqCst);
         let is_current = err_generation.load(Ordering::SeqCst) == err_id;
         if matches!(err, cpal::StreamError::DeviceNotAvailable) && err_rec.load(Ordering::Relaxed) && is_current {
             report_mic_problem(&err_app, &err_reported, err_report.clone());
@@ -1048,12 +1161,24 @@ fn start_stream_inner(
         .play()
         .map_err(|e| format!("Failed to play input audio stream: {}", e))?;
 
-    *active_stream = Some(stream);
+    *active_stream = Some(OpenStream {
+        stream,
+        info: stream_info.clone(),
+        requested: device_name,
+        resampler: resampler_state,
+        id: stream_id,
+        paused: None,
+    });
+    spawn_monitor(is_rec, buffer, app_handle, stream_info.clone(), control);
+    Ok(stream_info)
+}
 
-    // Monitoring thread for the pill's equalizer (loudness plus pitch-band energy of the latest audio)
-    // and the microphone health check: real audio must arrive within MIC_CHECK_AFTER and keep coming.
-    let is_rec_monitor = Arc::clone(&is_rec);
-    let buf_monitor = Arc::clone(&buffer);
+/// Monitoring thread for the pill's equalizer (loudness plus pitch-band energy of the latest audio)
+/// and the microphone health check: real audio must arrive within MIC_CHECK_AFTER and keep coming.
+fn spawn_monitor(is_rec: Arc<AtomicBool>, buffer: Arc<Mutex<Vec<f32>>>, app_handle: AppHandle, info: StreamInfo, control: StreamControl) {
+    let (device_label, missing_device) = (info.device, info.missing_device);
+    let is_rec_monitor = is_rec;
+    let buf_monitor = buffer;
     // A stream reopened mid-recording doesn't restart the no-speech alert.
     let no_speech_after = match NO_SPEECH_ALERT_SECS.load(Ordering::Relaxed) {
         secs if secs > 0 && control.resumed_from.is_none() => Some(Duration::from_secs(secs)),
@@ -1138,8 +1263,56 @@ fn start_stream_inner(
             let _ = app_handle.emit("audio-level", levels);
         }
     });
+}
 
-    Ok(stream_info)
+/// How often the recorder denoises the audio that arrived meanwhile.
+const LIVE_DENOISE_TICK: Duration = Duration::from_millis(200);
+/// With no start chime marked by then, none will be (it's marked within START_CHIME_MAX_WAIT).
+const LIVE_DENOISE_AFTER: Duration = Duration::from_secs(3);
+/// After the chime window ends: its fade-out plus the input's latency.
+const LIVE_DENOISE_CHIME_MARGIN: Duration = Duration::from_millis(300);
+
+/// Denoises the 48 kHz audio recorded since the last call, so stopping has little left to do.
+/// It starts once the start chime's part of the audio is final; the chime is notched out of the
+/// recording's start first, as stopping would have done before denoising.
+fn feed_live_denoise(
+    live: &mut Option<crate::denoise::LiveDenoise>,
+    chime_done: &mut bool,
+    native: &Mutex<Vec<f32>>,
+    chime_until: &Mutex<Option<Instant>>,
+    started: Option<Instant>,
+) {
+    let Some(started) = started else {
+        return;
+    };
+    if live.is_none() {
+        let chime = chime_until.lock().ok().and_then(|c| *c);
+        let settled = match chime {
+            Some(until) => Instant::now() > until + LIVE_DENOISE_CHIME_MARGIN,
+            None => started.elapsed() > LIVE_DENOISE_AFTER,
+        };
+        if !settled {
+            return;
+        }
+        if let Some(until) = chime {
+            let Ok(mut b) = native.lock() else {
+                return;
+            };
+            let window = until.saturating_duration_since(started).as_secs_f64();
+            remove_start_chime(&mut b, 48000, (window * 48000.0) as usize);
+            *chime_done = true;
+        }
+        *live = Some(crate::denoise::LiveDenoise::new());
+    }
+    let Some(l) = live.as_mut() else {
+        return;
+    };
+    // Copied out so the audio callback never waits on the denoising.
+    let more = match native.lock() {
+        Ok(b) => b.get(l.fed()..).map(<[f32]>::to_vec).unwrap_or_default(),
+        Err(_) => return,
+    };
+    l.feed(&more);
 }
 
 /// Added to the start chime's length: output latency plus the room's echo.
@@ -1574,6 +1747,7 @@ pub fn start_device_monitor(app_handle: AppHandle) {
                 let current_outputs = list_output_devices();
 
                 if current_inputs != last_inputs || current_outputs != last_outputs {
+                    DEVICE_CHANGES.fetch_add(1, Ordering::SeqCst);
                     log::info!(
                         "Audio devices changed: inputs={:?}, outputs={:?}",
                         current_inputs,
@@ -1841,7 +2015,7 @@ mod tests {
             })
             .collect();
         let speech_raw = resample_to_16k(&native, 48000);
-        let captured = CapturedAudio::new(speech_raw.clone(), native.clone(), 48000, Some(0.9));
+        let captured = CapturedAudio::new(speech_raw.clone(), native.clone(), 48000, Some(0.9), None);
 
         assert!((captured.speech.len() as i64 - speech_raw.len() as i64).abs() <= 32, "{} vs {}", captured.speech.len(), speech_raw.len());
         let (playback, rate) = captured.playback();

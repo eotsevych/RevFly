@@ -104,11 +104,16 @@ revfly_sign_app() {
 
   revfly_sign_bundle --deep "$app"
 
-  # The Apple Translation helper: --deep above gave it the app's identifier and no hardened
-  # runtime. Sign it on its own, then seal the bundle again around it.
-  local helper="$app/Contents/MacOS/revfly-translate"
-  if [ -f "$helper" ]; then
-    revfly_codesign --options runtime --identifier "$REVFLY_BUNDLE_ID.translate" "$helper"
+  # The helpers (Apple Translation, Neural Engine speech recognition): --deep above gave them the
+  # app's identifier and no hardened runtime. Sign each on its own, then seal the bundle again.
+  local helper resigned=""
+  for helper in translate asr; do
+    if [ -f "$app/Contents/MacOS/revfly-$helper" ]; then
+      revfly_codesign --options runtime --identifier "$REVFLY_BUNDLE_ID.$helper" "$app/Contents/MacOS/revfly-$helper"
+      resigned=1
+    fi
+  done
+  if [ -n "$resigned" ]; then
     revfly_sign_bundle "$app"
   fi
 }
