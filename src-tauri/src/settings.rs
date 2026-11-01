@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
@@ -318,6 +318,11 @@ fn default_noise_reduction() -> String {
     "off".to_string()
 }
 
+/// The "Don't save" storage mode: nothing about a dictation is written to disk.
+pub fn is_private(storage_mode: &str) -> bool {
+    storage_mode == "private" || storage_mode == "private_mode"
+}
+
 pub fn get_data_dir() -> PathBuf {
     if let Some(base) = dirs::data_dir() {
         base.join("revfly")
@@ -392,37 +397,45 @@ impl AppSettings {
     }
 
     pub fn load() -> Self {
-        let config_dir = get_config_dir();
-        let settings_path = config_dir.join("settings.json");
+        Self::load_from(&get_config_dir().join("settings.json"))
+    }
 
-        if settings_path.exists() {
-            if let Ok(content) = fs::read_to_string(&settings_path) {
-                let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&content) else {
-                    return Self::default();
-                };
+    fn load_from(settings_path: &Path) -> Self {
+        if let Ok(content) = fs::read_to_string(settings_path) {
+            let parsed = serde_json::from_str::<serde_json::Value>(&content).ok().and_then(|mut json| {
                 let split_sounds = split_sound_toggle(&mut json);
-                if let Ok(mut settings) = serde_json::from_value::<AppSettings>(json) {
-                    if settings.migrate() | split_sounds {
-                        let _ = settings.save();
-                    }
-                    return settings;
+                serde_json::from_value::<AppSettings>(json).ok().map(|s| (s, split_sounds))
+            });
+            if let Some((mut settings, split_sounds)) = parsed {
+                if settings.migrate() | split_sounds {
+                    let _ = settings.save_to(settings_path);
                 }
+                return settings;
             }
+            // Kept aside instead of overwritten by the defaults below, so keys and hotkeys can be recovered.
+            log::error!("settings.json could not be read; moved to settings.json.bad and started with defaults");
+            let _ = fs::rename(settings_path, settings_path.with_extension("json.bad"));
         }
 
         let default_settings = Self::default();
-        let _ = default_settings.save();
+        let _ = default_settings.save_to(settings_path);
         default_settings
     }
 
     pub fn save(&self) -> Result<(), String> {
-        let config_dir = get_config_dir();
-        if !config_dir.exists() {
-            let _ = fs::create_dir_all(&config_dir);
+        self.save_to(&get_config_dir().join("settings.json"))
+    }
+
+    /// Writes a temporary file and renames it over the old one, so a crash mid-write never leaves
+    /// a half-written settings file.
+    fn save_to(&self, settings_path: &Path) -> Result<(), String> {
+        if let Some(dir) = settings_path.parent() {
+            let _ = fs::create_dir_all(dir);
         }
-        let settings_path = config_dir.join("settings.json");
         let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        fs::write(settings_path, json).map_err(|e| e.to_string())?;
+        let tmp = settings_path.with_extension("json.tmp");
+        fs::write(&tmp, json).map_err(|e| e.to_string())?;
+        fs::rename(&tmp, settings_path).map_err(|e| e.to_string())?;
         Ok(())
     }
 }
@@ -505,5 +518,25 @@ mod tests {
         // Seen.
         s.last_version = Some(env!("CARGO_PKG_VERSION").to_string());
         assert!(!s.should_show_whats_new());
+    }
+
+    #[test]
+    fn unreadable_settings_are_kept_aside_and_saves_are_whole() {
+        let dir = std::env::temp_dir().join(format!("revfly_settings_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, "{\"model_name\": 5}").unwrap();
+
+        let loaded = AppSettings::load_from(&path);
+        assert_eq!(std::fs::read_to_string(dir.join("settings.json.bad")).unwrap(), "{\"model_name\": 5}");
+        assert_eq!(loaded.model_name, AppSettings::default().model_name);
+
+        let mut changed = loaded;
+        changed.target_lang = "German".to_string();
+        changed.save_to(&path).unwrap();
+        assert!(!dir.join("settings.json.tmp").exists());
+        assert_eq!(AppSettings::load_from(&path).target_lang, "German");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -1,15 +1,22 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Tokens } from "@/lib/tokens";
-import { Section, Row, FieldSelect } from "./SettingsPrimitives";
+import { Section, Row, FieldSelect, CopyButton } from "./SettingsPrimitives";
 import { useSettingsContext } from "./useSettingsContext";
-import { triggerClearHistory, triggerOpenAudioFolder } from "@/lib/tauri";
+import { SELECTABLE } from "./selectable";
+import {
+  fetchHistory,
+  fetchHistoryAudioBytes,
+  triggerClearHistory,
+  triggerOpenAudioFolder,
+  type HistoryItem,
+} from "@/lib/tauri";
 
 const PURGE_OPTIONS = [
   { value: "7", label: "1 week" },
   { value: "14", label: "2 weeks" },
   { value: "30", label: "1 month" },
   { value: "90", label: "3 months" },
-  { value: "-1", label: "Never" },
+  { value: "0", label: "Never" },
 ];
 
 const FORMAT_OPTIONS = [
@@ -33,13 +40,22 @@ const FORMAT_OPTIONS = [
 export default function StorageTab({ t }: { t: Tokens }) {
   const { settings, updateSettings, logs, refreshLogs } = useSettingsContext();
   const [cleared, setCleared] = useState(false);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [audioBytes, setAudioBytes] = useState(0);
+
+  // A new log entry means a dictation finished, and its history row is saved by then.
+  const latestLogId = logs[0]?.id;
+  useEffect(() => {
+    fetchHistory(50).then(setHistory);
+    fetchHistoryAudioBytes().then(setAudioBytes);
+  }, [latestLogId, cleared]);
 
   const rawMode = settings.storage_mode || "text_only";
   const currentMode =
     rawMode === "text_and_audio" ? "text_audio" : rawMode === "private_mode" ? "private" : rawMode;
   const capMb = settings.storage_cap_mb || 500;
-  const usedMb =
-    logs.length === 0 ? 0 : Math.min(capMb, Math.max(1, Math.round(logs.length * 2.8)));
+  const rawUsedMb = audioBytes / (1024 * 1024);
+  const usedMb = rawUsedMb < 10 ? Math.round(rawUsedMb * 10) / 10 : Math.round(rawUsedMb);
   const pct = Math.min(100, Math.round((usedMb / capMb) * 100));
 
   const handleOpenFolder = async () => {
@@ -63,6 +79,71 @@ export default function StorageTab({ t }: { t: Tokens }) {
 
   return (
     <div>
+      <Section title="Saved History" t={t}>
+        {history.length === 0 ? (
+          <div
+            style={{ padding: 16, fontSize: 12, color: t.textDim, fontFamily: "Inter, sans-serif" }}
+          >
+            {currentMode === "private"
+              ? "Don't save is on, so dictations aren't kept."
+              : "Nothing saved yet."}
+          </div>
+        ) : (
+          <div style={{ maxHeight: 320, overflowY: "auto" }}>
+            {history.map((item, i) => (
+              <div
+                key={item.id}
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  alignItems: "flex-start",
+                  padding: "10px 16px",
+                  borderBottom: i === history.length - 1 ? "none" : `1px solid ${t.border}`,
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0, ...SELECTABLE }}>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      color: t.text,
+                      fontFamily: "Inter, sans-serif",
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {item.translated_text}
+                  </div>
+                  {item.raw_text !== item.translated_text && (
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: t.textDim,
+                        fontFamily: "Inter, sans-serif",
+                        marginTop: 2,
+                        wordBreak: "break-word",
+                      }}
+                    >
+                      {item.raw_text}
+                    </div>
+                  )}
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: t.textDim,
+                      fontFamily: "JetBrains Mono, monospace",
+                      marginTop: 4,
+                    }}
+                  >
+                    {new Date(Number(item.timestamp) * 1000).toLocaleString()} ·{" "}
+                    {item.duration.toFixed(1)} s{item.audio_path ? " · audio saved" : ""}
+                  </div>
+                </div>
+                <CopyButton text={item.translated_text} t={t} />
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+
       <Section title="Save Format" t={t}>
         {FORMAT_OPTIONS.map((opt, i) => {
           const isSelected = currentMode === opt.value;

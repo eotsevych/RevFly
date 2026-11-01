@@ -181,45 +181,13 @@ fn get_history(
 }
 
 #[tauri::command]
+fn get_history_audio_bytes(state: State<'_, AppState>) -> u64 {
+    state.controller.history_audio_bytes()
+}
+
+#[tauri::command]
 fn clear_history(state: State<'_, AppState>) -> Result<(), String> {
     state.controller.clear_history()
-}
-
-#[tauri::command]
-fn get_model_status(state: State<'_, AppState>) -> serde_json::Value {
-    let settings = state.controller.get_settings();
-    if settings.model_name == "parakeet-tdt-0.6b-v3" {
-        let exists = parakeet::ParakeetTranscriber::model_ready();
-        let path = parakeet::ParakeetTranscriber::get_model_dir();
-        serde_json::json!({
-            "model_name": settings.model_name,
-            "exists": exists,
-            "path": path.to_string_lossy(),
-        })
-    } else {
-        let exists = transcribe::Transcriber::model_exists(&settings.model_name);
-        let path = transcribe::Transcriber::get_model_path(&settings.model_name);
-        serde_json::json!({
-            "model_name": settings.model_name,
-            "exists": exists,
-            "path": path.to_string_lossy(),
-        })
-    }
-}
-
-#[tauri::command]
-async fn download_model(
-    app_handle: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
-    let settings = state.controller.get_settings();
-    if settings.model_name == "parakeet-tdt-0.6b-v3" {
-        let path = parakeet::ParakeetTranscriber::ensure_model(&app_handle).await?;
-        Ok(path.to_string_lossy().to_string())
-    } else {
-        let path = transcribe::Transcriber::ensure_model(&app_handle, &settings.model_name).await?;
-        Ok(path.to_string_lossy().to_string())
-    }
 }
 
 #[tauri::command]
@@ -232,25 +200,6 @@ fn get_audio_devices(app_handle: AppHandle, state: State<'_, AppState>) -> serde
         "input_devices": input_devices,
         "output_devices": output_devices,
     })
-}
-
-#[tauri::command]
-fn set_audio_device(
-    state: State<'_, AppState>,
-    kind: String,
-    name: String,
-) -> Result<(), String> {
-    state.controller.set_audio_device(&kind, &name)
-}
-
-#[tauri::command]
-fn open_preferences_window(app_handle: AppHandle) {
-    tray::open_preferences(&app_handle);
-}
-
-#[tauri::command]
-fn open_onboarding_window(app_handle: AppHandle) {
-    tray::open_onboarding(&app_handle);
 }
 
 /// Closes the welcome guide; closing it marks it done (see `tray::open_onboarding`).
@@ -331,28 +280,6 @@ fn play_test_sound() -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-fn is_model_loaded(state: State<'_, AppState>) -> bool {
-    state.controller.is_model_loaded()
-}
-
-#[tauri::command]
-fn eject_model(state: State<'_, AppState>) -> Result<(), String> {
-    state.controller.eject_model();
-    Ok(())
-}
-
-#[tauri::command]
-fn get_tray_state(state: State<'_, AppState>) -> serde_json::Value {
-    let loaded = state.controller.is_model_loaded();
-    let phase = { state.controller.get_phase() };
-    serde_json::json!({
-        "is_loaded": loaded,
-        "phase": phase,
-        "can_eject": loaded,
-    })
-}
-
 /// Whether RevFly opens when you log in. The system's login item is the source of truth, so it
 /// isn't kept in the settings file.
 #[tauri::command]
@@ -417,7 +344,7 @@ async fn download_specific_model(
     app_handle: AppHandle,
     model_name: String,
 ) -> Result<String, String> {
-    if model_name == "parakeet-tdt-0.6b-v3" {
+    if model_name == crate::model_download::PARAKEET_MODEL {
         let path = parakeet::ParakeetTranscriber::ensure_model(&app_handle).await?;
         Ok(path.to_string_lossy().to_string())
     } else {
@@ -437,14 +364,6 @@ fn get_audio_data(
 #[tauri::command]
 fn open_audio_folder(state: State<'_, AppState>) -> Result<(), String> {
     state.controller.open_audio_folder()
-}
-
-#[tauri::command]
-fn play_recorded_audio(
-    state: State<'_, AppState>,
-    filename: Option<String>,
-) -> Result<(), String> {
-    state.controller.play_recorded_audio(filename)
 }
 
 #[tauri::command]
@@ -578,28 +497,6 @@ fn get_gpu_devices() -> Vec<String> {
 #[tauri::command]
 fn get_parakeet_engine() -> String {
     parakeet::ParakeetTranscriber::engine_label()
-}
-
-#[tauri::command]
-fn post_process_transcript(
-    state: State<'_, AppState>,
-    text: String,
-) -> post_processor::PostProcessedTranscript {
-    let settings = state.controller.get_settings();
-    let config = post_processor::PostProcessorConfig {
-        normalization: text_normalizer::NormalizationOptions {
-            enabled: settings.text_normalization,
-            remove_fillers: settings.remove_filler_words,
-            convert_numbers: settings.convert_numbers,
-            remove_stutters: settings.remove_stutters,
-        },
-        apply_self_corrections: settings.apply_self_corrections,
-        remove_noise_markers: settings.remove_noise_markers,
-        collapse_redundancy: settings.collapse_redundancy,
-        annotate_ambiguity: settings.annotate_ambiguity,
-        normalize_structured_values: settings.normalize_structured_values,
-    };
-    post_processor::post_process(&text, config)
 }
 
 /// Runs a command from a second `revfly` process (see cli.rs) in this one.
@@ -741,10 +638,8 @@ pub fn run() {
             request_accessibility,
             open_accessibility_settings,
             get_history,
+            get_history_audio_bytes,
             clear_history,
-            get_model_status,
-            download_model,
-            open_onboarding_window,
             finish_onboarding,
             open_whats_new_window,
             dismiss_whats_new,
@@ -752,8 +647,6 @@ pub fn run() {
             take_settings_tab,
             set_practice_mode,
             get_audio_devices,
-            set_audio_device,
-            open_preferences_window,
             close_preferences_window,
             fit_pill_height,
             start_dragging_window,
@@ -763,7 +656,6 @@ pub fn run() {
             download_specific_model,
             get_audio_data,
             open_audio_folder,
-            play_recorded_audio,
             list_lab_audio_files,
             run_lab_experiment,
             lab_translate,
@@ -778,7 +670,6 @@ pub fn run() {
             get_hardware_profile,
             get_gpu_devices,
             get_parakeet_engine,
-            post_process_transcript,
             start_mic_test,
             stop_mic_test,
             play_test_sound,
@@ -787,9 +678,6 @@ pub fn run() {
             custom_models::import_model_file,
             custom_models::pick_and_import_model,
             custom_models::download_custom_model,
-            is_model_loaded,
-            eject_model,
-            get_tray_state,
             get_launch_at_login,
             set_launch_at_login,
             updater::get_update_status,

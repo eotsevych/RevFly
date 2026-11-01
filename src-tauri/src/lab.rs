@@ -386,7 +386,7 @@ pub async fn run_experiment(
         )
     };
 
-    let is_parakeet = req.model_name == "parakeet-tdt-0.6b-v3";
+    let is_parakeet = req.model_name == crate::model_download::PARAKEET_MODEL;
 
     if is_parakeet {
         // Single Model Policy: unload Whisper

@@ -1,5 +1,4 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -156,44 +155,5 @@ fn play_earcon(clip: &'static Earcon) -> Result<(), String> {
     // Keep the stream alive until the clip has been played out, plus a short tail for device latency.
     let clip_ms = (total_frames as u64 * 1000) / out_rate.max(1) as u64;
     std::thread::sleep(Duration::from_millis(clip_ms + 150));
-    Ok(())
-}
-
-/// Plays a WAV file with the platform's built-in player without blocking the caller.
-pub fn play_wav_file(path: &Path) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("afplay")
-            .arg(path)
-            .spawn()
-            .map_err(|e| format!("Failed to play audio with afplay: {}", e))?;
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        if std::process::Command::new("paplay").arg(path).spawn().is_err() {
-            std::process::Command::new("aplay")
-                .arg(path)
-                .spawn()
-                .map_err(|e| format!("Failed to play audio with paplay/aplay: {}", e))?;
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        // PlaySync keeps PowerShell alive until playback ends; Play() would exit and cut the sound off.
-        let ps_script = format!(
-            "(New-Object Media.SoundPlayer '{}').PlaySync()",
-            path.to_string_lossy().replace('\'', "''")
-        );
-        std::process::Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn()
-            .map_err(|e| format!("Failed to play audio with PowerShell: {}", e))?;
-    }
-
     Ok(())
 }

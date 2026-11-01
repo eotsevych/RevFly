@@ -377,7 +377,14 @@ impl TranslationRoute {
         } else if !settings.local_llm_url.trim().is_empty() {
             settings.local_llm_url.trim().to_string()
         } else {
-            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions".to_string()
+            String::new()
+        };
+        // A native Gemini endpoint takes the key in its URL, which request errors then show in
+        // logs and on the pill; Gemini's OpenAI-compatible endpoint takes it in a header.
+        let endpoint = if endpoint.is_empty() || (endpoint.contains("generativelanguage.googleapis.com") && !endpoint.contains("/openai")) {
+            GEMINI_OPENAI_ENDPOINT.to_string()
+        } else {
+            endpoint
         };
         let key = if !settings.llm_api_key.trim().is_empty() {
             settings.llm_api_key.trim().to_string()
@@ -552,16 +559,6 @@ impl TranslationRoute {
                     &settings.prompt_template,
                 )
                 .await
-            } else if self.endpoint.contains("generativelanguage.googleapis.com") && !self.endpoint.contains("/openai") {
-                crate::translate::translate_with_gemini(
-                    text,
-                    &self.key,
-                    &settings.source_lang,
-                    &settings.target_lang,
-                    &self.model,
-                    &settings.prompt_template,
-                )
-                .await
             } else {
                 crate::translate::translate_with_openai_compatible(
                     text,
@@ -724,6 +721,9 @@ fn mic_dropout_message(report: &crate::audio::MicReport) -> (&'static str, Strin
 const MIC_SETTING: &str = "Settings → General → Microphone input";
 /// How long an error that needs reading stays on screen.
 const LONG_ERROR_HOLD: Duration = Duration::from_secs(9);
+const GEMINI_OPENAI_ENDPOINT: &str = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+/// Recordings stop on their own after this long.
+const MAX_RECORDING: Duration = Duration::from_secs(15 * 60);
 /// How long the start chime waits for the mic's first audio before playing anyway.
 const START_CHIME_MAX_WAIT: Duration = Duration::from_millis(1500);
 /// How long the pill waits for a pick when the chosen microphone isn't connected.
@@ -804,6 +804,13 @@ fn show_long_error(app_handle: &AppHandle, session_id: &Arc<AtomicU64>, session:
 /// `show_long_error` with a full pill state payload (e.g. one that offers a Retry button).
 fn show_long_error_payload(app_handle: &AppHandle, session_id: &Arc<AtomicU64>, session: u64, payload: serde_json::Value) {
     show_long_message(app_handle, session_id, session, payload, LONG_ERROR_HOLD);
+}
+
+/// Ends a recording that produced no text. Idle right away, so the hotkey records again while the
+/// error is on screen; the error then hides itself unless a new recording has started.
+fn fail_recording(app_handle: &AppHandle, phase: &Mutex<AssistantPhase>, session_id: &Arc<AtomicU64>, session: u64, title: &str, subtitle: &str) {
+    *phase.lock().unwrap() = AssistantPhase::Idle;
+    show_long_error(app_handle, session_id, session, title, subtitle);
 }
 
 /// Shows a long pill state for `hold`, then hides it unless a new session has started meanwhile.
@@ -892,8 +899,7 @@ fn keep_failed_recording(
         &settings.target_lang,
         duration_sec,
         Some(captured),
-        &settings.storage_mode,
-        settings.storage_cap_mb,
+        settings,
     );
     let history_id = history_id.ok().filter(|id| *id > 0);
     let (chunks, mut actions) = chunk_diagnostics(
@@ -945,9 +951,10 @@ fn keep_failed_recording(
 
 /// Whole recording of this session for the log's playback and Second Try; none in private mode.
 fn session_audio_filename(data_dir: &std::path::Path, storage_mode: &str, audio: &crate::audio::CapturedAudio) -> Option<String> {
-    let private = storage_mode == "private" || storage_mode == "private_mode";
-    let saved = if private { None } else { crate::pipeline_logger::save_session_audio(data_dir, audio) };
-    saved.or_else(|| Some("latest_recording.wav".to_string()))
+    if crate::settings::is_private(storage_mode) {
+        return None;
+    }
+    crate::pipeline_logger::save_session_audio(data_dir, audio).or_else(|| Some("latest_recording.wav".to_string()))
 }
 
 fn is_digital_silence(samples: &[f32]) -> bool {
@@ -1008,9 +1015,9 @@ impl AppController {
     pub fn new(app_handle: AppHandle) -> Result<Self, String> {
         let settings = AppSettings::load();
         crate::transcribe::set_device_backend(&settings.device_backend);
+        crate::pipeline_logger::set_private(crate::settings::is_private(&settings.storage_mode));
         let history = Arc::new(HistoryManager::new()?);
 
-        // Run retention policy on startup
         let _ = history.enforce_retention_policy(settings.retention_days);
 
         let phase = Arc::new(Mutex::new(AssistantPhase::Idle));
@@ -1187,6 +1194,7 @@ impl AppController {
         }
         // A loaded Whisper model is moved to or off the GPU when it is next used.
         crate::transcribe::set_device_backend(&new_settings.device_backend);
+        crate::pipeline_logger::set_private(crate::settings::is_private(&new_settings.storage_mode));
         crate::tray::sync_translation_menu(&new_settings);
         if devices_changed {
             crate::tray::update_tray_audio_devices(&self.app_handle, &new_settings);
@@ -1194,7 +1202,7 @@ impl AppController {
 
         // Single Model Policy: If active model changed, drop the other from RAM immediately
         if old_model != new_settings.model_name {
-            if new_settings.model_name == "parakeet-tdt-0.6b-v3" {
+            if new_settings.model_name == crate::model_download::PARAKEET_MODEL {
                 let mut tr = self.transcriber.lock().unwrap();
                 tr.unload();
             } else {
@@ -1210,9 +1218,14 @@ impl AppController {
         self.history.get_records(limit)
     }
 
+    pub fn history_audio_bytes(&self) -> u64 {
+        self.history.audio_bytes()
+    }
+
     pub fn clear_history(&self) -> Result<(), String> {
         self.history.clear_history()?;
         self.pipeline_logger.clear_logs();
+        crate::pipeline_logger::delete_log_files(&get_data_dir());
         Ok(())
     }
 
@@ -1276,30 +1289,6 @@ impl AppController {
     pub fn open_audio_folder(&self) -> Result<(), String> {
         let dir = self.history.get_audio_dir();
         crate::custom_models::open_in_file_manager(&dir)
-    }
-
-    pub fn play_recorded_audio(&self, filename: Option<String>) -> Result<(), String> {
-        let data_dir = get_data_dir();
-        let path = if let Some(ref f) = filename {
-            if f.is_empty() || f == "latest" || f == "latest_recording.wav" {
-                data_dir.join("latest_recording.wav")
-            } else {
-                let p = self.history.get_audio_file_path(f);
-                if p.exists() {
-                    p
-                } else {
-                    data_dir.join(f)
-                }
-            }
-        } else {
-            data_dir.join("latest_recording.wav")
-        };
-
-        if !path.exists() {
-            return Err(format!("Audio file not found: {:?}", path));
-        }
-
-        crate::sound::play_wav_file(&path)
     }
 
     pub fn list_lab_audio(&self) -> Vec<crate::lab::LabAudioItem> {
@@ -1773,6 +1762,10 @@ impl AppController {
     fn start_listening(&self, trigger: &'static str) -> Result<(), String> {
         let pressed = Instant::now();
         let _starting = self.start_gate.lock().unwrap();
+        // A second press that read Idle while the first was still starting must not restart it.
+        if *self.phase.lock().unwrap() != AssistantPhase::Idle {
+            return Ok(());
+        }
         self.session_id.fetch_add(1, Ordering::SeqCst);
 
         // A recording that will be translated needs the translation settings filled in. Say so
@@ -1973,6 +1966,21 @@ impl AppController {
             return Err(e);
         }
 
+        // A forgotten recording would grow by ~1 GB an hour and then time out in transcription.
+        {
+            let app = self.app_handle.clone();
+            let session_id = Arc::clone(&self.session_id);
+            let session = session_id.load(Ordering::SeqCst);
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(MAX_RECORDING).await;
+                let Some(state) = app.try_state::<crate::AppState>() else { return };
+                if session_id.load(Ordering::SeqCst) == session && state.controller.is_listening() {
+                    log_stage_event(&get_data_dir(), "REC_LIMIT", &format!("Recording stopped at the {} min limit", MAX_RECORDING.as_secs() / 60));
+                    let _ = state.controller.stop_listening_and_process("recording length limit");
+                }
+            });
+        }
+
         // 5. Pre-warm active model asynchronously while user is speaking (0 wait on finish!), unless
         // the memory-saving mode defers it to when the recording stops.
         if settings.model_load_mode != "on_stop" {
@@ -1991,7 +1999,7 @@ impl AppController {
         let model_name = model_name.to_string();
 
         tauri::async_runtime::spawn(async move {
-            let is_parakeet = model_name == "parakeet-tdt-0.6b-v3";
+            let is_parakeet = model_name == crate::model_download::PARAKEET_MODEL;
             if is_parakeet {
                 // Single Model Policy: unload Whisper
                 {
@@ -2125,44 +2133,21 @@ impl AppController {
             log_stage_event(&data_dir, "LEVEL", &format!("Voice leveling: gain {:+.1} dB, make-up {:+.1} dB", plan.gain_db, plan.makeup_db));
 
             // Save full original audio (uncut) to latest_recording.wav for playback in UI
-            let latest_wav = data_dir.join("latest_recording.wav");
-            let _ = crate::history::write_wav_file(&latest_wav, &raw_samples, 16000);
+            let private = crate::settings::is_private(&settings.storage_mode);
+            if !private {
+                let _ = crate::history::write_wav_file(&data_dir.join("latest_recording.wav"), &raw_samples, 16000);
+            }
             perf.audio_sec = duration_sec;
             perf.lap("audio_prep");
 
             if duration_sec < 0.2 {
                 log_stage_event(&data_dir, "AUDIO", "Audio buffer too short (<0.2s), aborting transcription.");
                 perf.set_outcome("too_short");
-                {
-                    let mut p = phase_arc.lock().unwrap();
-                    *p = AssistantPhase::Error;
-                }
-                let _ = app_handle.emit(
-                    "assistant-state-changed",
-                    serde_json::json!({
-                        "state": "error",
-                        "title": "Recording Failed",
-                        "subtitle": "Audio too short (held < 0.2s)"
-                    }),
-                );
-                tokio::time::sleep(Duration::from_millis(2500)).await;
-                {
-                    let mut p = phase_arc.lock().unwrap();
-                    *p = AssistantPhase::Idle;
-                }
-                let _ = app_handle.emit(
-                    "assistant-state-changed",
-                    serde_json::json!({
-                        "state": "idle",
-                        "title": "Ready",
-                        "subtitle": null
-                    }),
-                );
-                hide_main_window(&app_handle);
+                fail_recording(&app_handle, &phase_arc, &session_id_arc, session, "Recording Failed", "Audio too short (held < 0.2s)");
                 return;
             }
 
-            let is_parakeet = settings.model_name == "parakeet-tdt-0.6b-v3";
+            let is_parakeet = settings.model_name == crate::model_download::PARAKEET_MODEL;
 
             // Pieces transcribed while recording (see live_chunks): only the audio after the last
             // cut goes to the model now.
@@ -2195,8 +2180,9 @@ impl AppController {
             };
 
             // Save trimmed (VAD) audio to latest_vad_trimmed.wav for debugging
-            let latest_vad_wav = data_dir.join("latest_vad_trimmed.wav");
-            let _ = crate::history::write_wav_file(&latest_vad_wav, &vad_res.samples, 16000);
+            if !private {
+                let _ = crate::history::write_wav_file(&data_dir.join("latest_vad_trimmed.wav"), &vad_res.samples, 16000);
+            }
             perf.speech_sec = vad_res.trimmed_duration_sec;
             perf.vad_no_speech = vad_res.no_speech;
             perf.lap("vad");
@@ -2230,30 +2216,7 @@ impl AppController {
                         perf.set_outcome("failed");
                         keep_failed_recording(&history_arc, &pipeline_logger_arc, &app_handle, &captured, &settings, &vad_res, duration_sec, &data_dir, &session_audio, pipeline_start.elapsed().as_millis() as u64, &format!("Model download failed: {}", e));
                         log::error!("Failed to ensure Parakeet model: {}", e);
-                        {
-                            let mut p = phase_arc.lock().unwrap();
-                            *p = AssistantPhase::Error;
-                        }
-                        let _ = app_handle.emit(
-                            "assistant-state-changed",
-                            serde_json::json!({
-                                "state": "error",
-                                "title": "Model Download Failed",
-                                "subtitle": format!("{}. {}", e, vitals.short_summary())
-                            }),
-                        );
-                        tokio::time::sleep(Duration::from_millis(3500)).await;
-                        let mut p = phase_arc.lock().unwrap();
-                        *p = AssistantPhase::Idle;
-                        let _ = app_handle.emit(
-                            "assistant-state-changed",
-                            serde_json::json!({
-                                "state": "idle",
-                                "title": "Ready",
-                                "subtitle": null
-                            }),
-                        );
-                        hide_main_window(&app_handle);
+                        fail_recording(&app_handle, &phase_arc, &session_id_arc, session, "Model Download Failed", &format!("{}. {}", e, vitals.short_summary()));
                         return;
                     }
                 };
@@ -2291,30 +2254,7 @@ impl AppController {
                         perf.set_outcome("failed");
                         keep_failed_recording(&history_arc, &pipeline_logger_arc, &app_handle, &captured, &settings, &vad_res, duration_sec, &data_dir, &session_audio, pipeline_start.elapsed().as_millis() as u64, &format!("Transcription failed: {}", e));
                         log::error!("Parakeet transcription error: {}", e);
-                        {
-                            let mut p = phase_arc.lock().unwrap();
-                            *p = AssistantPhase::Error;
-                        }
-                        let _ = app_handle.emit(
-                            "assistant-state-changed",
-                            serde_json::json!({
-                                "state": "error",
-                                "title": "Transcription Failed",
-                                "subtitle": format!("{}. {}", e, vitals.short_summary())
-                            }),
-                        );
-                        tokio::time::sleep(Duration::from_millis(3500)).await;
-                        let mut p = phase_arc.lock().unwrap();
-                        *p = AssistantPhase::Idle;
-                        let _ = app_handle.emit(
-                            "assistant-state-changed",
-                            serde_json::json!({
-                                "state": "idle",
-                                "title": "Ready",
-                                "subtitle": null
-                            }),
-                        );
-                        hide_main_window(&app_handle);
+                        fail_recording(&app_handle, &phase_arc, &session_id_arc, session, "Transcription Failed", &format!("{}. {}", e, vitals.short_summary()));
                         return;
                     },
                     Ok(Err(join_err)) => {
@@ -2332,30 +2272,7 @@ impl AppController {
                         let vitals_log = data_dir.join("system_vitals_on_timeout.log");
                         let _ = std::fs::write(&vitals_log, format!("{}\nTimestamp: {}\nAudio Duration: {:.2}s\nModel: Parakeet TDT\n", vitals_report, current_timestamp(), vad_res.trimmed_duration_sec));
 
-                        {
-                            let mut p = phase_arc.lock().unwrap();
-                            *p = AssistantPhase::Error;
-                        }
-                        let _ = app_handle.emit(
-                            "assistant-state-changed",
-                            serde_json::json!({
-                                "state": "error",
-                                "title": "Transcription Timed Out",
-                                "subtitle": format!("Parakeet {}s timeout. {}", timeout.as_secs(), vitals.short_summary())
-                            }),
-                        );
-                        tokio::time::sleep(Duration::from_millis(3500)).await;
-                        let mut p = phase_arc.lock().unwrap();
-                        *p = AssistantPhase::Idle;
-                        let _ = app_handle.emit(
-                            "assistant-state-changed",
-                            serde_json::json!({
-                                "state": "idle",
-                                "title": "Ready",
-                                "subtitle": null
-                            }),
-                        );
-                        hide_main_window(&app_handle);
+                        fail_recording(&app_handle, &phase_arc, &session_id_arc, session, "Transcription Timed Out", &format!("Parakeet {}s timeout. {}", timeout.as_secs(), vitals.short_summary()));
                         return;
                     }
                 }
@@ -2376,30 +2293,7 @@ impl AppController {
                         perf.set_outcome("failed");
                         keep_failed_recording(&history_arc, &pipeline_logger_arc, &app_handle, &captured, &settings, &vad_res, duration_sec, &data_dir, &session_audio, pipeline_start.elapsed().as_millis() as u64, &format!("Model download failed: {}", e));
                         log::error!("Failed to ensure Whisper model: {}", e);
-                        {
-                            let mut p = phase_arc.lock().unwrap();
-                            *p = AssistantPhase::Error;
-                        }
-                        let _ = app_handle.emit(
-                            "assistant-state-changed",
-                            serde_json::json!({
-                                "state": "error",
-                                "title": "Model Download Failed",
-                                "subtitle": format!("{}. {}", e, vitals.short_summary())
-                            }),
-                        );
-                        tokio::time::sleep(Duration::from_millis(3500)).await;
-                        let mut p = phase_arc.lock().unwrap();
-                        *p = AssistantPhase::Idle;
-                        let _ = app_handle.emit(
-                            "assistant-state-changed",
-                            serde_json::json!({
-                                "state": "idle",
-                                "title": "Ready",
-                                "subtitle": null
-                            }),
-                        );
-                        hide_main_window(&app_handle);
+                        fail_recording(&app_handle, &phase_arc, &session_id_arc, session, "Model Download Failed", &format!("{}. {}", e, vitals.short_summary()));
                         return;
                     }
                 };
@@ -2487,30 +2381,7 @@ impl AppController {
                         perf.set_outcome("failed");
                         keep_failed_recording(&history_arc, &pipeline_logger_arc, &app_handle, &captured, &settings, &vad_res, duration_sec, &data_dir, &session_audio, pipeline_start.elapsed().as_millis() as u64, &format!("Transcription failed: {}", e));
                         log::error!("Transcription error: {}", e);
-                        {
-                            let mut p = phase_arc.lock().unwrap();
-                            *p = AssistantPhase::Error;
-                        }
-                        let _ = app_handle.emit(
-                            "assistant-state-changed",
-                            serde_json::json!({
-                                "state": "error",
-                                "title": "Transcription Failed",
-                                "subtitle": format!("{}. {}", e, vitals.short_summary())
-                            }),
-                        );
-                        tokio::time::sleep(Duration::from_millis(3500)).await;
-                        let mut p = phase_arc.lock().unwrap();
-                        *p = AssistantPhase::Idle;
-                        let _ = app_handle.emit(
-                            "assistant-state-changed",
-                            serde_json::json!({
-                                "state": "idle",
-                                "title": "Ready",
-                                "subtitle": null
-                            }),
-                        );
-                        hide_main_window(&app_handle);
+                        fail_recording(&app_handle, &phase_arc, &session_id_arc, session, "Transcription Failed", &format!("{}. {}", e, vitals.short_summary()));
                         return;
                     },
                     Ok(Err(join_err)) => {
@@ -2532,32 +2403,7 @@ impl AppController {
                                 vitals_report, current_timestamp(), vad_res.trimmed_duration_sec, settings.model_name)
                         );
 
-                        {
-                            let mut p = phase_arc.lock().unwrap();
-                            *p = AssistantPhase::Error;
-                        }
-
-                        let _ = app_handle.emit(
-                            "assistant-state-changed",
-                            serde_json::json!({
-                                "state": "error",
-                                "title": "Transcription Timed Out",
-                                "subtitle": format!("{}s timeout on {}. {}", timeout.as_secs(), settings.model_name, vitals.short_summary())
-                            }),
-                        );
-
-                        tokio::time::sleep(Duration::from_millis(3500)).await;
-                        let mut p = phase_arc.lock().unwrap();
-                        *p = AssistantPhase::Idle;
-                        let _ = app_handle.emit(
-                            "assistant-state-changed",
-                            serde_json::json!({
-                                "state": "idle",
-                                "title": "Ready",
-                                "subtitle": null
-                            }),
-                        );
-                        hide_main_window(&app_handle);
+                        fail_recording(&app_handle, &phase_arc, &session_id_arc, session, "Transcription Timed Out", &format!("{}s timeout on {}. {}", timeout.as_secs(), settings.model_name, vitals.short_summary()));
                         return;
                     }
                 }
@@ -2620,10 +2466,6 @@ impl AppController {
                 pipeline_logger_arc.add_log(empty_log.clone(), &data_dir);
                 let _ = app_handle.emit("transcription-diagnostic-log", &empty_log);
 
-                {
-                    let mut p = phase_arc.lock().unwrap();
-                    *p = AssistantPhase::Error;
-                }
                 let (title, subtitle) = if is_digital_silence(&raw_samples) {
                     // The OS delivers zeros instead of an error when microphone access is blocked.
                     log_stage_event(&data_dir, "AUDIO", "Recording is digital silence: microphone blocked or muted");
@@ -2633,28 +2475,7 @@ impl AppController {
                 } else {
                     ("Transcription Failed", "No speech recognized in recording")
                 };
-                let _ = app_handle.emit(
-                    "assistant-state-changed",
-                    serde_json::json!({
-                        "state": "error",
-                        "title": title,
-                        "subtitle": subtitle
-                    }),
-                );
-                tokio::time::sleep(Duration::from_millis(2800)).await;
-                {
-                    let mut p = phase_arc.lock().unwrap();
-                    *p = AssistantPhase::Idle;
-                }
-                let _ = app_handle.emit(
-                    "assistant-state-changed",
-                    serde_json::json!({
-                        "state": "idle",
-                        "title": "Ready",
-                        "subtitle": null
-                    }),
-                );
-                hide_main_window(&app_handle);
+                fail_recording(&app_handle, &phase_arc, &session_id_arc, session, title, subtitle);
                 return;
             }
 
@@ -2711,10 +2532,7 @@ impl AppController {
                     log_stage_event(
                         &data_dir,
                         "CONFIDENTIAL_MASK",
-                        &format!(
-                            "Masked confidential tokens before translation:\n  From: \"{}\"\n  To: \"{}\"",
-                            normalized_source_text, masked
-                        ),
+                        &format!("Masked confidential tokens before translation: \"{}\"", masked),
                     );
                 }
                 masked
@@ -3016,8 +2834,7 @@ impl AppController {
                     &settings.target_lang,
                     duration_sec,
                     Some(&captured),
-                    &settings.storage_mode,
-                    settings.storage_cap_mb,
+                    &settings,
                 )
                 .unwrap_or(0);
             let history_ms = db_start.elapsed().as_millis() as u64;

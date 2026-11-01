@@ -131,13 +131,6 @@ export async function fetchHardwareProfile(): Promise<HardwareProfile | null> {
   }
 }
 
-export interface PostProcessedTranscript {
-  raw_text: string;
-  clean_text: string;
-  uncertain_spans: string[];
-  requires_clarification: boolean;
-}
-
 export interface HistoryItem {
   id: number;
   timestamp: string;
@@ -239,6 +232,17 @@ export async function fetchHistory(limit = 50): Promise<HistoryItem[]> {
   }
 }
 
+/** Size in bytes of the recordings saved to history. */
+export async function fetchHistoryAudioBytes(): Promise<number> {
+  if (!isTauri()) return 0;
+  try {
+    return await invoke<number>("get_history_audio_bytes");
+  } catch (err) {
+    console.error("Failed to read history size:", err);
+    return 0;
+  }
+}
+
 export async function triggerClearHistory(): Promise<boolean> {
   if (!isTauri()) return true;
   try {
@@ -260,17 +264,6 @@ export async function fetchAudioDevices(): Promise<{
   } catch (err) {
     console.error("Failed to fetch audio devices:", err);
     return { input_devices: [], output_devices: [] };
-  }
-}
-
-export async function setAudioDevice(kind: "input" | "output", name: string): Promise<boolean> {
-  if (!isTauri()) return true;
-  try {
-    await invoke("set_audio_device", { kind, name });
-    return true;
-  } catch (err) {
-    console.error("Failed to set audio device:", err);
-    return false;
   }
 }
 
@@ -304,24 +297,6 @@ export async function playTestSound(): Promise<boolean> {
   } catch (err) {
     console.error("Failed to play test sound:", err);
     return false;
-  }
-}
-
-export async function openPreferencesWindow(): Promise<void> {
-  if (!isTauri()) return;
-  try {
-    await invoke("open_preferences_window");
-  } catch (err) {
-    console.error("Failed to open preferences window:", err);
-  }
-}
-
-export async function openOnboardingWindow(): Promise<void> {
-  if (!isTauri()) return;
-  try {
-    await invoke("open_onboarding_window");
-  } catch (err) {
-    console.error("Failed to open the welcome guide:", err);
   }
 }
 
@@ -521,32 +496,6 @@ export async function subscribeToModelDownload(
   }
 }
 
-export interface ModelStatus {
-  model_name: string;
-  exists: boolean;
-  path: string;
-}
-
-export async function fetchModelStatus(): Promise<ModelStatus | null> {
-  if (!isTauri()) return null;
-  try {
-    return await invoke<ModelStatus>("get_model_status");
-  } catch (err) {
-    console.error("Failed to get model status:", err);
-    return null;
-  }
-}
-
-export async function triggerDownloadModel(): Promise<string | null> {
-  if (!isTauri()) return null;
-  try {
-    return await invoke<string>("download_model");
-  } catch (err) {
-    console.error("Failed to download model:", err);
-    return null;
-  }
-}
-
 export interface ChunkDiagnosticEvent {
   chunk_index: number;
   trigger_reason: string;
@@ -704,17 +653,6 @@ export async function fetchAudioData(filename?: string): Promise<string | null> 
   }
 }
 
-export async function triggerPlayAudio(filename?: string): Promise<boolean> {
-  if (!isTauri()) return false;
-  try {
-    await invoke("play_recorded_audio", { filename: filename || null });
-    return true;
-  } catch (err) {
-    console.error("Failed to play audio:", err);
-    return false;
-  }
-}
-
 export async function triggerOpenAudioFolder(): Promise<boolean> {
   if (!isTauri()) return false;
   try {
@@ -839,7 +777,7 @@ export async function openAppleTranslationSettings(): Promise<void> {
   await invoke("apple_translation_open_settings");
 }
 
-/** Translates text with the chosen service ("LLM", "Custom API" or "Apple") without pasting it. Throws
+/** Translates text with the chosen service ("LLM", "Custom API", "Offline" or "Apple") without pasting it. Throws
  * the service's error message when it fails. */
 export async function triggerLabTranslate(
   text: string,
@@ -1004,54 +942,6 @@ export async function downloadCustomModel(
   } catch (err) {
     console.error("Failed to download custom model:", err);
     throw err;
-  }
-}
-
-export async function postProcessTranscript(text: string): Promise<PostProcessedTranscript | null> {
-  if (!isTauri()) {
-    return {
-      raw_text: text,
-      clean_text: text,
-      uncertain_spans: [],
-      requires_clarification: false,
-    };
-  }
-  try {
-    return await invoke<PostProcessedTranscript>("post_process_transcript", { text });
-  } catch (err) {
-    console.error("Failed to post-process transcript:", err);
-    return null;
-  }
-}
-
-export async function isModelLoaded(): Promise<boolean> {
-  if (!isTauri()) return false;
-  try {
-    return await invoke<boolean>("is_model_loaded");
-  } catch {
-    return false;
-  }
-}
-export async function ejectModel(): Promise<boolean> {
-  if (!isTauri()) return false;
-  try {
-    await invoke("eject_model");
-    return true;
-  } catch (err) {
-    console.error(err);
-    return false;
-  }
-}
-export async function getTrayState(): Promise<{
-  is_loaded: boolean;
-  phase: string;
-  can_eject: boolean;
-} | null> {
-  if (!isTauri()) return null;
-  try {
-    return await invoke("get_tray_state");
-  } catch {
-    return null;
   }
 }
 

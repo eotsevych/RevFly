@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::settings::get_data_dir;
+use crate::settings::{get_data_dir, AppSettings};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryRecord {
@@ -26,7 +26,10 @@ pub struct HistoryManager {
 
 impl HistoryManager {
     pub fn new() -> Result<Self, String> {
-        let data_dir = get_data_dir();
+        Self::new_in(&get_data_dir())
+    }
+
+    fn new_in(data_dir: &Path) -> Result<Self, String> {
         if !data_dir.exists() {
             let _ = fs::create_dir_all(&data_dir);
         }
@@ -68,25 +71,24 @@ impl HistoryManager {
         target_lang: &str,
         duration: f32,
         audio: Option<&crate::audio::CapturedAudio>,
-        storage_mode: &str,
-        storage_cap_mb: u64,
+        settings: &AppSettings,
     ) -> Result<i64, String> {
-        if storage_mode == "private" || storage_mode == "private_mode" {
-            // Private mode: do not save anything to disk
+        let storage_mode = settings.storage_mode.as_str();
+        if crate::settings::is_private(storage_mode) {
             return Ok(0);
         }
+        // The app runs for weeks between launches, so old entries are dropped as new ones come in.
+        let _ = self.enforce_retention_policy(settings.retention_days);
 
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let timestamp_str = format!("{}", now);
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+        let timestamp_str = format!("{}", now.as_secs());
 
         let mut audio_file_rel: Option<String> = None;
 
         if storage_mode == "text_audio" || storage_mode == "text_and_audio" {
             if let Some(audio) = audio {
-                let filename = format!("rec_{}.wav", now);
+                // Milliseconds, so two recordings that end in the same second keep their own files.
+                let filename = format!("rec_{}.wav", now.as_millis());
                 let full_path = self.audio_dir.join(&filename);
 
                 // Saved leveled at the microphone's own rate, so playback keeps the full bandwidth.
@@ -96,7 +98,7 @@ impl HistoryManager {
                 }
 
                 // Check and enforce storage cap after adding audio
-                let _ = self.enforce_storage_cap(storage_cap_mb);
+                let _ = self.enforce_storage_cap(settings.storage_cap_mb);
             }
         }
 
@@ -312,6 +314,12 @@ impl HistoryManager {
         Ok(())
     }
 
+    /// Size of the saved recordings, which the storage cap limits.
+    pub fn audio_bytes(&self) -> u64 {
+        let Ok(entries) = fs::read_dir(&self.audio_dir) else { return 0 };
+        entries.flatten().filter_map(|e| e.metadata().ok()).filter(|m| m.is_file()).map(|m| m.len()).sum()
+    }
+
     pub fn get_audio_dir(&self) -> PathBuf {
         self.audio_dir.clone()
     }
@@ -335,4 +343,35 @@ pub fn write_wav_file(path: &Path, samples: &[f32], sample_rate: u32) -> Result<
     }
     writer.finalize().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retention_drops_only_entries_older_than_the_limit() {
+        let dir = std::env::temp_dir().join(format!("revfly_history_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let history = HistoryManager::new_in(&dir).unwrap();
+        let mut settings = AppSettings::default();
+        settings.storage_mode = "text_audio".to_string();
+        settings.retention_days = 0;
+        let audio = crate::audio::CapturedAudio::empty();
+        let old = history.add_entry("old", "old", "en", "en", 0.1, Some(&audio), &settings).unwrap();
+        let new = history.add_entry("new", "new", "en", "en", 0.1, Some(&audio), &settings).unwrap();
+        let file = |id: i64| history.get_records(10).unwrap().into_iter().find(|r| r.id == id).and_then(|r| r.audio_path);
+        let (old_file, new_file) = (file(old).unwrap(), file(new).unwrap());
+        assert_ne!(old_file, new_file);
+        let ten_days_ago = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - 10 * 86400;
+        history.db_conn.lock().unwrap().execute("UPDATE history SET timestamp = ?1 WHERE id = ?2", params![ten_days_ago.to_string(), old]).unwrap();
+
+        history.enforce_retention_policy(7).unwrap();
+
+        let ids: Vec<i64> = history.get_records(10).unwrap().iter().map(|r| r.id).collect();
+        assert_eq!(ids, vec![new]);
+        assert!(!history.get_audio_file_path(&old_file).exists());
+        assert!(history.get_audio_file_path(&new_file).exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

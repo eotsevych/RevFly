@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,14 +129,9 @@ impl TranscriptionDiagnosticLog {
     }
 
     pub fn append_to_file(&self, data_dir: &Path) {
-        let logs_dir = data_dir.join("logs");
-        if !logs_dir.exists() {
-            let _ = fs::create_dir_all(&logs_dir);
-        }
-        let log_file = logs_dir.join("transcription_pipeline.log");
-
-        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_file) {
-            let line = format!(
+        append_log(
+            data_dir,
+            &format!(
                 "[{}] id={} total_ms={} audio={:.2}s vad_ms={} vad_cut={:.2}s whisper_ms={} model={} speed={:.1}x lang={} trans_ms={} trans_via=\"{}\" text=\"{}\"\n",
                 self.timestamp,
                 self.id,
@@ -150,9 +146,8 @@ impl TranscriptionDiagnosticLog {
                 self.translation_ms,
                 self.translation_provider.as_deref().unwrap_or("-"),
                 self.final_text.replace('\n', " ")
-            );
-            let _ = file.write_all(line.as_bytes());
-        }
+            ),
+        );
     }
 }
 
@@ -268,19 +263,47 @@ pub fn current_timestamp() -> String {
 }
 
 pub fn log_stage_event(data_dir: &Path, tag: &str, message: &str) {
-    let timestamp = current_timestamp();
-    let line = format!("[{}] [{}] {}\n", timestamp, tag, message);
+    let line = format!("[{}] [{}] {}\n", current_timestamp(), tag, message);
     print!("{}", line);
+    append_log(data_dir, &line);
+}
 
+const LOG_FILE: &str = "transcription_pipeline.log";
+const OLD_LOG_FILE: &str = "transcription_pipeline.1.log";
+const MAX_LOG_BYTES: u64 = 10 * 1024 * 1024;
+
+/// "Don't save" storage mode: the pipeline log holds dictated text, so nothing goes to disk.
+static PRIVATE: AtomicBool = AtomicBool::new(false);
+
+pub fn set_private(private: bool) {
+    PRIVATE.store(private, Ordering::SeqCst);
+}
+
+pub fn is_private() -> bool {
+    PRIVATE.load(Ordering::SeqCst)
+}
+
+/// Appends to the pipeline log, keeping one older file once it reaches `MAX_LOG_BYTES`.
+fn append_log(data_dir: &Path, text: &str) {
+    if is_private() {
+        return;
+    }
     let logs_dir = data_dir.join("logs");
-    if !logs_dir.exists() {
-        let _ = fs::create_dir_all(&logs_dir);
+    let _ = fs::create_dir_all(&logs_dir);
+    let log_file = logs_dir.join(LOG_FILE);
+    if fs::metadata(&log_file).map(|m| m.len() >= MAX_LOG_BYTES).unwrap_or(false) {
+        let _ = fs::rename(&log_file, logs_dir.join(OLD_LOG_FILE));
     }
-    let log_file = logs_dir.join("transcription_pipeline.log");
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_file) {
-        let _ = file.write_all(line.as_bytes());
-        let _ = file.flush();
+        let _ = file.write_all(text.as_bytes());
     }
+}
+
+/// Deletes the pipeline log files, which hold the text of every dictation.
+pub fn delete_log_files(data_dir: &Path) {
+    let logs_dir = data_dir.join("logs");
+    let _ = fs::remove_file(logs_dir.join(LOG_FILE));
+    let _ = fs::remove_file(logs_dir.join(OLD_LOG_FILE));
 }
 
 /// Diagnostics for a recording transcribed chunk by chunk (chunking on): the chunks `vad` planned.
