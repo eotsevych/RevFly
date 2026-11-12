@@ -1,5 +1,9 @@
 # RevFly
 
+> [!IMPORTANT]
+> **RevFly is now [Bifaria](https://bifaria.com).** This repository is archived and gets no more updates. RevFly 1.0.13 is the last release.
+> Install Bifaria from [bifaria.com](https://bifaria.com) or [its releases](https://github.com/eotsevych/bifaria/releases/latest); on first launch it copies your RevFly settings, history, recordings and speech models. Source: [github.com/eotsevych/bifaria](https://github.com/eotsevych/bifaria). Homebrew: `brew install --cask eotsevych/tap/bifaria`.
+
 <div align="center">
 
 **The fast, private, local-first desktop voice assistant with instant AI translation.**
