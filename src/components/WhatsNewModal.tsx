@@ -1,6 +1,6 @@
 import { useState, useEffect, type ReactNode } from "react";
 import { useResolvedTheme } from "@/lib/theme";
-import { dismissWhatsNew, openSettingsFromWhatsNew, fetchUpdateStatus } from "@/lib/tauri";
+import { dismissWhatsNew, openBifariaSite, fetchUpdateStatus } from "@/lib/tauri";
 
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
 const SANS = "Inter, system-ui, sans-serif";
@@ -149,18 +149,18 @@ function Item({ p, title, children }: { p: Palette; title: string; children: Rea
 }
 
 /** Shown once after each update, and from Settings › Updates. Update the features for each release
- * that changes what users see. */
+ * that changes what users see. RevFly 1.0.13 is the last release, so it points users to Bifaria. */
 export function WhatsNewModal() {
   const theme = useResolvedTheme();
   const p = theme === "dark" ? DARK : LIGHT;
-  const [loading, setLoading] = useState<"settings" | "dismiss" | null>(null);
+  const [loading, setLoading] = useState<"bifaria" | "dismiss" | null>(null);
   const [version, setVersion] = useState<string | null>(null);
 
   useEffect(() => {
     fetchUpdateStatus().then((s) => setVersion(s?.current_version ?? null));
   }, []);
 
-  const run = (which: "settings" | "dismiss", action: () => Promise<void>) => async () => {
+  const run = (which: "bifaria" | "dismiss", action: () => Promise<void>) => async () => {
     if (loading) return;
     setLoading(which);
     try {
@@ -171,7 +171,10 @@ export function WhatsNewModal() {
     }
   };
 
-  const handleSettings = run("settings", openSettingsFromWhatsNew);
+  const handleGetBifaria = run("bifaria", async () => {
+    await openBifariaSite();
+    await dismissWhatsNew();
+  });
   const handleDismiss = run("dismiss", dismissWhatsNew);
 
   useEffect(() => {
@@ -282,15 +285,14 @@ export function WhatsNewModal() {
             color: p.text,
           }}
         >
-          The biggest RevFly update yet
+          RevFly is now Bifaria
         </h1>
         <p style={{ margin: 0, fontSize: 13, lineHeight: 1.45, color: p.body }}>
-          Translation without the internet on every computer, faster transcription on your
-          computer&apos;s own chips, and more privacy.
+          The same free app with a new name. This is the last RevFly update: new features and fixes
+          now come only in Bifaria.
         </p>
       </div>
 
-      {/* Feature highlights; they scroll if the window is smaller than they need. */}
       <div
         style={{
           display: "flex",
@@ -303,70 +305,27 @@ export function WhatsNewModal() {
       >
         <Group
           p={p}
-          color={p.green}
-          soft={p.greenSoft}
-          border={p.greenBorder}
-          title="Translation"
-          icon={
-            <Icon>
-              <circle cx="12" cy="12" r="10" />
-              <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-            </Icon>
-          }
-        >
-          <Item p={p} title="Offline on every computer">
-            Free and private on Windows, Linux and Mac.
-          </Item>
-          <Item p={p} title="Apple Intelligence">
-            On macOS 26, translates on your Mac with your own prompt.
-          </Item>
-          <Item p={p} title="Easier to choose">
-            Each service shows what it&apos;s best for.
-          </Item>
-        </Group>
-        <Group
-          p={p}
           color={p.accent}
           soft={p.accentSoft}
           border={p.accentSoftBorder}
-          title="Transcription"
+          title="Move in a minute"
           icon={
             <Icon>
-              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+              <path d="M5 12h14M13 6l6 6-6 6" />
             </Icon>
           }
         >
-          <Item p={p} title="Faster on your hardware">
-            Neural Engine on Mac, GPU on Windows and Linux.
+          <Item p={p} title="Install Bifaria">
+            From bifaria.com, for Mac, Windows and Linux.
           </Item>
-          <Item p={p} title="Transcribe while you talk">
-            Now with every model, for faster long dictations.
+          <Item p={p} title="Everything comes with you">
+            On first launch Bifaria copies your settings, history, recordings and speech models.
           </Item>
-          <Item p={p} title="Better numbers">
-            &ldquo;Two hundred and fifty&rdquo; → 250, &ldquo;4 30 PM&rdquo; → 4:30 PM.
+          <Item p={p} title="On a Mac">
+            Allow Microphone and Accessibility access again, since Bifaria is a new app.
           </Item>
-        </Group>
-        <Group
-          p={p}
-          color={p.cyan}
-          soft={p.cyanSoft}
-          border={p.cyanBorder}
-          title="Privacy & text"
-          icon={
-            <Icon>
-              <rect x="3" y="11" width="18" height="11" rx="2" />
-              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-            </Icon>
-          }
-        >
-          <Item p={p} title="Don't save keeps nothing on disk">
-            Saved ones are in Settings › History.
-          </Item>
-          <Item p={p} title="Text styles">
-            Natural speech, For AI prompts or Verbatim.
-          </Item>
-          <Item p={p} title="Keep my clipboard">
-            After pasting, RevFly puts back what you had copied.
+          <Item p={p} title="Then remove RevFly">
+            Its own files stay until you do.
           </Item>
         </Group>
       </div>
@@ -375,7 +334,7 @@ export function WhatsNewModal() {
       <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
         <button
           type="button"
-          onClick={handleSettings}
+          onClick={handleGetBifaria}
           disabled={loading !== null}
           style={{
             flex: 1.4,
@@ -387,10 +346,10 @@ export function WhatsNewModal() {
             fontSize: 13,
             fontWeight: 600,
             cursor: loading ? "default" : "pointer",
-            opacity: loading && loading !== "settings" ? 0.6 : 1,
+            opacity: loading && loading !== "bifaria" ? 0.6 : 1,
           }}
         >
-          {loading === "settings" ? "Opening…" : "Choose a Text Style"}
+          {loading === "bifaria" ? "Opening…" : "Get Bifaria"}
         </button>
         <button
           type="button"
@@ -409,7 +368,7 @@ export function WhatsNewModal() {
             opacity: loading && loading !== "dismiss" ? 0.6 : 1,
           }}
         >
-          Close
+          Later
         </button>
       </div>
     </div>

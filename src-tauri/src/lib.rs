@@ -220,6 +220,13 @@ fn open_whats_new_window(app_handle: AppHandle) {
 }
 
 /// Closes What's New; closing it marks it seen (see `tray::open_whats_new`).
+/// Opens bifaria.com from the "RevFly is now Bifaria" message.
+#[tauri::command]
+fn open_bifaria_site() -> Result<(), String> {
+    // `open`, `explorer` and `xdg-open` all hand a URL to the default browser.
+    custom_models::open_in_file_manager(std::path::Path::new("https://bifaria.com"))
+}
+
 #[tauri::command]
 fn dismiss_whats_new(app_handle: AppHandle) {
     close_whats_new(&app_handle);
@@ -652,6 +659,7 @@ pub fn run() {
             finish_onboarding,
             open_whats_new_window,
             dismiss_whats_new,
+            open_bifaria_site,
             open_settings_from_whats_new,
             take_settings_tab,
             set_practice_mode,

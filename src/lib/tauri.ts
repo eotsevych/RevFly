@@ -367,6 +367,11 @@ export async function openWhatsNewWindow(): Promise<void> {
   }
 }
 
+export async function openBifariaSite(): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("open_bifaria_site");
+}
+
 export async function dismissWhatsNew(): Promise<void> {
   if (!isTauri()) return;
   try {
