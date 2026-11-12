@@ -4,13 +4,16 @@
 # After each release, run scripts/update_homebrew_cask.sh <version> to refresh version and sha256,
 # then copy this file to Casks/revfly.rb in the tap repo (see DEPLOYMENT.md).
 cask "revfly" do
-  version "1.0.12"
-  sha256 "796b0664613ad1342fea6cfe0516d4f3e590c0b4cae33b2a1dc6eacef108dbfc"
+  version "1.0.13"
+  sha256 "31a47eea6b7ca74120414ee07d29bdfc9bd6bf1253ad6978a2bed4f57ba89dcf"
 
   url "https://github.com/eotsevych/RevFly/releases/download/v#{version}/RevFly_Universal.dmg"
   name "RevFly"
   desc "Local-first voice dictation and translation"
   homepage "https://eotsevych.github.io/RevFly/"
+
+  # RevFly is now Bifaria; this cask gets no more updates.
+  deprecate! date: "2026-11-12", because: "has been renamed to Bifaria", replacement_cask: "bifaria"
 
   livecheck do
     url :url
